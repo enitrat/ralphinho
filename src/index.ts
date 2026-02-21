@@ -10,6 +10,49 @@
  * Extracted from Plue workflow, generalized for reuse.
  */
 
-export * from "./selectors";
-export type { Ticket } from "./selectors";
-export * from "./components";
+import {
+  selectAllTickets,
+  selectReviewTickets,
+  selectDiscoverTickets,
+  selectCompletedTicketIds,
+  selectProgressSummary,
+  selectTicketReport,
+  selectResearch,
+  selectPlan,
+  selectImplement,
+  selectTestResults,
+  selectSpecReview,
+  selectCodeReviews,
+} from "./selectors";
+
+import type { Ticket } from "./selectors";
+
+import { SuperRalph } from "./components/SuperRalph";
+import type { SuperRalphProps, SuperRalphConfig, SuperRalphAgents, SuperRalphPrompts } from "./components/SuperRalph";
+
+export {
+  // Selectors
+  selectAllTickets,
+  selectReviewTickets,
+  selectDiscoverTickets,
+  selectCompletedTicketIds,
+  selectProgressSummary,
+  selectTicketReport,
+  selectResearch,
+  selectPlan,
+  selectImplement,
+  selectTestResults,
+  selectSpecReview,
+  selectCodeReviews,
+
+  // Components
+  SuperRalph,
+};
+
+export type {
+  Ticket,
+  SuperRalphProps,
+  SuperRalphConfig,
+  SuperRalphAgents,
+  SuperRalphPrompts,
+};
