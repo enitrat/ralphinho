@@ -12,6 +12,4 @@
 
 export * from "./selectors";
 export type { Ticket } from "./selectors";
-
-// Components will be exported once they're created
-// export * from "./components";
+export * from "./components";
