@@ -21,17 +21,34 @@ bun add @evmts/super-ralph smithers-orchestrator
 
 ```typescript
 import { SuperRalph } from "@evmts/super-ralph";
-import { Workflow, smithers, outputs } from "./smithers";
-import { categories } from "./categories";
+import { Workflow, smithers, outputs } from "./smithers"; // Your Smithers setup
 import { KimiAgent, GeminiAgent, ClaudeCodeAgent } from "smithers-orchestrator";
-import { CodebaseReview } from "./components/CodebaseReview";
+import UpdateProgressPrompt from "./prompts/UpdateProgress.mdx"; // Your MDX prompts
+import DiscoverPrompt from "./prompts/Discover.mdx";
+import { CodebaseReview } from "./components/CodebaseReview"; // Your components
 import { TicketPipeline } from "./components/TicketPipeline";
 import { IntegrationTest } from "./components/IntegrationTest";
-import { categoryReferencePaths } from "./config";
-import UpdateProgressPrompt from "./prompts/UpdateProgress.mdx";
-import DiscoverPrompt from "./prompts/Discover.mdx";
 
-const REPO_ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+// Your project's work categories
+const categories = [
+  { id: "auth", name: "Authentication" },
+  { id: "api", name: "API Server" },
+  { id: "db", name: "Database" },
+  // ... more categories
+] as const;
+
+// Your project config
+const target = {
+  id: "my-project",
+  name: "My Project",
+  buildCmds: { go: "go build ./...", rust: "cargo build" },
+  testCmds: { go: "go test ./...", rust: "cargo test" },
+  fmtCmds: { go: "gofmt -w .", rust: "cargo fmt" },
+  specsPath: "docs/specs/",
+  codeStyle: "Go: snake_case, Rust: snake_case",
+  reviewChecklist: ["Spec compliance", "Test coverage"],
+  referenceFiles: ["docs/reference/"],
+};
 
 export default smithers((ctx) => {
   return (
@@ -42,7 +59,7 @@ export default smithers((ctx) => {
         taskRetries={3}
         categories={categories}
         outputs={outputs}
-        target={getTarget()}
+        target={target}
         CodebaseReview={CodebaseReview}
         TicketPipeline={TicketPipeline}
         IntegrationTest={IntegrationTest}
@@ -55,15 +72,15 @@ export default smithers((ctx) => {
             agent: new KimiAgent({
               model: "kimi-code/kimi-for-coding",
               systemPrompt: "Summarize progress. Read completed tickets and write a brief status update.",
-              cwd: REPO_ROOT,
+              cwd: process.cwd(),
               yolo: true,
               thinking: true,
               timeoutMs: 10 * 60 * 1000,
             }),
             fallback: new GeminiAgent({
               model: "gemini-2.5-pro",
-              systemPrompt: "Summarize progress. Read completed tickets and write a brief status update.",
-              cwd: REPO_ROOT,
+              systemPrompt: "Summarize progress.",
+              cwd: process.cwd(),
               yolo: true,
               timeoutMs: 10 * 60 * 1000,
             }),
@@ -71,15 +88,15 @@ export default smithers((ctx) => {
           discover: {
             agent: new GeminiAgent({
               model: "gemini-2.5-pro",
-              systemPrompt: "Discover new work. Review specs and code to identify next tickets.",
-              cwd: REPO_ROOT,
+              systemPrompt: "Discover new work. Review specs and identify next tickets.",
+              cwd: process.cwd(),
               yolo: true,
               timeoutMs: 15 * 60 * 1000,
             }),
             fallback: new ClaudeCodeAgent({
               model: "claude-opus-4-6",
-              systemPrompt: "Discover new work. Review specs and code to identify next tickets.",
-              cwd: REPO_ROOT,
+              systemPrompt: "Discover new work.",
+              cwd: process.cwd(),
               dangerouslySkipPermissions: true,
               timeoutMs: 15 * 60 * 1000,
             }),
@@ -91,27 +108,12 @@ export default smithers((ctx) => {
 });
 ```
 
-Where `getTarget()` returns your project config:
-```typescript
-{
-  id: "my-project",
-  name: "My Project",
-  buildCmds: { go: "go build ./...", rust: "cargo build" },
-  testCmds: { go: "go test ./...", rust: "cargo test", e2e: "bun test" },
-  fmtCmds: { go: "gofmt -w .", rust: "cargo fmt" },
-  specsPath: "docs/specs/",
-  codeStyle: "Go: snake_case, Rust: snake_case, JSON: snake_case",
-  reviewChecklist: ["Spec compliance", "Architecture patterns", "Test coverage"],
-  referenceFiles: ["docs/reference/"],
-}
-```
-
 ### Controlled (use hook for custom logic)
 
 ```typescript
 import { SuperRalph, useSuperRalph } from "@evmts/super-ralph";
 import { Workflow, smithers, outputs } from "./smithers";
-import { categories } from "./categories";
+// ... same imports as above
 
 export default smithers((ctx) => {
   // Use hook to extract workflow state
@@ -123,10 +125,17 @@ export default smithers((ctx) => {
   return (
     <Workflow name="my-workflow">
       <SuperRalph
-        superRalphCtx={superRalphCtx}  {/* Pass controlled context */}
-        prompts={{ /* ... */ }}
-        agents={{ /* ... */ }}
-        config={{ /* ... */ }}
+        superRalphCtx={superRalphCtx}  {/* Pass controlled context instead of ctx */}
+        maxConcurrency={12}
+        taskRetries={3}
+        categories={categories}
+        outputs={outputs}
+        target={target}
+        CodebaseReview={CodebaseReview}
+        TicketPipeline={TicketPipeline}
+        IntegrationTest={IntegrationTest}
+        prompts={{ /* same as above */ }}
+        agents={{ /* same as above */ }}
       />
     </Workflow>
   );
