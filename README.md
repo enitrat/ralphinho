@@ -1,6 +1,8 @@
 # super-ralph
 
-> Reusable Ralph workflow pattern - ticket-driven development with multi-agent review loops
+> Reusable Ralph workflow - ticket-driven development with multi-agent review loops
+
+Zero boilerplate. Generic prompts included. Just configure and go.
 
 ## Installation
 
@@ -8,15 +10,15 @@
 bun add @evmts/super-ralph smithers-orchestrator
 ```
 
-## Quick Start
-
-### 1. Create your Smithers setup
+## Usage
 
 ```typescript
-// smithers.ts
+import { SuperRalph, useSuperRalph } from "@evmts/super-ralph";
 import { createSmithers } from "smithers-orchestrator";
+import { KimiAgent, GeminiAgent, ClaudeCodeAgent } from "smithers-orchestrator";
 import { z } from "zod";
 
+// 1. Define schemas
 const outputSchemas = {
   progress: z.object({ summary: z.string() }),
   discover: z.object({ tickets: z.array(z.any()) }),
@@ -24,47 +26,15 @@ const outputSchemas = {
   report: z.object({ status: z.enum(["complete", "partial", "blocked"]) }),
 };
 
-export const { smithers, outputs } = createSmithers(outputSchemas, {
-  dbPath: "./workflow.db",
-});
-```
+const { smithers, outputs } = createSmithers(outputSchemas, { dbPath: "./workflow.db" });
 
-### 2. Create your MDX prompts
-
-Create `prompts/UpdateProgress.mdx`:
-```mdx
-UPDATE PROGRESS
-
-Your job is to update the progress report.
-
-Completed tickets:
-{props.completedTickets.map(id => `- ${id}`).join('\n')}
-
-Read git log and write a summary to PROGRESS.md
-```
-
-Create `prompts/Discover.mdx`:
-```mdx
-DISCOVER NEW WORK
-
-Your job is to discover new tickets.
-
-Categories: {props.categories.map(c => c.id).join(', ')}
-
-Already completed: {props.completedTicketIds.join(', ')}
-
-Review specs and create new tickets.
-```
-
-### 3. Define your categories and target
-
-```typescript
+// 2. Define categories
 const categories = [
   { id: "auth", name: "Authentication" },
   { id: "api", name: "API Server" },
-  { id: "db", name: "Database" },
 ] as const;
 
+// 3. Define target
 const target = {
   id: "my-project",
   name: "My Project",
@@ -76,43 +46,13 @@ const target = {
   reviewChecklist: ["Spec compliance", "Test coverage"],
   referenceFiles: ["docs/reference/"],
 };
-```
 
-### 4. Create stub components
+// 4. Create stub components (implement later)
+const CodebaseReview = ({ target }: any) => null;
+const TicketPipeline = ({ target, ticket, ctx }: any) => null;
+const IntegrationTest = ({ target }: any) => null;
 
-```typescript
-// components/CodebaseReview.tsx
-export function CodebaseReview({ target }: any) {
-  // Your codebase review logic - reviews code and suggests tickets
-  return null;
-}
-
-// components/TicketPipeline.tsx
-export function TicketPipeline({ target, ticket, ctx }: any) {
-  // Your ticket pipeline logic - Research → Plan → Implement → Test → Review → Report
-  return null;
-}
-
-// components/IntegrationTest.tsx
-export function IntegrationTest({ target }: any) {
-  // Your integration test logic - runs tests per category
-  return null;
-}
-```
-
-### 5. Create your workflow
-
-```typescript
-// workflow.tsx
-import { SuperRalph, useSuperRalph } from "@evmts/super-ralph";
-import { smithers, outputs } from "./smithers";
-import { KimiAgent, GeminiAgent, ClaudeCodeAgent } from "smithers-orchestrator";
-import UpdateProgressPrompt from "./prompts/UpdateProgress.mdx";
-import DiscoverPrompt from "./prompts/Discover.mdx";
-import { CodebaseReview } from "./components/CodebaseReview";
-import { TicketPipeline } from "./components/TicketPipeline";
-import { IntegrationTest } from "./components/IntegrationTest";
-
+// 5. Create workflow
 export default smithers((ctx) => {
   const superRalphCtx = useSuperRalph(ctx, { categories, outputs });
 
@@ -120,75 +60,46 @@ export default smithers((ctx) => {
     <SuperRalph
       superRalphCtx={superRalphCtx}
       ctx={ctx}
-    maxConcurrency={12}
-    taskRetries={3}
-    categories={categories}
-    outputs={outputs}
-    target={target}
-    CodebaseReview={CodebaseReview}
-    TicketPipeline={TicketPipeline}
-    IntegrationTest={IntegrationTest}
-    prompts={{
-      UpdateProgress: UpdateProgressPrompt,
-      Discover: DiscoverPrompt,
-    }}
-    agents={{
-      updateProgress: {
-        agent: new KimiAgent({
-          model: "kimi-code/kimi-for-coding",
-          systemPrompt: "Summarize progress.",
-          cwd: process.cwd(),
-          yolo: true,
-          thinking: true,
-          timeoutMs: 10 * 60 * 1000,
-        }),
-        fallback: new GeminiAgent({
-          model: "gemini-2.5-pro",
-          systemPrompt: "Summarize progress.",
-          cwd: process.cwd(),
-          yolo: true,
-          timeoutMs: 10 * 60 * 1000,
-        }),
-      },
-      discover: {
-        agent: new GeminiAgent({
-          model: "gemini-2.5-pro",
-          systemPrompt: "Discover new work.",
-          cwd: process.cwd(),
-          yolo: true,
-          timeoutMs: 15 * 60 * 1000,
-        }),
-        fallback: new ClaudeCodeAgent({
-          model: "claude-opus-4-6",
-          systemPrompt: "Discover new work.",
-          cwd: process.cwd(),
-          dangerouslySkipPermissions: true,
-          timeoutMs: 15 * 60 * 1000,
-        }),
-      },
-    }}
-  />
-));
-```
-
-## Controlled Component Pattern
-
-Use `useSuperRalph` hook to access workflow state:
-
-```typescript
-import { SuperRalph, useSuperRalph } from "@evmts/super-ralph";
-import { smithers, outputs } from "./smithers";
-
-export default smithers((ctx) => {
-  const superRalphCtx = useSuperRalph(ctx, { categories, outputs });
-
-  // Access workflow state
-  console.log(`Processing ${superRalphCtx.unfinishedTickets.length} tickets`);
-  console.log(`Completed: ${superRalphCtx.completedTicketIds.length}`);
-
-  return (
-    <SuperRalph
-      superRalphCtx={superRalphCtx}
+      promptConfig={{
+        projectName: "My Project",
+        progressFile: "PROGRESS.md",
+        commitMessage: "📝 docs: update progress",
+      }}
+      agents={{
+        updateProgress: {
+          agent: new KimiAgent({
+            model: "kimi-code/kimi-for-coding",
+            systemPrompt: "Summarize progress.",
+            cwd: process.cwd(),
+            yolo: true,
+            thinking: true,
+            timeoutMs: 10 * 60 * 1000,
+          }),
+          fallback: new GeminiAgent({
+            model: "gemini-2.5-pro",
+            systemPrompt: "Summarize progress.",
+            cwd: process.cwd(),
+            yolo: true,
+            timeoutMs: 10 * 60 * 1000,
+          }),
+        },
+        discover: {
+          agent: new GeminiAgent({
+            model: "gemini-2.5-pro",
+            systemPrompt: "Discover new work.",
+            cwd: process.cwd(),
+            yolo: true,
+            timeoutMs: 15 * 60 * 1000,
+          }),
+          fallback: new ClaudeCodeAgent({
+            model: "claude-opus-4-6",
+            systemPrompt: "Discover new work.",
+            cwd: process.cwd(),
+            dangerouslySkipPermissions: true,
+            timeoutMs: 15 * 60 * 1000,
+          }),
+        },
+      }}
       maxConcurrency={12}
       taskRetries={3}
       categories={categories}
@@ -197,70 +108,94 @@ export default smithers((ctx) => {
       CodebaseReview={CodebaseReview}
       TicketPipeline={TicketPipeline}
       IntegrationTest={IntegrationTest}
-      prompts={{ UpdateProgress: UpdateProgressPrompt, Discover: DiscoverPrompt }}
-      agents={{ /* same as above */ }}
     />
   );
 });
 ```
 
-## API Reference
+## API
 
-### Props
+### Required Props
 
 | Prop | Type | Description |
 |------|------|-------------|
-| `ctx` | `SmithersCtx` | Smithers context (uncontrolled mode) |
-| `superRalphCtx` | `SuperRalphContext` | Pre-computed state (controlled mode) |
+| `superRalphCtx` | `SuperRalphContext` | From `useSuperRalph(ctx, { categories, outputs })` |
+| `ctx` | `SmithersCtx` | Smithers context (for child components) |
+| `promptConfig` | `object` | Prompt configuration (see below) |
+| `agents` | `object` | Agent configurations (see below) |
 | `maxConcurrency` | `number` | Max parallel tasks |
 | `taskRetries` | `number` | Retry count for failed tasks |
-| `categories` | `Array<{ id: string, name: string }>` | Work categories |
+| `categories` | `Array<{id, name}>` | Work categories |
 | `outputs` | `object` | Smithers output schemas |
-| `target` | `object` | Project config (build/test/fmt cmds, etc.) |
-| `CodebaseReview` | `Component` | Codebase review orchestrator |
-| `TicketPipeline` | `Component` | Ticket pipeline orchestrator |
-| `IntegrationTest` | `Component` | Integration test orchestrator |
-| `prompts` | `{ UpdateProgress, Discover }` | MDX prompt components |
-| `agents` | `{ updateProgress, discover }` | Agent configurations |
-| `skipPhases` | `Set<string>` | Optional phases to skip |
+| `target` | `object` | Project config (build/test cmds, specs path, etc.) |
+| `CodebaseReview` | `Component` | Your codebase review orchestrator |
+| `TicketPipeline` | `Component` | Your ticket pipeline orchestrator |
+| `IntegrationTest` | `Component` | Your integration test orchestrator |
 
-### Prompts
+### Prompt Config
 
-Your MDX files should export React components:
-
-**UpdateProgress** - Receives `{ completedTickets: string[] }`
-**Discover** - Receives `{ categories, completedTicketIds, previousProgress, reviewFindings }`
+```typescript
+{
+  projectName: string;      // e.g., "My Project"
+  progressFile: string;     // e.g., "PROGRESS.md"
+  commitMessage?: string;   // Optional, defaults to "📝 docs: update progress"
+}
+```
 
 ### Agents
 
-Each agent config is `{ agent: Agent, fallback: Agent }` where Agent is a Smithers agent instance (ClaudeCodeAgent, KimiAgent, GeminiAgent, CodexAgent).
+```typescript
+{
+  updateProgress: { agent: Agent, fallback: Agent },
+  discover: { agent: Agent, fallback: Agent },
+}
+```
 
-### Selectors
+Where `Agent` is a Smithers agent (ClaudeCodeAgent, KimiAgent, etc.).
 
-Import selectors to extract data from SmithersCtx:
+### Target
 
 ```typescript
-import { selectAllTickets, selectProgressSummary, selectCodeReviews } from "@evmts/super-ralph";
+{
+  id: string;
+  name: string;
+  buildCmds: Record<string, string>;
+  testCmds: Record<string, string>;
+  fmtCmds: Record<string, string>;
+  specsPath: string;
+  codeStyle: string;
+  reviewChecklist: string[];
+  referenceFiles: string[];
+}
+```
+
+## What's Included
+
+✅ **Generic prompts** - UpdateProgress and Discover prompts built-in
+✅ **Selectors** - Data extraction functions
+✅ **Controlled component** - Use `useSuperRalph()` hook
+✅ **Ralph orchestration** - Infinite loop with ticket processing
+✅ **Zero boilerplate** - No MDX files to create
+
+## Selectors
+
+```typescript
+import { selectAllTickets } from "@evmts/super-ralph";
 
 const { completed, unfinished } = selectAllTickets(ctx, categories, outputs);
-const progress = selectProgressSummary(ctx, outputs);
-const reviews = selectCodeReviews(ctx, ticketId, outputs);
 ```
 
 Available: `selectAllTickets`, `selectReviewTickets`, `selectDiscoverTickets`, `selectCompletedTicketIds`, `selectProgressSummary`, `selectTicketReport`, `selectResearch`, `selectPlan`, `selectImplement`, `selectTestResults`, `selectSpecReview`, `selectCodeReviews`
 
-## The Ralph Pattern
+## The Pattern
 
 ```
 Ralph (infinite loop)
-  ├─ UpdateProgress (summarize work)
-  ├─ CodebaseReview (find issues)
-  ├─ Discover (find new work)
-  ├─ IntegrationTest (run tests)
-  └─ TicketPipeline × N (process tickets in parallel)
-     └─ Worktree (isolated)
-        ├─ Research → Plan → ValidationLoop → Report
-        └─ ValidationLoop: Implement → Test → BuildVerify → Review → Fix
+  ├─ UpdateProgress (built-in prompt)
+  ├─ CodebaseReview (your component)
+  ├─ Discover (built-in prompt)
+  ├─ IntegrationTest (your component)
+  └─ TicketPipeline × N (your component)
 ```
 
 ## License

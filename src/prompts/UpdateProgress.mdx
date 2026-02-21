@@ -1,0 +1,30 @@
+UPDATE PROGRESS
+
+Your job is to update the progress report for {props.projectName}.
+
+## CRITICAL: This is a READ-ONLY assessment step
+
+Do NOT run build commands, test commands, or compilation. Those are expensive and handled by dedicated test/build steps. You only read code, git history, and existing output files.
+
+## Steps
+
+1. Read the current progress file at {props.progressFile} (create if it doesn't exist)
+2. Read git log for recent commits: `git log --oneline -50`
+3. Read existing output from pipeline steps if available
+4. Browse the codebase to assess current state
+5. Update {props.progressFile} with:
+   - Updated completion percentages per category
+   - Summary of recent work (from completed tickets and git log)
+   - Current gaps and priorities
+   - Updated timestamp
+
+{props.completedTickets && props.completedTickets.length > 0 ? `\nRecently completed tickets:\n${props.completedTickets.map(t => `- ${t}`).join('\n')}` : ''}
+
+## Commit
+
+After updating:
+```
+git add {props.progressFile}
+git commit -m "{props.commitMessage || '📝 docs: update progress report'}"
+git pull --rebase origin main && git push
+```

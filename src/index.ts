@@ -28,7 +28,7 @@ import {
 import type { Ticket } from "./selectors";
 
 import { SuperRalph } from "./components/SuperRalph";
-import type { SuperRalphProps, SuperRalphAgents, SuperRalphPrompts } from "./components/SuperRalph";
+import type { SuperRalphProps, SuperRalphAgents, SuperRalphPromptConfig } from "./components/SuperRalph";
 import { useSuperRalph } from "./hooks/useSuperRalph";
 import type { SuperRalphContext, UseSuperRalphConfig } from "./hooks/useSuperRalph";
 
@@ -58,7 +58,7 @@ export type {
   Ticket,
   SuperRalphProps,
   SuperRalphAgents,
-  SuperRalphPrompts,
+  SuperRalphPromptConfig,
   SuperRalphContext,
   UseSuperRalphConfig,
 };

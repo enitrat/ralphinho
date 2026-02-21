@@ -4,26 +4,24 @@ import { selectAllTickets, selectReviewTickets, selectProgressSummary } from "..
 import type { SuperRalphContext } from "../hooks/useSuperRalph";
 import { useSuperRalph } from "../hooks/useSuperRalph";
 import React from "react";
-
-export type SuperRalphPrompts = {
-  UpdateProgress: React.ComponentType<{ completedTickets: string[] }>;
-  Discover: React.ComponentType<{
-    categories: any[];
-    completedTicketIds: string[];
-    previousProgress: string | null;
-    reviewFindings: string | null;
-  }>;
-};
+import UpdateProgressPrompt from "../prompts/UpdateProgress.mdx";
+import DiscoverPrompt from "../prompts/Discover.mdx";
 
 export type SuperRalphAgents = {
   updateProgress: { agent: any; fallback: any };
   discover: { agent: any; fallback: any };
 };
 
+export type SuperRalphPromptConfig = {
+  projectName: string;
+  progressFile: string;
+  commitMessage?: string;
+};
+
 export type SuperRalphProps = {
   superRalphCtx: SuperRalphContext;
   ctx: SmithersCtx<any>;
-  prompts: SuperRalphPrompts;
+  promptConfig: SuperRalphPromptConfig;
   agents: SuperRalphAgents;
   maxConcurrency: number;
   taskRetries: number;
@@ -39,7 +37,7 @@ export type SuperRalphProps = {
 export function SuperRalph({
   superRalphCtx,
   ctx,
-  prompts,
+  promptConfig,
   agents,
   maxConcurrency,
   taskRetries,
@@ -51,8 +49,7 @@ export function SuperRalph({
   IntegrationTest,
   skipPhases = new Set(),
 }: SuperRalphProps) {
-  const { completedTicketIds, unfinishedTickets, reviewFindings } = superRalphCtx;
-  const { UpdateProgress, Discover } = prompts;
+  const { completedTicketIds, unfinishedTickets, reviewFindings, progressSummary } = superRalphCtx;
 
   return (
     <Ralph until={false} maxIterations={Infinity} onMaxReached="return-last">
@@ -65,7 +62,12 @@ export function SuperRalph({
             fallbackAgent={agents.updateProgress.fallback}
             retries={taskRetries}
           >
-            <UpdateProgress completedTickets={completedTicketIds} />
+            <UpdateProgressPrompt
+              projectName={promptConfig.projectName}
+              progressFile={promptConfig.progressFile}
+              commitMessage={promptConfig.commitMessage}
+              completedTickets={completedTicketIds}
+            />
           </Task>
         )}
 
@@ -79,10 +81,13 @@ export function SuperRalph({
             fallbackAgent={agents.discover.fallback}
             retries={taskRetries}
           >
-            <Discover
+            <DiscoverPrompt
+              projectName={promptConfig.projectName}
+              specsPath={target.specsPath}
+              referenceFiles={target.referenceFiles}
               categories={categories}
               completedTicketIds={completedTicketIds}
-              previousProgress={superRalphCtx.progressSummary}
+              previousProgress={progressSummary}
               reviewFindings={reviewFindings}
             />
           </Task>
