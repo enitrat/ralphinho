@@ -2,419 +2,156 @@
 
 > Reusable Ralph workflow - ticket-driven development with multi-agent review loops
 
-Complete workflow framework with built-in orchestrators. Just configure agents, provide specs, and go.
+An opinionated [Smithers](https://smithers.sh) workflow. You just provide the specs, this workflow does the rest.
 
 ## Installation
 
 ```bash
-bun add @smithers-orchestrator/super-ralph
+bun add @smithers-orchestrator/super-ralph smithers-orchestrator
 ```
 
 ## Usage
 
 ```tsx
 import { SuperRalph, ralphOutputSchemas } from "@smithers-orchestrator/super-ralph";
-import { createSmithers, KimiAgent, GeminiAgent, ClaudeCodeAgent, CodexAgent } from "smithers-orchestrator";
-import PRD from "./specs/PRD.mdx";                    // Your product requirements
-import EngineeringSpec from "./specs/Engineering.mdx"; // Your engineering spec
-import DesignSpec from "./specs/Design.mdx";          // Your design spec
+import { createSmithers, ClaudeCodeAgent, CodexAgent, GeminiAgent } from "smithers-orchestrator";
+import PRD from "./specs/PRD.mdx";
+import EngineeringSpec from "./specs/Engineering.mdx";
 
-// 1. Create Smithers with built-in schemas
 const { smithers, outputs } = createSmithers(ralphOutputSchemas, { dbPath: "./workflow.db" });
 
-// 2. Create workflow
 export default smithers((ctx) => (
   <SuperRalph
-    ctx={ctx}                        // Smithers context
-    focuses={[                        // Work areas for organizing tickets
+    ctx={ctx}
+    outputs={outputs}
+    focuses={[
       { id: "auth", name: "Authentication" },
       { id: "api", name: "API Server" },
     ]}
-    outputs={outputs}                 // Smithers output schemas
-    target={{                          // Project configuration
-      id: "my-project",                // Project ID
-      name: "My Project",              // Display name
-      specsPath: "docs/specs/",        // Where specs live
-      referenceFiles: ["docs/reference/"], // Reference documentation
-      buildCmds: { go: "go build ./..." }, // Build commands by language
-      testCmds: { go: "go test ./..." },   // Test commands by type
-      codeStyle: "Go: snake_case",         // Code style guidelines
-      reviewChecklist: ["Spec compliance"], // Code review checklist
+    target={{
+      id: "my-project",
+      name: "My Project",
+      specsPath: "docs/specs/",
+      referenceFiles: ["docs/reference/"],
+      buildCmds: { go: "go build ./...", rust: "cargo build" },
+      testCmds: { go: "go test ./...", rust: "cargo test" },
+      codeStyle: "Go: snake_case, Rust: snake_case",
+      reviewChecklist: ["Spec compliance", "Test coverage", "Security"],
     }}
-    maxConcurrency={12}               // Max parallel tasks to run
-    taskRetries={3}                   // Retry count for failed tasks
-      updateProgress={                // How to update progress file
-        <SuperRalph.UpdateProgress
-          agent={new KimiAgent({ model: "kimi-code/kimi-for-coding", cwd: process.cwd(), yolo: true })}  // Primary agent
-          projectName="My Project"      // Project name for progress report
-          progressFile="PROGRESS.md"    // File path to write progress to
-        />
-      }
-      discover={                        // How to discover new tickets
-        <SuperRalph.Discover
-          agent={new GeminiAgent({ model: "gemini-2.5-pro", cwd: process.cwd(), yolo: true })}  // Primary agent
-          specsPath="docs/specs/"               // Where to find specs to review
-          referenceFiles={["docs/reference/"]}  // Reference docs for patterns
-        />
-      }
-      integrationTest={                 // How to run integration tests
-        <SuperRalph.IntegrationTest
-          agent={new ClaudeCodeAgent({ model: "claude-sonnet-4-6", cwd: process.cwd() })}  // Primary agent
-          focuses={[                             // Run tests for each focus area
-            { id: "auth", name: "Authentication" },
-            { id: "api", name: "API Server" },
-          ]}
-          categoryTestSuites={{                   // Test suites per focus
-            auth: {
-              suites: ["Auth tests"],            // Test suite names
-              setupHints: ["go test ./internal/auth/..."],  // Commands to run
-              testDirs: ["internal/auth/"]       // Directories to check
-            },
-          }}
-          findingsFile="docs/test-suite-findings.md"  // Where to write test results
-        />
-      }
-      categoryReview={               // How to review each focus area
-        <SuperRalph.CategoryReview
-          agent={new CodexAgent({ model: "gpt-5.3-codex", cwd: process.cwd(), yolo: true })}  // Primary agent
-          categoryDirs={{              // Directories to review per focus
-            auth: ["internal/auth/"],  // Auth focus reviews these dirs
-            api: ["internal/routes/", "internal/services/"],  // API focus reviews these
-          }}
-        />
-      }
-      research={
-        <SuperRalph.Research
-          agent={new ClaudeCodeAgent({ model: "claude-opus-4-6", cwd: process.cwd() })}
-          fallbackAgent={new GeminiAgent({ model: "gemini-2.5-pro", cwd: process.cwd(), yolo: true })}
-          contextDir="docs/context"
-          referencePaths={["docs/specs/", "docs/reference/"]}
-        />
-      }
-      plan={
-        <SuperRalph.Plan
-          agent={new CodexAgent({ model: "gpt-5.3-codex", cwd: process.cwd(), yolo: true })}
-          fallbackAgent={new GeminiAgent({ model: "gemini-2.5-pro", cwd: process.cwd(), yolo: true })}
-          planDir="docs/plans"
-          tddPatterns={["Write tests FIRST, then implementation"]}
-          commitPrefix="📝"
-          mainBranch="main"
-        />
-      }
-      implement={
-        <SuperRalph.Implement
-          agent={new CodexAgent({ model: "gpt-5.3-codex", cwd: process.cwd(), yolo: true })}
-          fallbackAgent={new ClaudeCodeAgent({ model: "claude-sonnet-4-6", cwd: process.cwd() })}
-          testWritingGuidance={["Write unit tests AND integration tests"]}
-          implementationGuidance={["Follow project architecture patterns"]}
-          formatterCommands={["gofmt -w .", "cargo fmt"]}
-          verifyCommands={["make build"]}
-          architectureRules={["Follow specs in docs/specs/"]}
-          commitPrefix="✨"
-          mainBranch="main"
-          emojiPrefixes="✨ feat, 🐛 fix, ♻️ refactor, 📝 docs, 🧪 test"
-        />
-      }
-      test={
-        <SuperRalph.Test
-          agent={new ClaudeCodeAgent({ model: "claude-sonnet-4-6", cwd: process.cwd() })}
-          testSuites={[
-            { name: "Go Tests", command: "go test ./...", description: "Run all Go unit tests" },
-            { name: "Rust Tests", command: "cargo test", description: "Run all Rust tests" },
-            { name: "E2E Tests", command: "bun test", description: "Run E2E tests" },
-          ]}
-          fixCommitPrefix="🐛 fix"
-          mainBranch="main"
-        />
-      }
-      buildVerify={
-        <SuperRalph.BuildVerify
-          agent={new KimiAgent({ model: "kimi-code/kimi-for-coding", cwd: process.cwd(), yolo: true })}
-          buildCommand="make build"
-          verifyCommands={["go build ./...", "cargo build"]}
-        />
-      }
-      specReview={
-        <SuperRalph.SpecReview
-          agent={new CodexAgent({ model: "gpt-5.3-codex", cwd: process.cwd(), yolo: true })}
-          specChecks={[
-            { name: "Architecture", items: ["Router pattern", "Service layer", "Error format"] },
-            { name: "Conventions", items: ["snake_case JSON", "Timestamps ISO 8601"] },
-          ]}
-        />
-      }
-      codeReview={
-        <SuperRalph.CodeReview
-          agent={new ClaudeCodeAgent({ model: "claude-sonnet-4-6", cwd: process.cwd() })}
-          additionalAgents={[
-            {
-              agent: new CodexAgent({ model: "gpt-5.3-codex", cwd: process.cwd(), yolo: true }),
-              outputKey: "code_review_codex",
-            },
-            {
-              agent: new GeminiAgent({ model: "gemini-2.5-pro", cwd: process.cwd(), yolo: true }),
-              outputKey: "code_review_gemini",
-            },
-          ]}
-          reviewChecklist={["Code quality", "Error handling", "Test coverage"]}
-        />
-      }
-      reviewFix={
-        <SuperRalph.ReviewFix
-          agent={new ClaudeCodeAgent({ model: "claude-sonnet-4-6", cwd: process.cwd() })}
-          validationCommands={["make build", "go test ./..."]}
-          commitPrefix="🐛 fix"
-          mainBranch="main"
-          emojiPrefixes="🐛 fix, ♻️ refactor"
-        />
-      }
-      report={
-        <SuperRalph.Report
-          agent={new ClaudeCodeAgent({ model: "claude-sonnet-4-6", cwd: process.cwd() })}
-          fallbackAgent={new KimiAgent({ model: "kimi-code/kimi-for-coding", cwd: process.cwd(), yolo: true })}
-          reportDir="docs/reports"
-        />
-      }
-    >
-      <PRD />
-      <EngineeringSpec />
-      <DesignSpec />
-    </SuperRalph>
-  )
+    maxConcurrency={12}
+    planningAgent={new ClaudeCodeAgent({ model: "claude-opus-4-6", cwd: process.cwd() })}
+    implementationAgent={new CodexAgent({ model: "gpt-5.3-codex", cwd: process.cwd(), yolo: true })}
+    testingAgent={new ClaudeCodeAgent({ model: "claude-sonnet-4-6", cwd: process.cwd() })}
+    reviewingAgent={new ClaudeCodeAgent({ model: "claude-sonnet-4-6", cwd: process.cwd() })}
+    reportingAgent={new GeminiAgent({ model: "gemini-2.5-pro", cwd: process.cwd(), yolo: true })}
+  >
+    <PRD />
+    <EngineeringSpec />
+  </SuperRalph>
 ));
 ```
 
-### Advanced: Custom Components
-
-You can replace any compound component with your own:
-
-```tsx
-// Replace built-in Discover with custom implementation
-discover={<MyCustomDiscover agent={...} />}
-
-// Or run additional logic in parallel with built-in
-discover={
-  <Parallel>
-    <SuperRalph.Discover agent={...} specsPath="..." referenceFiles={[...]} />
-    <MyAdditionalDiscovery agent={...} />
-  </Parallel>
-}
-```
+That's it! 30 lines of configuration for a complete workflow.
 
 ## What's Included
 
-### Built-in Orchestrators
+- ✅ **13 workflow steps** - UpdateProgress, Discover, CategoryReview, Research, Plan, Implement, Test, BuildVerify, SpecReview, CodeReview, ReviewFix, Report, IntegrationTest
+- ✅ **All orchestrators** - TicketPipeline, ValidationLoop, CodebaseReview built-in
+- ✅ **Generic prompts** - 13 parameterized MDX prompts
+- ✅ **Output schemas** - `ralphOutputSchemas` with all standard schemas
+- ✅ **Selectors** - Data extraction utilities
+- ✅ **Zero boilerplate** - Just configure 5 agents and provide specs
 
-✅ **TicketPipeline** - Research → Plan → ValidationLoop → Report
-✅ **ValidationLoop** - Implement → Test → Build → (Spec+Code Review) → Fix (loops until approved)
-✅ **CodebaseReview** - Parallel category reviews across all categories
+## Configuration
 
-### Built-in Compound Components
+### Required Props
 
-All workflow steps are provided as compound components:
+| Prop | Description |
+|------|-------------|
+| `ctx` | Smithers context |
+| `outputs` | Smithers output schemas (use `ralphOutputSchemas`) |
+| `focuses` | Work areas: `[{ id: "auth", name: "Authentication" }, ...]` |
+| `target` | Project config (see below) |
+| `maxConcurrency` | Max parallel tasks |
+| `planningAgent` | Agent for research, planning, discovery |
+| `implementationAgent` | Agent for implementation and fixes |
+| `testingAgent` | Agent for running tests and build verification |
+| `reviewingAgent` | Agent for code and spec reviews |
+| `reportingAgent` | Agent for progress updates and reports |
 
-- `<SuperRalph.UpdateProgress />` - Update progress file
-- `<SuperRalph.Discover />` - Discover new tickets from specs
-- `<SuperRalph.IntegrationTest />` - Run integration tests per category
-- `<SuperRalph.CategoryReview />` - Review codebase category
-- `<SuperRalph.Research />` - Gather context for ticket
-- `<SuperRalph.Plan />` - Create TDD implementation plan
-- `<SuperRalph.Implement />` - Implement ticket (TDD)
-- `<SuperRalph.Test />` - Run all tests
-- `<SuperRalph.BuildVerify />` - Verify build passes
-- `<SuperRalph.SpecReview />` - Review spec compliance
-- `<SuperRalph.CodeReview />` - Review code quality (multi-agent)
-- `<SuperRalph.ReviewFix />` - Fix review issues
-- `<SuperRalph.Report />` - Write final ticket report
-
-### Generic Prompts
-
-All prompts are parameterized and project-agnostic. Located in `src/prompts/`:
-
-- `UpdateProgress.mdx`, `Discover.mdx`, `IntegrationTest.mdx`
-- `CategoryReview.mdx`, `Research.mdx`, `Plan.mdx`
-- `Implement.mdx`, `Test.mdx`, `BuildVerify.mdx`
-- `SpecReview.mdx`, `CodeReview.mdx`, `ReviewFix.mdx`, `Report.mdx`
-
-### Output Schemas
-
-Pre-built Zod schemas for all workflow steps:
+### Target Config
 
 ```typescript
-import { ralphOutputSchemas } from "@evmts/super-ralph";
-
-// Contains: progress, discover, category_review, research, plan, implement,
-// test_results, build_verify, spec_review, code_review, review_fix, report,
-// integration_test
+{
+  id: string;                      // Project ID
+  name: string;                    // Display name
+  specsPath: string;               // Where specs live (e.g., "docs/specs/")
+  referenceFiles: string[];        // Reference docs (e.g., ["docs/reference/"])
+  buildCmds: Record<string, string>; // Build commands per language
+  testCmds: Record<string, string>;  // Test commands per type
+  codeStyle: string;               // Code style rules
+  reviewChecklist: string[];       // Review criteria
+}
 ```
 
-### Selectors
+### Optional Props
 
-Data extraction utilities:
+| Prop | Default | Description |
+|------|---------|-------------|
+| `taskRetries` | `3` | Retry count for failed tasks |
+| `progressFile` | `"PROGRESS.md"` | Progress file path |
+| `findingsFile` | `"docs/test-suite-findings.md"` | Test findings file |
+| `commitConfig` | `{}` | `{ prefix, mainBranch, emojiPrefixes }` |
+| `testSuites` | From `target.testCmds` | Custom test suite definitions |
+| `focusTestSuites` | `{}` | Test suites per focus area |
+| `focusDirs` | `{}` | Directories per focus for review |
+| `skipPhases` | `new Set()` | Phases to skip |
+| `children` | `undefined` | Spec MDX files |
 
-```typescript
-import {
-  selectAllTickets,
-  selectReviewTickets,
-  selectDiscoverTickets,
-  selectCompletedTicketIds,
-  selectProgressSummary,
-  selectTicketReport,
-  selectResearch,
-  selectPlan,
-  selectImplement,
-  selectTestResults,
-  selectSpecReview,
-  selectCodeReviews,
-} from "@evmts/super-ralph";
+## Advanced: Custom Components
 
-const { completed, unfinished } = selectAllTickets(ctx, categories, outputs);
-const research = selectResearch(ctx, ticketId);
-```
-
-## Component Props Reference
-
-### UpdateProgress
-
-- `agent` - Primary agent
-- `fallbackAgent` - Optional fallback
-- `projectName` - Project name
-- `progressFile` - Path to progress file
-- `commitMessage` - Optional custom commit message
-
-### Discover
-
-- `agent` - Primary agent
-- `fallbackAgent` - Optional fallback
-- `specsPath` - Path to specs directory
-- `referenceFiles` - Array of reference paths
-
-### IntegrationTest
-
-- `agent` - Primary agent for running tests
-- `fallbackAgent` - Optional fallback agent
-- `focuses` - Array of `{ id, name }` work focus areas
-- `categoryTestSuites` - Map of focus ID to `{ suites, setupHints, testDirs }`
-- `findingsFile` - Path to write test findings (e.g., `docs/test-suite-findings.md`)
-
-### CategoryReview
-
-- `agent` - Primary agent
-- `fallbackAgent` - Optional fallback
-- `categoryDirs` - Optional map of category ID to directory paths
-
-### Research
-
-- `agent` - Primary agent
-- `fallbackAgent` - Optional fallback
-- `contextDir` - Directory for context files (default: `docs/context`)
-- `referencePaths` - Optional array of reference paths
-
-### Plan
-
-- `agent` - Primary agent
-- `fallbackAgent` - Optional fallback
-- `planDir` - Directory for plan files (default: `docs/plans`)
-- `tddPatterns` - Optional TDD guidance
-- `commitPrefix` - Optional commit emoji/prefix
-- `mainBranch` - Main branch name (default: `main`)
-
-### Implement
-
-- `agent` - Primary agent
-- `fallbackAgent` - Optional fallback
-- `testWritingGuidance` - Optional test writing rules
-- `implementationGuidance` - Optional implementation rules
-- `formatterCommands` - Optional formatter commands
-- `verifyCommands` - Optional verification commands
-- `architectureRules` - Optional architecture rules
-- `commitPrefix` - Optional commit emoji/prefix
-- `mainBranch` - Main branch name
-- `emojiPrefixes` - Optional emoji guide
-
-### Test
-
-- `agent` - Primary agent
-- `fallbackAgent` - Optional fallback
-- `testSuites` - Optional array of `{ name, command, description, skipCondition?, skipNote? }`
-- `fixCommitPrefix` - Optional fix commit prefix
-- `mainBranch` - Main branch name
-
-### BuildVerify
-
-- `agent` - Primary agent
-- `fallbackAgent` - Optional fallback
-- `buildCommand` - Optional build command
-- `verifyCommands` - Optional verification commands
-
-### SpecReview
-
-- `agent` - Primary agent
-- `fallbackAgent` - Optional fallback
-- `specChecks` - Optional array of `{ name, items }`
-- `testResults` - Optional test result overrides
-
-### CodeReview
-
-- `agent` - Primary agent
-- `fallbackAgent` - Optional fallback
-- `additionalAgents` - Optional array of `{ agent, fallbackAgent?, outputKey }`
-- `reviewChecklist` - Optional review checklist items
-
-### ReviewFix
-
-- `agent` - Primary agent
-- `fallbackAgent` - Optional fallback
-- `validationCommands` - Optional validation commands
-- `commitPrefix` - Optional commit emoji/prefix
-- `mainBranch` - Main branch name
-- `emojiPrefixes` - Optional emoji guide
-
-### Report
-
-- `agent` - Primary agent
-- `fallbackAgent` - Optional fallback
-- `reportDir` - Directory for reports (default: `docs/reports`)
-
-## How It Works
-
-1. **Parallel workflow phases:**
-   - UpdateProgress - Updates progress file
-   - CodebaseReview - Reviews all categories in parallel
-   - Discover - Discovers new tickets from specs
-   - IntegrationTest - Runs integration tests per category
-
-2. **Per-ticket processing (in worktrees):**
-   - TicketPipeline orchestrates Research → Plan → ValidationLoop → Report
-   - ValidationLoop runs Implement → Test → Build → Reviews → Fix until approved
-
-3. **Infinite Ralph loop:**
-   - Repeats until `until` condition is met (default: `false` = infinite)
-   - Use `skipPhases` to skip specific phases (e.g., `new Set(["PROGRESS"])`)
-
-## Advanced: Skip Phases
+Override any step with a custom component:
 
 ```tsx
 <SuperRalph
-  superRalphCtx={superRalphCtx}
-  maxConcurrency={12}
-  taskRetries={3}
-  skipPhases={new Set(["CODEBASE_REVIEW", "INTEGRATION_TEST"])}
-  // ... components
+  {...props}
+  discover={<MyCustomDiscover agent={...} />}
 />
 ```
 
-Available skip keys: `PROGRESS`, `CODEBASE_REVIEW`, `DISCOVER`, `INTEGRATION_TEST`
+Or run additional logic in parallel:
 
-## Philosophy
+```tsx
+<SuperRalph
+  {...props}
+  discover={
+    <Parallel>
+      <SuperRalph.Discover agent={...} specsPath="..." referenceFiles={[...]} />
+      <MyAdditionalDiscovery agent={...} />
+    </Parallel>
+  }
+/>
+```
 
-**Zero boilerplate.** Super Ralph provides a complete workflow framework where you just configure agents and provide your project specs. All orchestration, prompts, and schemas are built-in.
+## The Pattern
 
-**Compound component pattern.** Each step is configurable via compound components, giving you full control over agents and behavior without rebuilding orchestrators.
-
-**Multi-agent by default.** Every step supports primary + fallback agents. Code review supports N agents in parallel.
-
-**TDD first.** The workflow enforces test-driven development: tests before implementation, review loops until approved, atomic commits.
+```
+Ralph (infinite loop)
+  ├─ UpdateProgress → PROGRESS.md
+  ├─ CodebaseReview → per-focus reviews → tickets
+  ├─ Discover → new feature tickets
+  ├─ IntegrationTest → per-focus test runs
+  └─ TicketPipeline × N (parallel, in worktrees)
+     ├─ Research → gather context
+     ├─ Plan → TDD plan
+     ├─ ValidationLoop (loops until approved)
+     │  ├─ Implement → write tests + code
+     │  ├─ Test → run all tests
+     │  ├─ BuildVerify → check compilation
+     │  ├─ SpecReview + CodeReview (parallel)
+     │  └─ ReviewFix → fix issues
+     └─ Report → completion summary
+```
 
 ## License
 
