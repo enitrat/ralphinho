@@ -24,6 +24,7 @@ import {
   ClaudeCodeAgent,
   CodexAgent,
   GeminiAgent,
+  KimiAgent,
 } from "smithers-orchestrator";
 import PRD from "./specs/PRD.mdx";
 import EngineeringSpec from "./specs/Engineering.mdx";
@@ -56,6 +57,7 @@ export default smithers((ctx) => (
       testing: new ClaudeCodeAgent({ model: "claude-sonnet-4-6", cwd: process.cwd() }),
       reviewing: new CodexAgent({ model: "gpt-5.3-codex", cwd: process.cwd(), yolo: true }),
       reporting: new GeminiAgent({ model: "gemini-2.5-pro", cwd: process.cwd(), yolo: true }),
+      mergeQueue: new KimiAgent({ model: "kimi-code/kimi-for-coding", cwd: process.cwd(), yolo: true, thinking: true }),
     }}
   >
     <PRD />
