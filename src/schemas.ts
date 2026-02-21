@@ -27,6 +27,16 @@ export const ralphOutputSchemas = {
       severity: z.enum(["none", "minor", "major", "critical"]),
       feedback: z.string(),
     }),
+    architectureAlignment: z.object({
+      issues: z.array(z.string()).nullable(),
+      severity: z.enum(["none", "minor", "major", "critical"]),
+      feedback: z.string(),
+    }).optional(),
+    testCoverage: z.object({
+      issues: z.array(z.string()).nullable(),
+      severity: z.enum(["none", "minor", "major", "critical"]),
+      feedback: z.string(),
+    }).optional(),
     codeQuality: z.object({
       issues: z.array(z.string()).nullable(),
       severity: z.enum(["none", "minor", "major", "critical"]),
@@ -37,6 +47,11 @@ export const ralphOutputSchemas = {
       severity: z.enum(["none", "minor", "major", "critical"]),
       feedback: z.string(),
     }),
+    jjNativeCompliance: z.object({
+      issues: z.array(z.string()).nullable(),
+      severity: z.enum(["none", "minor", "major", "critical"]),
+      feedback: z.string(),
+    }).optional(),
     overallSeverity: z.enum(["none", "minor", "major", "critical"]),
     suggestedTickets: z.array(z.object({
       id: z.string(),
