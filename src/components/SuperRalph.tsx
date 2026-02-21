@@ -31,15 +31,6 @@ type IntegrationTestProps = {
   findingsFile: string;
 };
 
-type CodebaseReviewProps = {
-  target: any;
-  children: React.ReactElement;
-};
-
-type TicketPipelineProps = {
-  target: any;
-  children: React.ReactElement;
-};
 
 // Main component props
 export type SuperRalphProps = {
@@ -50,8 +41,8 @@ export type SuperRalphProps = {
   updateProgress: React.ReactElement<UpdateProgressProps>;
   discover: React.ReactElement<DiscoverProps>;
   integrationTest: React.ReactElement<IntegrationTestProps>;
-  codebaseReview: React.ReactElement<CodebaseReviewProps>;
-  ticketPipeline: React.ReactElement<TicketPipelineProps>;
+  codebaseReview: React.ReactElement;
+  ticketPipeline: React.ReactElement;
 };
 
 export function SuperRalph({
@@ -87,7 +78,7 @@ export function SuperRalph({
           </Task>
         )}
 
-        {!skipPhases.has("CODEBASE_REVIEW") && React.cloneElement(codebaseReview.props.children, { target: codebaseReview.props.target })}
+        {!skipPhases.has("CODEBASE_REVIEW") && codebaseReview}
 
         {!skipPhases.has("DISCOVER") && (
           <Task
@@ -138,7 +129,7 @@ export function SuperRalph({
 
         {unfinishedTickets.map((ticket: any) => (
           <Worktree key={ticket.id} id={`wt-${ticket.id}`} path={`/tmp/workflow-wt-${ticket.id}`}>
-            {React.cloneElement(ticketPipeline.props.children, { target: ticketPipeline.props.target, ticket, ctx })}
+            {React.cloneElement(ticketPipeline, { ticket, ctx })}
           </Worktree>
         ))}
       </Parallel>
@@ -146,7 +137,7 @@ export function SuperRalph({
   );
 }
 
-// Compound components
+// Compound components (marker components for type safety)
 function UpdateProgress(_props: UpdateProgressProps) {
   return null;
 }
@@ -159,16 +150,6 @@ function IntegrationTest(_props: IntegrationTestProps) {
   return null;
 }
 
-function CodebaseReview(_props: CodebaseReviewProps) {
-  return null;
-}
-
-function TicketPipeline(_props: TicketPipelineProps) {
-  return null;
-}
-
 SuperRalph.UpdateProgress = UpdateProgress;
 SuperRalph.Discover = Discover;
 SuperRalph.IntegrationTest = IntegrationTest;
-SuperRalph.CodebaseReview = CodebaseReview;
-SuperRalph.TicketPipeline = TicketPipeline;
