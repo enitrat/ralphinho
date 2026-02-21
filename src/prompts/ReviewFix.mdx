@@ -25,9 +25,7 @@ For EACH issue from both reviews:
 3. If valid: make the fix
 4. If false positive: document why in your output
 5. After each fix, run relevant validation commands:
-{props.validationCommands && props.validationCommands.length > 0
-  ? props.validationCommands.map(c => `   - ${c}`).join('\n')
-  : '   - Run formatters and tests'}
+{props.validationCommands && props.validationCommands.length > 0 ? props.validationCommands.map(c => `   - ${c}`).join('\n') : '   - Run formatters and tests'}
 
 ## TDD for Fixes
 
