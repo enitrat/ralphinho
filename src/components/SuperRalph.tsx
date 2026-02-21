@@ -1,7 +1,7 @@
-import { Ralph, Parallel, Worktree } from "smithers-orchestrator";
-import { Task } from "smithers-orchestrator";
+import { Ralph, Parallel, Worktree, Task } from "smithers-orchestrator";
 import type { SmithersCtx } from "smithers-orchestrator";
 import { selectAllTickets, selectReviewTickets, selectProgressSummary } from "../selectors";
+import React from "react";
 
 export type SuperRalphPrompts = {
   UpdateProgress: React.ComponentType<{ completedTickets: string[] }>;
