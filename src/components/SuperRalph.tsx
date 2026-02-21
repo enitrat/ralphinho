@@ -7,34 +7,17 @@ import React from "react";
 
 export type SuperRalphPrompts = {
   UpdateProgress: React.ComponentType<{ completedTickets: string[] }>;
-  Discover: React.ComponentType<{ categories: any[]; completedTicketIds: string[]; previousProgress: string | null; reviewFindings: string | null }>;
-  Research: React.ComponentType<any>;
-  Plan: React.ComponentType<any>;
-  Implement: React.ComponentType<any>;
-  Test: React.ComponentType<any>;
-  BuildVerify: React.ComponentType<any>;
-  SpecReview: React.ComponentType<any>;
-  ReviewFix: React.ComponentType<any>;
-  Report: React.ComponentType<any>;
-  CategoryReview: React.ComponentType<any>;
-  CodeReview: React.ComponentType<any>;
-  IntegrationTest: React.ComponentType<any>;
+  Discover: React.ComponentType<{
+    categories: any[];
+    completedTicketIds: string[];
+    previousProgress: string | null;
+    reviewFindings: string | null;
+  }>;
 };
 
 export type SuperRalphAgents = {
   updateProgress: { agent: any; fallback: any };
   discover: { agent: any; fallback: any };
-  research: { agent: any; fallback: any };
-  plan: { agent: any; fallback: any };
-  implement: { agent: any; fallback: any };
-  test: { agent: any; fallback: any };
-  buildVerify: { agent: any; fallback: any };
-  specReview: { agent: any; fallback: any };
-  reviewFix: { agent: any; fallback: any };
-  report: { agent: any; fallback: any };
-  categoryReview: { agent: any; fallback?: any };
-  codeReview: { claude: any; codex: any; gemini: any; fallbacks: { claude: any; codex: any; gemini: any } };
-  integrationTest: { agent: any; fallback: any };
 };
 
 export type SuperRalphConfig = {
