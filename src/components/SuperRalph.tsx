@@ -1,6 +1,6 @@
-import { Ralph, Parallel, Sequence, Worktree, Task } from "smithers-orchestrator";
+import { Ralph, Parallel, Sequence, Worktree, Task, MergeQueue } from "smithers-orchestrator";
 import type { SmithersCtx } from "smithers-orchestrator";
-import { selectAllTickets, selectReviewTickets, selectProgressSummary, selectImplement, selectTestResults, selectSpecReview, selectCodeReviews, selectResearch, selectPlan, selectTicketReport } from "../selectors";
+import { selectAllTickets, selectReviewTickets, selectProgressSummary, selectImplement, selectTestResults, selectSpecReview, selectCodeReviews, selectResearch, selectPlan, selectTicketReport, selectLand } from "../selectors";
 import type { RalphOutputs, Ticket } from "../selectors";
 import React, { type ReactElement, type ReactNode } from "react";
 import UpdateProgressPrompt from "../prompts/UpdateProgress.mdx";
@@ -15,6 +15,7 @@ import SpecReviewPrompt from "../prompts/SpecReview.mdx";
 import CodeReviewPrompt from "../prompts/CodeReview.mdx";
 import ReviewFixPrompt from "../prompts/ReviewFix.mdx";
 import ReportPrompt from "../prompts/Report.mdx";
+import LandPrompt from "../prompts/Land.mdx";
 import CategoryReviewPrompt from "../prompts/CategoryReview.mdx";
 
 // Main component props (simple API)
@@ -60,6 +61,10 @@ export type SuperRalphProps = {
   }>;
   focusTestSuites?: Record<string, { suites: string[]; setupHints: string[]; testDirs: string[] }>;
   focusDirs?: Record<string, string[]>;
+  /** Fast CI checks run in the worktree before entering the merge queue (unit tests, build, type checks) */
+  preLandChecks?: string[];
+  /** Slow CI checks run after rebase in the merge queue (e2e tests, integration tests, full suite) */
+  postLandChecks?: string[];
   skipPhases?: Set<string>;
 
   // Advanced: Override any step with custom component
@@ -76,6 +81,7 @@ export type SuperRalphProps = {
   codeReview?: ReactElement;
   reviewFix?: ReactElement;
   report?: ReactElement;
+  land?: ReactElement;
 
   // Specs as children
   children?: ReactNode;
@@ -106,6 +112,8 @@ export function SuperRalph({
   testSuites = [],
   focusTestSuites = {},
   focusDirs = {},
+  preLandChecks = [],
+  postLandChecks = [],
   skipPhases = new Set(),
 
   // Advanced overrides
@@ -122,6 +130,7 @@ export function SuperRalph({
   codeReview: customCodeReview,
   reviewFix: customReviewFix,
   report: customReport,
+  land: customLand,
 
   children,
 }: SuperRalphProps) {
@@ -202,204 +211,223 @@ export function SuperRalph({
           const planData = selectPlan(ctx, ticket.id, outputs);
           const contextFilePath = researchData?.contextFilePath ?? `docs/context/${ticket.id}.md`;
           const planFilePath = planData?.planFilePath ?? `docs/plans/${ticket.id}.md`;
+          const landed = selectLand(ctx, ticket.id, outputs)?.merged === true;
+          const reportComplete = selectTicketReport(ctx, ticket.id, outputs)?.status === "complete";
 
           return (
-            <Worktree key={ticket.id} id={`wt-${ticket.id}`} path={`/tmp/workflow-wt-${ticket.id}`}>
-              <Sequence skipIf={selectTicketReport(ctx, ticket.id, outputs)?.status === "complete"}>
-                {customResearch || (
-                  <Task id={`${ticket.id}:research`} output={outputs.research} agent={planningAgent} retries={taskRetries}>
-                    <ResearchPrompt
-                      ticketId={ticket.id}
-                      ticketTitle={ticket.title}
-                      ticketDescription={ticket.description}
-                      ticketCategory={ticket.category}
-                      referenceFiles={ticket.referenceFiles}
-                      relevantFiles={ticket.relevantFiles}
-                      contextFilePath={contextFilePath}
-                      referencePaths={[specsPath, ...referenceFiles]}
-                    />
-                  </Task>
-                )}
+            <Sequence key={ticket.id} skipIf={landed}>
+              {/* Phase 1: Development (in worktree, on branch) */}
+              <Worktree id={`wt-${ticket.id}`} path={`/tmp/workflow-wt-${ticket.id}`} branch={`ticket/${ticket.id}`}>
+                <Sequence skipIf={reportComplete}>
+                  {customResearch || (
+                    <Task id={`${ticket.id}:research`} output={outputs.research} agent={planningAgent} retries={taskRetries}>
+                      <ResearchPrompt
+                        ticketId={ticket.id}
+                        ticketTitle={ticket.title}
+                        ticketDescription={ticket.description}
+                        ticketCategory={ticket.category}
+                        referenceFiles={ticket.referenceFiles}
+                        relevantFiles={ticket.relevantFiles}
+                        contextFilePath={contextFilePath}
+                        referencePaths={[specsPath, ...referenceFiles]}
+                      />
+                    </Task>
+                  )}
 
-                {customPlan || (
-                  <Task id={`${ticket.id}:plan`} output={outputs.plan} agent={planningAgent} retries={taskRetries}>
-                    <PlanPrompt
-                      ticketId={ticket.id}
-                      ticketTitle={ticket.title}
-                      ticketDescription={ticket.description}
-                      ticketCategory={ticket.category}
-                      acceptanceCriteria={ticket.acceptanceCriteria ?? []}
-                      contextFilePath={contextFilePath}
-                      researchSummary={researchData?.summary ?? null}
-                      planFilePath={planFilePath}
-                      tddPatterns={["Write tests FIRST, then implementation"]}
-                      commitPrefix={prefix}
-                      mainBranch={mainBranch}
-                    />
-                  </Task>
-                )}
+                  {customPlan || (
+                    <Task id={`${ticket.id}:plan`} output={outputs.plan} agent={planningAgent} retries={taskRetries}>
+                      <PlanPrompt
+                        ticketId={ticket.id}
+                        ticketTitle={ticket.title}
+                        ticketDescription={ticket.description}
+                        ticketCategory={ticket.category}
+                        acceptanceCriteria={ticket.acceptanceCriteria ?? []}
+                        contextFilePath={contextFilePath}
+                        researchSummary={researchData?.summary ?? null}
+                        planFilePath={planFilePath}
+                        tddPatterns={["Write tests FIRST, then implementation"]}
+                        commitPrefix={prefix}
+                        mainBranch={mainBranch}
+                      />
+                    </Task>
+                  )}
 
-                {/* ValidationLoop */}
-                <Sequence>
-                  {(() => {
-                    const latestImplement = selectImplement(ctx, ticket.id, outputs);
-                    const latestTest = selectTestResults(ctx, ticket.id, outputs);
-                    const latestSpecReview = selectSpecReview(ctx, ticket.id, outputs);
-                    const { worstSeverity: worstCodeSeverity, mergedIssues: mergedCodeIssues, mergedFeedback: mergedCodeFeedback } = selectCodeReviews(ctx, ticket.id, outputs);
+                  {/* ValidationLoop */}
+                  <Sequence>
+                    {(() => {
+                      const latestImplement = selectImplement(ctx, ticket.id, outputs);
+                      const latestTest = selectTestResults(ctx, ticket.id, outputs);
+                      const latestSpecReview = selectSpecReview(ctx, ticket.id, outputs);
+                      const { worstSeverity: worstCodeSeverity, mergedIssues: mergedCodeIssues, mergedFeedback: mergedCodeFeedback } = selectCodeReviews(ctx, ticket.id, outputs);
 
-                    const specApproved = latestSpecReview?.severity === "none";
-                    const codeApproved = worstCodeSeverity === "none";
-                    const noReviewIssues = specApproved && codeApproved;
+                      const specApproved = latestSpecReview?.severity === "none";
+                      const codeApproved = worstCodeSeverity === "none";
+                      const noReviewIssues = specApproved && codeApproved;
 
-                    const toArray = (v: unknown): string[] => Array.isArray(v) ? v : typeof v === "string" ? [v] : [];
-                    const reviewFeedback = (() => {
-                      const parts: string[] = [];
-                      if (latestSpecReview && !specApproved) {
-                        parts.push(`SPEC REVIEW (${latestSpecReview.severity}): ${latestSpecReview.feedback}`);
-                        if (latestSpecReview.issues) parts.push(`Issues: ${toArray(latestSpecReview.issues).join("; ")}`);
-                      }
-                      if (!codeApproved && mergedCodeFeedback) {
-                        parts.push(`CODE REVIEW (${worstCodeSeverity}): ${mergedCodeFeedback}`);
-                        if (mergedCodeIssues.length > 0) parts.push(`Issues: ${mergedCodeIssues.join("; ")}`);
-                      }
-                      return parts.length > 0 ? parts.join("\n\n") : null;
-                    })();
+                      const toArray = (v: unknown): string[] => Array.isArray(v) ? v : typeof v === "string" ? [v] : [];
+                      const reviewFeedback = (() => {
+                        const parts: string[] = [];
+                        if (latestSpecReview && !specApproved) {
+                          parts.push(`SPEC REVIEW (${latestSpecReview.severity}): ${latestSpecReview.feedback}`);
+                          if (latestSpecReview.issues) parts.push(`Issues: ${toArray(latestSpecReview.issues).join("; ")}`);
+                        }
+                        if (!codeApproved && mergedCodeFeedback) {
+                          parts.push(`CODE REVIEW (${worstCodeSeverity}): ${mergedCodeFeedback}`);
+                          if (mergedCodeIssues.length > 0) parts.push(`Issues: ${mergedCodeIssues.join("; ")}`);
+                        }
+                        return parts.length > 0 ? parts.join("\n\n") : null;
+                      })();
 
-                    return (
-                      <>
-                        {customImplement || (
-                          <Task id={`${ticket.id}:implement`} output={outputs.implement} agent={implementationAgent} retries={taskRetries}>
-                            <ImplementPrompt
-                              ticketId={ticket.id}
-                              ticketTitle={ticket.title}
-                              ticketCategory={ticket.category}
-                              planFilePath={planFilePath}
-                              contextFilePath={contextFilePath}
-                              implementationSteps={planData?.implementationSteps ?? null}
-                              previousImplementation={latestImplement ?? null}
-                              reviewFeedback={reviewFeedback}
-                              failingTests={latestTest?.failingSummary ?? null}
-                              testWritingGuidance={["Write unit tests AND integration tests"]}
-                              implementationGuidance={["Follow architecture patterns from specs"]}
-                              formatterCommands={Object.entries(buildCmds).map(([lang, cmd]) => `Format ${lang}`)}
-                              verifyCommands={Object.values(buildCmds)}
-                              architectureRules={[`Read ${specsPath} for patterns`]}
-                              commitPrefix={prefix}
-                              mainBranch={mainBranch}
-                              emojiPrefixes={emojiPrefixes}
-                            />
-                          </Task>
-                        )}
+                      return (
+                        <>
+                          {customImplement || (
+                            <Task id={`${ticket.id}:implement`} output={outputs.implement} agent={implementationAgent} retries={taskRetries}>
+                              <ImplementPrompt
+                                ticketId={ticket.id}
+                                ticketTitle={ticket.title}
+                                ticketCategory={ticket.category}
+                                planFilePath={planFilePath}
+                                contextFilePath={contextFilePath}
+                                implementationSteps={planData?.implementationSteps ?? null}
+                                previousImplementation={latestImplement ?? null}
+                                reviewFeedback={reviewFeedback}
+                                failingTests={latestTest?.failingSummary ?? null}
+                                testWritingGuidance={["Write unit tests AND integration tests"]}
+                                implementationGuidance={["Follow architecture patterns from specs"]}
+                                formatterCommands={Object.entries(buildCmds).map(([lang, cmd]) => `Format ${lang}`)}
+                                verifyCommands={Object.values(buildCmds)}
+                                architectureRules={[`Read ${specsPath} for patterns`]}
+                                commitPrefix={prefix}
+                                mainBranch={mainBranch}
+                                emojiPrefixes={emojiPrefixes}
+                              />
+                            </Task>
+                          )}
 
-                        {customTest || (
-                          <Task id={`${ticket.id}:test`} output={outputs.test_results} agent={testingAgent} retries={taskRetries}>
-                            <TestPrompt
-                              ticketId={ticket.id}
-                              ticketTitle={ticket.title}
-                              ticketCategory={ticket.category}
-                              testSuites={testSuites.length > 0 ? testSuites : Object.entries(testCmds).map(([name, command]) => ({
-                                name: `${name} tests`,
-                                command,
-                                description: `Run ${name} tests`,
-                              }))}
-                              fixCommitPrefix={`🐛 fix`}
-                              mainBranch={mainBranch}
-                            />
-                          </Task>
-                        )}
+                          {customTest || (
+                            <Task id={`${ticket.id}:test`} output={outputs.test_results} agent={testingAgent} retries={taskRetries}>
+                              <TestPrompt
+                                ticketId={ticket.id}
+                                ticketTitle={ticket.title}
+                                ticketCategory={ticket.category}
+                                testSuites={testSuites.length > 0 ? testSuites : Object.entries(testCmds).map(([name, command]) => ({
+                                  name: `${name} tests`,
+                                  command,
+                                  description: `Run ${name} tests`,
+                                }))}
+                                fixCommitPrefix={`🐛 fix`}
+                                mainBranch={mainBranch}
+                              />
+                            </Task>
+                          )}
 
-                        {customBuildVerify || (
-                          <Task id={`${ticket.id}:build-verify`} output={outputs.build_verify} agent={testingAgent} retries={taskRetries}>
-                            <BuildVerifyPrompt
-                              ticketId={ticket.id}
-                              ticketTitle={ticket.title}
-                              ticketCategory={ticket.category}
-                              filesCreated={latestImplement?.filesCreated ?? null}
-                              filesModified={latestImplement?.filesModified ?? null}
-                              whatWasDone={latestImplement?.whatWasDone ?? null}
-                            />
-                          </Task>
-                        )}
-
-                        <Parallel maxConcurrency={maxConcurrency}>
-                          {customSpecReview || (
-                            <Task id={`${ticket.id}:spec-review`} output={outputs.spec_review} agent={reviewingAgent} retries={taskRetries}>
-                              <SpecReviewPrompt
+                          {customBuildVerify || (
+                            <Task id={`${ticket.id}:build-verify`} output={outputs.build_verify} agent={testingAgent} retries={taskRetries}>
+                              <BuildVerifyPrompt
                                 ticketId={ticket.id}
                                 ticketTitle={ticket.title}
                                 ticketCategory={ticket.category}
                                 filesCreated={latestImplement?.filesCreated ?? null}
                                 filesModified={latestImplement?.filesModified ?? null}
-                                testResults={[
-                                  { name: "Tests", status: latestTest?.goTestsPassed ? "PASS" : "FAIL" },
-                                ]}
-                                failingSummary={latestTest?.failingSummary ?? null}
-                                specChecks={[
-                                  { name: "Code Style", items: [codeStyle] },
-                                  { name: "Review Checklist", items: reviewChecklist },
-                                ]}
+                                whatWasDone={latestImplement?.whatWasDone ?? null}
                               />
                             </Task>
                           )}
 
-                          {customCodeReview || (
-                            <Task id={`${ticket.id}:code-review`} output={outputs.code_review} agent={reviewingAgent} retries={taskRetries}>
-                              <CodeReviewPrompt
+                          <Parallel maxConcurrency={maxConcurrency}>
+                            {customSpecReview || (
+                              <Task id={`${ticket.id}:spec-review`} output={outputs.spec_review} agent={reviewingAgent} retries={taskRetries}>
+                                <SpecReviewPrompt
+                                  ticketId={ticket.id}
+                                  ticketTitle={ticket.title}
+                                  ticketCategory={ticket.category}
+                                  filesCreated={latestImplement?.filesCreated ?? null}
+                                  filesModified={latestImplement?.filesModified ?? null}
+                                  testResults={[
+                                    { name: "Tests", status: latestTest?.goTestsPassed ? "PASS" : "FAIL" },
+                                  ]}
+                                  failingSummary={latestTest?.failingSummary ?? null}
+                                  specChecks={[
+                                    { name: "Code Style", items: [codeStyle] },
+                                    { name: "Review Checklist", items: reviewChecklist },
+                                  ]}
+                                />
+                              </Task>
+                            )}
+
+                            {customCodeReview || (
+                              <Task id={`${ticket.id}:code-review`} output={outputs.code_review} agent={reviewingAgent} retries={taskRetries}>
+                                <CodeReviewPrompt
+                                  ticketId={ticket.id}
+                                  ticketTitle={ticket.title}
+                                  ticketCategory={ticket.category}
+                                  filesCreated={latestImplement?.filesCreated ?? null}
+                                  filesModified={latestImplement?.filesModified ?? null}
+                                  reviewChecklist={reviewChecklist}
+                                />
+                              </Task>
+                            )}
+                          </Parallel>
+
+                          {customReviewFix || (!noReviewIssues && (
+                            <Task id={`${ticket.id}:review-fix`} output={outputs.review_fix} agent={implementationAgent} retries={taskRetries}>
+                              <ReviewFixPrompt
                                 ticketId={ticket.id}
                                 ticketTitle={ticket.title}
                                 ticketCategory={ticket.category}
-                                filesCreated={latestImplement?.filesCreated ?? null}
-                                filesModified={latestImplement?.filesModified ?? null}
-                                reviewChecklist={reviewChecklist}
+                                specSeverity={latestSpecReview?.severity ?? "none"}
+                                specFeedback={latestSpecReview?.feedback ?? ""}
+                                specIssues={latestSpecReview?.issues ?? null}
+                                codeSeverity={worstCodeSeverity}
+                                codeFeedback={mergedCodeFeedback}
+                                codeIssues={mergedCodeIssues.length > 0 ? mergedCodeIssues : null}
+                                validationCommands={Object.values(testCmds)}
+                                commitPrefix={`🐛 fix`}
+                                mainBranch={mainBranch}
+                                emojiPrefixes={emojiPrefixes}
                               />
                             </Task>
-                          )}
-                        </Parallel>
+                          ))}
+                        </>
+                      );
+                    })()}
+                  </Sequence>
 
-                        {customReviewFix || (!noReviewIssues && (
-                          <Task id={`${ticket.id}:review-fix`} output={outputs.review_fix} agent={implementationAgent} retries={taskRetries}>
-                            <ReviewFixPrompt
-                              ticketId={ticket.id}
-                              ticketTitle={ticket.title}
-                              ticketCategory={ticket.category}
-                              specSeverity={latestSpecReview?.severity ?? "none"}
-                              specFeedback={latestSpecReview?.feedback ?? ""}
-                              specIssues={latestSpecReview?.issues ?? null}
-                              codeSeverity={worstCodeSeverity}
-                              codeFeedback={mergedCodeFeedback}
-                              codeIssues={mergedCodeIssues.length > 0 ? mergedCodeIssues : null}
-                              validationCommands={Object.values(testCmds)}
-                              commitPrefix={`🐛 fix`}
-                              mainBranch={mainBranch}
-                              emojiPrefixes={emojiPrefixes}
-                            />
-                          </Task>
-                        ))}
-                      </>
-                    );
-                  })()}
+                  {customReport || (
+                    <Task id={`${ticket.id}:report`} output={outputs.report} agent={reportingAgent} retries={taskRetries}>
+                      <ReportPrompt
+                        ticketId={ticket.id}
+                        ticketTitle={ticket.title}
+                        ticketCategory={ticket.category}
+                        acceptanceCriteria={ticket.acceptanceCriteria ?? []}
+                        specSeverity={selectSpecReview(ctx, ticket.id, outputs)?.severity ?? "none"}
+                        codeSeverity={selectCodeReviews(ctx, ticket.id, outputs).worstSeverity}
+                        allIssuesResolved={(ctx.outputMaybe("review_fix", { nodeId: `${ticket.id}:review-fix` }) as any)?.allIssuesResolved ?? true}
+                        reviewRounds={1}
+                        goTests={selectTestResults(ctx, ticket.id, outputs)?.goTestsPassed ? "PASS" : "FAIL"}
+                        rustTests={selectTestResults(ctx, ticket.id, outputs)?.rustTestsPassed ? "PASS" : "FAIL"}
+                        e2eTests={selectTestResults(ctx, ticket.id, outputs)?.e2eTestsPassed ? "PASS" : "FAIL"}
+                        sqlcGen={selectTestResults(ctx, ticket.id, outputs)?.sqlcGenPassed ? "PASS" : "FAIL"}
+                      />
+                    </Task>
+                  )}
                 </Sequence>
+              </Worktree>
 
-                {customReport || (
-                  <Task id={`${ticket.id}:report`} output={outputs.report} agent={reportingAgent} retries={taskRetries}>
-                    <ReportPrompt
+              {/* Phase 2: Landing (in main repo, serialized via merge queue) */}
+              <MergeQueue id="land-queue" maxConcurrency={1}>
+                {customLand || (
+                  <Task id={`${ticket.id}:land`} output={outputs.land} agent={implementationAgent} retries={taskRetries}>
+                    <LandPrompt
                       ticketId={ticket.id}
                       ticketTitle={ticket.title}
                       ticketCategory={ticket.category}
-                      acceptanceCriteria={ticket.acceptanceCriteria ?? []}
-                      specSeverity={selectSpecReview(ctx, ticket.id, outputs)?.severity ?? "none"}
-                      codeSeverity={selectCodeReviews(ctx, ticket.id, outputs).worstSeverity}
-                      allIssuesResolved={(ctx.outputMaybe("review_fix", { nodeId: `${ticket.id}:review-fix` }) as any)?.allIssuesResolved ?? true}
-                      reviewRounds={1}
-                      goTests={selectTestResults(ctx, ticket.id, outputs)?.goTestsPassed ? "PASS" : "FAIL"}
-                      rustTests={selectTestResults(ctx, ticket.id, outputs)?.rustTestsPassed ? "PASS" : "FAIL"}
-                      e2eTests={selectTestResults(ctx, ticket.id, outputs)?.e2eTestsPassed ? "PASS" : "FAIL"}
-                      sqlcGen={selectTestResults(ctx, ticket.id, outputs)?.sqlcGenPassed ? "PASS" : "FAIL"}
+                      ciCommands={postLandChecks.length > 0 ? postLandChecks : Object.values(testCmds)}
                     />
                   </Task>
                 )}
-              </Sequence>
-            </Worktree>
+              </MergeQueue>
+            </Sequence>
           );
         })}
       </Parallel>
@@ -421,3 +449,4 @@ SuperRalph.SpecReview = function SpecReview(_props: any) { return null; };
 SuperRalph.CodeReview = function CodeReview(_props: any) { return null; };
 SuperRalph.ReviewFix = function ReviewFix(_props: any) { return null; };
 SuperRalph.Report = function Report(_props: any) { return null; };
+SuperRalph.Land = function Land(_props: any) { return null; };
