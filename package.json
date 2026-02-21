@@ -1,0 +1,50 @@
+{
+  "name": "@evmts/super-ralph",
+  "version": "0.1.0",
+  "description": "Reusable Ralph workflow pattern - ticket-driven development with multi-agent review loops",
+  "author": "William Cory",
+  "license": "MIT",
+  "type": "module",
+  "module": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./selectors": "./src/selectors.ts",
+    "./components": "./src/components/index.ts"
+  },
+  "files": [
+    "src/",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "bun": ">=1.3.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/evmts/super-ralph.git"
+  },
+  "bugs": {
+    "url": "https://github.com/evmts/super-ralph/issues"
+  },
+  "homepage": "https://github.com/evmts/super-ralph#readme",
+  "keywords": [
+    "ai",
+    "workflow",
+    "orchestration",
+    "ralph",
+    "multi-agent",
+    "tdd",
+    "code-review"
+  ],
+  "peerDependencies": {
+    "smithers-orchestrator": "*"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "typescript": "^5.6.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
+}
