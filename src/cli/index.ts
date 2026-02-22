@@ -19,6 +19,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { getClarificationQuestions } from "./clarifications.ts";
 
@@ -490,11 +491,21 @@ async function main() {
   });
 
   await writeFile(workflowPath, workflowSource, "utf8");
-  await writeFile(
-    preloadPath,
-    `import { mdxPlugin } from "smithers-orchestrator/mdx-plugin";\n\nmdxPlugin();\n`,
-    "utf8",
-  );
+
+  // Create preload - check if we have a shared preload from super-ralph source
+  const cliDir = import.meta.dir || dirname(fileURLToPath(import.meta.url));
+  const superRalphRoot = dirname(dirname(cliDir)); // Go up from src/cli to super-ralph root
+  const superRalphPreload = join(superRalphRoot, "preload.ts");
+  const useSharedPreload = existsSync(superRalphPreload);
+
+  if (!useSharedPreload) {
+    await writeFile(
+      preloadPath,
+      `import { mdxPlugin } from "smithers-orchestrator/mdx-plugin";\n\nmdxPlugin();\n`,
+      "utf8",
+    );
+  }
+
   await writeFile(bunfigPath, `preload = ["./preload.ts"]\n`, "utf8");
 
   const runId = typeof parsed.flags["run-id"] === "string"
@@ -521,9 +532,16 @@ async function main() {
   console.log("🎬 Starting workflow execution...\n");
 
   // Execute the workflow using Smithers CLI
+  // Determine execution directory: use smithers directory for node_modules access
+  const smithersDir = dirname(dirname(smithersCliPath)); // Go up from src/cli to smithers root
+  const execCwd = existsSync(join(smithersDir, "node_modules")) ? smithersDir : repoRoot;
+
+  // Use the preload that's in the directory with node_modules
+  const effectivePreload = useSharedPreload ? superRalphPreload : preloadPath;
+
   const args = [
     "-r",
-    preloadPath,
+    effectivePreload,
     smithersCliPath,
     "run",
     workflowPath,
@@ -539,7 +557,7 @@ async function main() {
   delete (env as any).CLAUDECODE;
 
   const proc = Bun.spawn(["bun", ...args], {
-    cwd: repoRoot,
+    cwd: execCwd,
     env: env as any,
     stdout: "inherit",
     stderr: "inherit",
