@@ -22,10 +22,9 @@ Do NOT run build commands, test commands, or compilation. Those are expensive an
 
 ## Commit
 
-After updating:
+After updating, commit your changes in this worktree:
 ```
 jj describe -m "{props.commitMessage || '📝 docs: update progress report'}"
-jj new
-jj bookmark set main -r @-
-jj git push --bookmark main
 ```
+
+Do NOT run `jj bookmark set main` or `jj git push` — landing is handled separately.

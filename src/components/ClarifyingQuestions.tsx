@@ -4,7 +4,7 @@ import { Task, Sequence } from "smithers-orchestrator";
 import type { ClarificationQuestion, ClarificationAnswer, ClarificationSession } from "../cli/clarifications";
 import { z } from "zod";
 
-const generateQuestionsOutputSchema = z.object({
+export const generateQuestionsOutputSchema = z.object({
   questions: z.array(z.object({
     question: z.string(),
     choices: z.array(z.object({
@@ -74,9 +74,11 @@ export function ClarifyingQuestions({
   prompt,
   repoRoot,
   packageScripts,
-  agent,
+  agent: agentProp,
   preGeneratedQuestions,
 }: ClarifyingQuestionsProps) {
+  const primaryAgent = Array.isArray(agentProp) ? agentProp[0] : agentProp;
+  const fallbackAgent = Array.isArray(agentProp) && agentProp.length > 1 ? agentProp[1] : undefined;
   const scriptsBlock = Object.entries(packageScripts)
     .map(([name, cmd]) => `- ${name}: ${cmd}`)
     .join("\n");
@@ -151,7 +153,8 @@ Return valid JSON only, no markdown, no explanations.`;
         <Task
           id="generate-questions"
           output={generateQuestionsOutputSchema}
-          agent={agent}
+          agent={primaryAgent}
+          fallbackAgent={fallbackAgent}
         >
           {questionGenerationPrompt}
         </Task>

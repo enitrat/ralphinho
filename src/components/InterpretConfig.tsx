@@ -132,11 +132,15 @@ export function InterpretConfig({
     prompt,
   ].join("\n");
 
+  const primaryAgent = Array.isArray(agent) ? agent[0] : agent;
+  const fallbackAgent = Array.isArray(agent) && agent.length > 1 ? agent[1] : undefined;
+
   return (
     <Task
       id="interpret-config"
       output={interpretConfigOutputSchema}
-      agent={agent}
+      agent={primaryAgent}
+      fallbackAgent={fallbackAgent}
     >
       {interpretPrompt}
     </Task>

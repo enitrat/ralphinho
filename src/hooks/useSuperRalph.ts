@@ -23,9 +23,9 @@ export type UseSuperRalphConfig = {
  * Use this for controlled component pattern or to access workflow state.
  */
 export function useSuperRalph(ctx: SmithersCtx<any>, config: UseSuperRalphConfig): SuperRalphContext {
-  const { findings: reviewFindings } = selectReviewTickets(ctx, config.focuses, config.outputs);
-  const { completed: completedTicketIds, unfinished: unfinishedTickets } = selectAllTickets(ctx, config.focuses, config.outputs);
-  const progressSummary = selectProgressSummary(ctx, config.outputs);
+  const { findings: reviewFindings } = selectReviewTickets(ctx, config.focuses);
+  const { completed: completedTicketIds, unfinished: unfinishedTickets } = selectAllTickets(ctx, config.focuses);
+  const progressSummary = selectProgressSummary(ctx);
 
   return {
     ctx,

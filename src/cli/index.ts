@@ -21,7 +21,6 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
-import { getClarificationQuestions } from "./clarifications.ts";
 
 type ParsedArgs = {
   positional: string[];
@@ -270,6 +269,12 @@ async function ensureJjAvailable(repoRoot: string) {
   throw new Error(message);
 }
 
+// Check if we're running from super-ralph source (CLI location)
+// These need to be at module level so they're accessible in both renderWorkflowFile and main execution
+const cliDir = import.meta.dir || dirname(fileURLToPath(import.meta.url));
+const superRalphSourceRoot = dirname(dirname(cliDir));
+const runningFromSource = existsSync(join(superRalphSourceRoot, 'src/components/SuperRalph.tsx'));
+
 function renderWorkflowFile(params: {
   promptText: string;
   promptSpecPath: string;
@@ -278,9 +283,9 @@ function renderWorkflowFile(params: {
   packageScripts: Record<string, string>;
   detectedAgents: { claude: boolean; codex: boolean };
   fallbackConfig: any;
-  skipQuestions: boolean;
+  clarificationSession: any | null;
 }): string {
-  const { promptText, promptSpecPath, repoRoot, dbPath, packageScripts, detectedAgents, fallbackConfig, skipQuestions } = params;
+  const { promptText, promptSpecPath, repoRoot, dbPath, packageScripts, detectedAgents, fallbackConfig, clarificationSession } = params;
 
   // Determine import strategy:
   // If target repo is super-ralph itself, use relative imports
@@ -288,11 +293,6 @@ function renderWorkflowFile(params: {
   // Otherwise, use package imports
   const isSuperRalphRepo = existsSync(join(repoRoot, 'src/components/SuperRalph.tsx')) &&
                            existsSync(join(repoRoot, 'src/components/ClarifyingQuestions.tsx'));
-
-  // Check if we're running from super-ralph source (CLI location)
-  const cliDir = import.meta.dir || dirname(fileURLToPath(import.meta.url));
-  const superRalphSourceRoot = dirname(dirname(cliDir));
-  const runningFromSource = existsSync(join(superRalphSourceRoot, 'src/components/SuperRalph.tsx'));
 
   let importPrefix: string;
   if (isSuperRalphRepo) {
@@ -307,17 +307,10 @@ function renderWorkflowFile(params: {
   }
 
   return `import React from "react";
-import { createSmithers, ClaudeCodeAgent, CodexAgent } from "smithers-orchestrator";
+import { createSmithers, ClaudeCodeAgent, CodexAgent, Sequence, Parallel } from "smithers-orchestrator";
 import { SuperRalph } from "${importPrefix}";
-import {
-  ClarifyingQuestions,
-  InterpretConfig,
-  Monitor,
-  clarifyingQuestionsOutputSchema,
-  interpretConfigOutputSchema,
-  monitorOutputSchema,
-} from "${importPrefix}/components";
-import { getClarificationQuestions } from "${importPrefix}/cli/clarifications";
+import { InterpretConfig, Monitor } from "${importPrefix}/components";
+import { ralphOutputSchemas } from "${importPrefix}";
 
 const REPO_ROOT = ${JSON.stringify(repoRoot)};
 const DB_PATH = ${JSON.stringify(dbPath)};
@@ -327,14 +320,10 @@ const PROMPT_TEXT = ${JSON.stringify(promptText)};
 const PROMPT_SPEC_PATH = ${JSON.stringify(promptSpecPath)};
 const PACKAGE_SCRIPTS = ${JSON.stringify(packageScripts, null, 2)};
 const FALLBACK_CONFIG = ${JSON.stringify(fallbackConfig, null, 2)};
-const SKIP_QUESTIONS = ${skipQuestions};
+const CLARIFICATION_SESSION = ${JSON.stringify(clarificationSession)};
 
-const { smithers, outputs, Workflow, Sequence, Parallel } = createSmithers(
-  {
-    clarifying_questions: clarifyingQuestionsOutputSchema,
-    interpret_config: interpretConfigOutputSchema,
-    monitor: monitorOutputSchema,
-  },
+const { smithers, outputs, Workflow } = createSmithers(
+  ralphOutputSchemas,
   { dbPath: DB_PATH }
 );
 
@@ -359,12 +348,8 @@ function createCodex(systemPrompt: string) {
 }
 
 function choose(primary: "claude" | "codex", systemPrompt: string) {
-  if (HAS_CLAUDE && HAS_CODEX) {
-    if (primary === "claude") {
-      return [createClaude(systemPrompt), createCodex(systemPrompt)];
-    }
-    return [createCodex(systemPrompt), createClaude(systemPrompt)];
-  }
+  if (primary === "claude" && HAS_CLAUDE) return createClaude(systemPrompt);
+  if (primary === "codex" && HAS_CODEX) return createCodex(systemPrompt);
   if (HAS_CLAUDE) return createClaude(systemPrompt);
   return createCodex(systemPrompt);
 }
@@ -378,39 +363,22 @@ const reportingAgent = choose("claude", "Write concise, accurate ticket status r
 export default smithers((ctx) => (
   <Workflow name="super-ralph-full">
     <Sequence>
-      {/* Step 1: Clarifying Questions (skip if --skip-questions) */}
-      {!SKIP_QUESTIONS && (
-        <ClarifyingQuestions
-          ctx={ctx}
-          outputs={outputs}
-          prompt={PROMPT_TEXT}
-          repoRoot={REPO_ROOT}
-          packageScripts={PACKAGE_SCRIPTS}
-          agent={planningAgent}
-          preGeneratedQuestions={getClarificationQuestions()}
-        />
-      )}
-
-      {/* Step 2: Interpret Config */}
+      {/* Step 1: Interpret Config (clarification session already collected by CLI) */}
       <InterpretConfig
         prompt={PROMPT_TEXT}
-        clarificationSession={
-          SKIP_QUESTIONS
-            ? null
-            : (ctx.outputMaybe("collect-clarification-answers", outputs.clarifying_questions) as any)?.session ?? null
-        }
+        clarificationSession={CLARIFICATION_SESSION}
         repoRoot={REPO_ROOT}
         fallbackConfig={FALLBACK_CONFIG}
         packageScripts={PACKAGE_SCRIPTS}
         detectedAgents={{
           claude: HAS_CLAUDE,
           codex: HAS_CODEX,
-          gh: false, // Not used in config interpretation
+          gh: false,
         }}
         agent={planningAgent}
       />
 
-      {/* Step 3: Run SuperRalph + Monitor in Parallel */}
+      {/* Step 2: Run SuperRalph + Monitor in Parallel */}
       <Parallel>
         <SuperRalph
           ctx={ctx}
@@ -429,11 +397,7 @@ export default smithers((ctx) => (
           dbPath={DB_PATH}
           runId={ctx.runId}
           config={(ctx.outputMaybe("interpret-config", outputs.interpret_config) as any) || FALLBACK_CONFIG}
-          clarificationSession={
-            SKIP_QUESTIONS
-              ? null
-              : (ctx.outputMaybe("collect-clarification-answers", outputs.clarifying_questions) as any)?.session ?? null
-          }
+          clarificationSession={CLARIFICATION_SESSION}
           prompt={PROMPT_TEXT}
           repoRoot={REPO_ROOT}
         />
@@ -442,6 +406,178 @@ export default smithers((ctx) => (
   </Workflow>
 ));
 `;
+}
+
+/**
+ * Generate clarifying questions via claude --print, then launch the interactive UI.
+ * Returns the completed ClarificationSession or null on failure.
+ */
+async function runClarifyingQuestions(
+  promptText: string,
+  repoRoot: string,
+  packageScripts: Record<string, string>,
+): Promise<any> {
+  const scriptsBlock = Object.entries(packageScripts)
+    .map(([name, cmd]) => `- ${name}: ${cmd}`)
+    .join("\n");
+
+  const questionGenPrompt = `You are a senior product consultant helping a user define exactly what they want before a team of AI agents spends hours or even days building it. This is a long-running, expensive automated workflow — getting the requirements right NOW saves enormous time and cost later.
+
+The user may not fully know what they want yet. That's normal. Your job is to:
+- Help them think through what they actually need (not just what they said)
+- Surface edge cases and decisions they haven't considered
+- Make opinionated suggestions when choices have clear best practices
+- Ask about scope, priorities, and tradeoffs — not technical implementation
+
+User's request: "${promptText}"
+Repository: ${repoRoot}
+Available scripts: ${scriptsBlock || "(none)"}
+
+Generate 10-15 clarifying questions. Be thorough — this is the user's only chance to steer the project before autonomous agents take over for a potentially multi-hour or multi-day build.
+
+Focus areas:
+- Core features and behavior (what does the user actually see and do?)
+- Scope and MVP boundaries (what's in v1 vs later?)
+- User experience details (loading states, error handling, empty states)
+- Data and persistence (what gets saved, where, for how long?)
+- Edge cases the user hasn't thought about
+- Priorities and tradeoffs (speed vs polish, features vs simplicity)
+- Success criteria (how do we know it's done?)
+
+GOOD questions (product-focused, opinionated):
+- "Should todos persist between browser sessions, or is in-memory fine for a demo?"
+- "What happens when the list is empty — blank screen, or a friendly prompt?"
+- "Is this a quick prototype or something you'd ship to real users?"
+
+BAD questions (tech decisions — NEVER ask these, the AI agents decide):
+- "What state management library should we use?"
+- "Should we use TypeScript or JavaScript?"
+- "What testing framework do you prefer?"
+
+Each question should have 2-6 choices — use as many as make sense for that question. Some questions are yes/no (2 choices), others need more nuance (5-6). Make the choices opinionated — the first choice should be your recommended default for most users. The user can always type a custom answer too.
+
+Return ONLY valid JSON (no markdown fences, no commentary):
+{"questions":[{"question":"...","choices":[{"label":"...","description":"...","value":"..."},{"label":"...","description":"...","value":"..."},{"label":"...","description":"...","value":"..."},{"label":"...","description":"...","value":"..."}]}]}`;
+
+  // Call Anthropic API directly for fast question generation
+  const spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  let spinIdx = 0;
+  const spinInterval = setInterval(() => {
+    process.stdout.write(`\r${spinner[spinIdx++ % spinner.length]} Generating clarifying questions...`);
+  }, 80);
+
+  let claudeResult: string;
+  try {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) throw new Error("no-api-key");
+
+    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-opus-4-6",
+        max_tokens: 4096,
+        messages: [{ role: "user", content: questionGenPrompt }],
+      }),
+    });
+
+    clearInterval(spinInterval);
+    process.stdout.write("\r\x1b[K");
+
+    if (!resp.ok) throw new Error(`API ${resp.status}: ${await resp.text()}`);
+    const data = await resp.json() as any;
+    claudeResult = data.content?.[0]?.text ?? "";
+    if (!claudeResult.trim()) throw new Error("Empty API response");
+  } catch (apiErr: any) {
+    clearInterval(spinInterval);
+    process.stdout.write("\r\x1b[K");
+
+    // Fallback to claude --print if API call fails (e.g. no API key)
+    console.log("⚠️  API call failed, falling back to claude CLI...\n");
+    const claudeEnv = { ...process.env, ANTHROPIC_API_KEY: "" };
+    delete (claudeEnv as any).CLAUDECODE;
+    const fallbackProc = Bun.spawn([
+      "claude", "--print", "--output-format", "text", "--model", "claude-opus-4-6",
+      questionGenPrompt,
+    ], {
+      cwd: repoRoot,
+      stdout: "pipe",
+      stderr: "pipe",
+      env: claudeEnv,
+    });
+    const fallbackOut = await new Response(fallbackProc.stdout).text();
+    const fallbackErr = await new Response(fallbackProc.stderr).text();
+    const fallbackCode = await fallbackProc.exited;
+    if (fallbackCode !== 0 || !fallbackOut.trim()) {
+      throw new Error(`claude --print failed (code ${fallbackCode}): ${fallbackErr}`);
+    }
+    claudeResult = fallbackOut.trim();
+  }
+
+  // Parse the JSON response — extract JSON from possible markdown fences
+  let questions: any[];
+  try {
+    let jsonStr = claudeResult;
+    // Strip markdown code fences if present
+    const fenceMatch = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+    if (fenceMatch) jsonStr = fenceMatch[1];
+    const parsed = JSON.parse(jsonStr.trim());
+    questions = parsed.questions;
+    if (!Array.isArray(questions) || questions.length === 0) {
+      throw new Error("No questions in response");
+    }
+  } catch (e: any) {
+    console.error("⚠️  Failed to parse generated questions, using fallback.");
+    // Import hardcoded fallback
+    const { getClarificationQuestions } = await import("./clarifications.ts");
+    questions = getClarificationQuestions();
+  }
+
+  console.log(`✅ Generated ${questions.length} questions\n`);
+
+  // Write questions to temp file and launch interactive UI
+  const tempDir = join(repoRoot, ".super-ralph", "temp");
+  await mkdir(tempDir, { recursive: true });
+
+  const sessionId = randomUUID();
+  const questionsPath = join(tempDir, `questions-${sessionId}.json`);
+  const answersPath = join(tempDir, `answers-${sessionId}.json`);
+
+  await writeFile(questionsPath, JSON.stringify({ questions }, null, 2));
+
+  // Launch interactive UI
+  const interactiveScript = join(cliDir, "interactive-questions.ts");
+  const uiProc = Bun.spawn(["bun", interactiveScript, questionsPath, answersPath], {
+    stdout: "inherit",
+    stderr: "inherit",
+    stdin: "inherit",
+    cwd: repoRoot,
+  });
+  const uiCode = await uiProc.exited;
+  if (uiCode !== 0) {
+    throw new Error(`Interactive UI exited with code ${uiCode}`);
+  }
+
+  // Read answers
+  const answersJson = await readFile(answersPath, "utf8");
+  const { answers } = JSON.parse(answersJson);
+
+  // Build session
+  const summary = answers
+    .map((a: any, i: number) => `${i + 1}. ${a.question}\n   → ${a.answer}`)
+    .join("\n\n");
+
+  // Cleanup temp files
+  try {
+    const { unlink } = await import("node:fs/promises");
+    await Promise.all([unlink(questionsPath), unlink(answersPath)]);
+  } catch { /* ignore */ }
+
+  return { answers, summary };
 }
 
 async function main() {
@@ -491,6 +627,12 @@ async function main() {
   // Write prompt to file
   await writeFile(promptSpecPath, `${promptText.trim()}\n`, "utf8");
 
+  // Step 1: Clarifying questions (unless --skip-questions)
+  let clarificationSession: any = null;
+  if (!parsed.flags["skip-questions"]) {
+    clarificationSession = await runClarifyingQuestions(promptText, repoRoot, packageScripts);
+  }
+
   // Generate workflow file
   const workflowPath = join(generatedDir, "workflow.tsx");
   const preloadPath = join(generatedDir, "preload.ts");
@@ -505,15 +647,26 @@ async function main() {
     packageScripts,
     detectedAgents: { claude: detectedAgents.claude, codex: detectedAgents.codex },
     fallbackConfig,
-    skipQuestions: Boolean(parsed.flags["skip-questions"]),
+    clarificationSession,
   });
 
   await writeFile(workflowPath, workflowSource, "utf8");
 
+  // Ensure the generated workflow can resolve node_modules (smithers-orchestrator, react, etc.)
+  // Bun resolves imports relative to the source file, so we symlink node_modules into the generated dir
+  const generatedNodeModules = join(generatedDir, "node_modules");
+  const sourceNodeModules = join(superRalphSourceRoot, "node_modules");
+  if (!existsSync(generatedNodeModules) && existsSync(sourceNodeModules)) {
+    const { symlinkSync } = await import("fs");
+    try {
+      symlinkSync(sourceNodeModules, generatedNodeModules, "dir");
+    } catch {
+      // Symlink may already exist or fail on some systems - not fatal
+    }
+  }
+
   // Create preload - check if we have a shared preload from super-ralph source
-  const cliDir = import.meta.dir || dirname(fileURLToPath(import.meta.url));
-  const superRalphRoot = dirname(dirname(cliDir)); // Go up from src/cli to super-ralph root
-  const superRalphPreload = join(superRalphRoot, "preload.ts");
+  const superRalphPreload = join(superRalphSourceRoot, "preload.ts");
   const useSharedPreload = existsSync(superRalphPreload);
 
   if (!useSharedPreload) {
@@ -550,9 +703,16 @@ async function main() {
   console.log("🎬 Starting workflow execution...\n");
 
   // Execute the workflow using Smithers CLI
-  // Determine execution directory: use smithers directory for node_modules access
-  const smithersDir = dirname(dirname(smithersCliPath)); // Go up from src/cli to smithers root
-  const execCwd = existsSync(join(smithersDir, "node_modules")) ? smithersDir : repoRoot;
+  // Determine execution directory:
+  // - If running from super-ralph source, use super-ralph dir (has all deps including React)
+  // - Otherwise use smithers dir or repo root
+  let execCwd: string;
+  if (runningFromSource) {
+    execCwd = superRalphSourceRoot;
+  } else {
+    const smithersDir = dirname(dirname(smithersCliPath)); // Go up from src/cli to smithers root
+    execCwd = existsSync(join(smithersDir, "node_modules")) ? smithersDir : repoRoot;
+  }
 
   // Use the preload that's in the directory with node_modules
   const effectivePreload = useSharedPreload ? superRalphPreload : preloadPath;
@@ -574,7 +734,7 @@ async function main() {
   const env = { ...process.env, USE_CLI_AGENTS: "1", SMITHERS_DEBUG: "1" };
   delete (env as any).CLAUDECODE;
 
-  const proc = Bun.spawn(["bun", ...args], {
+  const proc = Bun.spawn(["bun", "--no-install", ...args], {
     cwd: execCwd,
     env: env as any,
     stdout: "inherit",

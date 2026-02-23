@@ -7,6 +7,7 @@ import type { ralphOutputSchemas } from "./schemas";
  */
 
 export type RalphOutputs = typeof ralphOutputSchemas;
+export type SchemaKey = keyof RalphOutputs & string;
 
 export interface Ticket {
   id: string;
@@ -62,20 +63,28 @@ function normalizeTicket(raw: unknown): Ticket | null {
   };
 }
 
-export function selectReviewTickets(ctx: SmithersCtx<RalphOutputs>, focuses: ReadonlyArray<{ readonly id: string }>, outputs: RalphOutputs): { tickets: Ticket[]; findings: string | null } {
+// Type helper for output inference
+type OutputType<K extends SchemaKey> = ReturnType<SmithersCtx<RalphOutputs>["outputMaybe"]> extends infer R 
+  ? R 
+  : unknown;
+
+export function selectReviewTickets(
+  ctx: SmithersCtx<RalphOutputs>, 
+  focuses: ReadonlyArray<{ readonly id: string }>
+): { tickets: Ticket[]; findings: string | null } {
   const tickets: Ticket[] = [];
   const summaryParts: string[] = [];
 
   for (const { id } of focuses) {
-    const review = ctx.outputMaybe(outputs.category_review, { nodeId: `codebase-review:${id}` });
-    if (Array.isArray(review?.suggestedTickets)) {
-      for (const candidate of review.suggestedTickets) {
+    const review = ctx.outputMaybe("category_review", { nodeId: `codebase-review:${id}` });
+    if (review && Array.isArray((review as any).suggestedTickets)) {
+      for (const candidate of (review as any).suggestedTickets) {
         const normalized = normalizeTicket(candidate);
         if (normalized) tickets.push(normalized);
       }
     }
-    if (review && review.overallSeverity !== "none") {
-      summaryParts.push(`${id} (${review.overallSeverity}): ${review.specCompliance.feedback}`);
+    if (review && (review as any).overallSeverity !== "none") {
+      summaryParts.push(`${id} (${(review as any).overallSeverity}): ${(review as any).specCompliance?.feedback}`);
     }
   }
 
@@ -85,34 +94,37 @@ export function selectReviewTickets(ctx: SmithersCtx<RalphOutputs>, focuses: Rea
   };
 }
 
-export function selectDiscoverTickets(ctx: SmithersCtx<RalphOutputs>, outputs: RalphOutputs): Ticket[] {
-  const discoverOutput = ctx.outputMaybe(outputs.discover, { nodeId: "discover" });
-  if (!Array.isArray(discoverOutput?.tickets)) return [];
+export function selectDiscoverTickets(ctx: SmithersCtx<RalphOutputs>): Ticket[] {
+  const discoverOutput = ctx.outputMaybe("discover", { nodeId: "discover" });
+  if (!discoverOutput || !Array.isArray((discoverOutput as any).tickets)) return [];
   const normalized: Ticket[] = [];
-  for (const candidate of discoverOutput.tickets) {
+  for (const candidate of (discoverOutput as any).tickets) {
     const ticket = normalizeTicket(candidate);
     if (ticket) normalized.push(ticket);
   }
   return normalized;
 }
 
-export function selectCompletedTicketIds(ctx: SmithersCtx<RalphOutputs>, tickets: Ticket[], outputs: RalphOutputs): string[] {
+export function selectCompletedTicketIds(ctx: SmithersCtx<RalphOutputs>, tickets: Ticket[]): string[] {
   return tickets
     .filter((t) => {
-      const land = selectLand(ctx, t.id, outputs);
+      const land = selectLand(ctx, t.id);
       return land?.merged === true;
     })
     .map((t) => t.id);
 }
 
-export function selectProgressSummary(ctx: SmithersCtx<RalphOutputs>, outputs: RalphOutputs): string | null {
-  const progress = ctx.outputMaybe(outputs.progress, { nodeId: "update-progress" });
-  return progress?.summary ?? null;
+export function selectProgressSummary(ctx: SmithersCtx<RalphOutputs>): string | null {
+  const progress = ctx.outputMaybe("progress", { nodeId: "update-progress" });
+  return (progress as any)?.summary ?? null;
 }
 
-export function selectAllTickets(ctx: SmithersCtx<RalphOutputs>, focuses: ReadonlyArray<{ readonly id: string }>, outputs: RalphOutputs): { all: Ticket[]; completed: string[]; unfinished: Ticket[] } {
-  const { tickets: reviewTickets } = selectReviewTickets(ctx, focuses, outputs);
-  const featureTickets = selectDiscoverTickets(ctx, outputs);
+export function selectAllTickets(
+  ctx: SmithersCtx<RalphOutputs>, 
+  focuses: ReadonlyArray<{ readonly id: string }>
+): { all: Ticket[]; completed: string[]; unfinished: Ticket[] } {
+  const { tickets: reviewTickets } = selectReviewTickets(ctx, focuses);
+  const featureTickets = selectDiscoverTickets(ctx);
 
   // Merge and deduplicate tickets (review tickets take priority)
   const seenIds = new Set<string>();
@@ -124,44 +136,62 @@ export function selectAllTickets(ctx: SmithersCtx<RalphOutputs>, focuses: Readon
     }
   }
 
-  const completed = selectCompletedTicketIds(ctx, all, outputs);
+  const completed = selectCompletedTicketIds(ctx, all);
   const unfinished = all.filter((t) => !completed.includes(t.id));
 
   return { all, completed, unfinished };
 }
 
-export function selectTicketReport(ctx: SmithersCtx<RalphOutputs>, ticketId: string, outputs: RalphOutputs) {
+export function selectTicketReport(ctx: SmithersCtx<RalphOutputs>, ticketId: string) {
   return ctx.latest("report", `${ticketId}:report`);
 }
 
-export function selectResearch(ctx: SmithersCtx<RalphOutputs>, ticketId: string, outputs: RalphOutputs) {
-  return ctx.outputMaybe(outputs.research, { nodeId: `${ticketId}:research` });
+export function selectResearch(ctx: SmithersCtx<RalphOutputs>, ticketId: string) {
+  return ctx.outputMaybe("research", { nodeId: `${ticketId}:research` }) as 
+    | { contextFilePath: string; summary: string }
+    | undefined;
 }
 
-export function selectPlan(ctx: SmithersCtx<RalphOutputs>, ticketId: string, outputs: RalphOutputs) {
-  return ctx.outputMaybe(outputs.plan, { nodeId: `${ticketId}:plan` });
+export function selectPlan(ctx: SmithersCtx<RalphOutputs>, ticketId: string) {
+  return ctx.outputMaybe("plan", { nodeId: `${ticketId}:plan` }) as
+    | { planFilePath: string; implementationSteps: string[] | null }
+    | undefined;
 }
 
-export function selectImplement(ctx: SmithersCtx<RalphOutputs>, ticketId: string, outputs: RalphOutputs) {
-  return ctx.outputMaybe(outputs.implement, { nodeId: `${ticketId}:implement` });
+export function selectImplement(ctx: SmithersCtx<RalphOutputs>, ticketId: string) {
+  return ctx.outputMaybe("implement", { nodeId: `${ticketId}:implement` }) as
+    | { whatWasDone: string; filesCreated: string[] | null; filesModified: string[] | null; nextSteps: string | null }
+    | undefined;
 }
 
-export function selectTestResults(ctx: SmithersCtx<RalphOutputs>, ticketId: string, outputs: RalphOutputs) {
-  return ctx.outputMaybe(outputs.test_results, { nodeId: `${ticketId}:test` });
+export function selectTestResults(ctx: SmithersCtx<RalphOutputs>, ticketId: string) {
+  return ctx.outputMaybe("test_results", { nodeId: `${ticketId}:test` }) as
+    | { goTestsPassed: boolean; rustTestsPassed: boolean; e2eTestsPassed: boolean; sqlcGenPassed: boolean; failingSummary: string | null }
+    | undefined;
 }
 
-export function selectSpecReview(ctx: SmithersCtx<RalphOutputs>, ticketId: string, outputs: RalphOutputs) {
-  return ctx.outputMaybe(outputs.spec_review, { nodeId: `${ticketId}:spec-review` });
+export function selectSpecReview(ctx: SmithersCtx<RalphOutputs>, ticketId: string) {
+  return ctx.outputMaybe("spec_review", { nodeId: `${ticketId}:spec-review` }) as
+    | { severity: "none" | "minor" | "major" | "critical"; feedback: string; issues: string[] | null }
+    | undefined;
 }
 
-export function selectLand(ctx: SmithersCtx<RalphOutputs>, ticketId: string, outputs: RalphOutputs) {
-  return ctx.latest("land", `${ticketId}:land`);
+export function selectLand(ctx: SmithersCtx<RalphOutputs>, ticketId: string) {
+  return ctx.latest("land", `${ticketId}:land`) as
+    | { merged: boolean; mergeCommit: string | null; ciPassed: boolean; summary: string; evicted?: boolean; evictionReason?: string | null; evictionDetails?: string | null; attemptedLog?: string | null; attemptedDiffSummary?: string | null; landedOnMainSinceBranch?: string | null }
+    | undefined;
 }
 
-export function selectCodeReviews(ctx: SmithersCtx<RalphOutputs>, ticketId: string, outputs: RalphOutputs) {
-  const claude = ctx.outputMaybe(outputs.code_review, { nodeId: `${ticketId}:code-review` });
-  const codex = ctx.outputMaybe(outputs.code_review_codex, { nodeId: `${ticketId}:code-review-codex` });
-  const gemini = ctx.outputMaybe(outputs.code_review_gemini, { nodeId: `${ticketId}:code-review-gemini` });
+export function selectCodeReviews(ctx: SmithersCtx<RalphOutputs>, ticketId: string) {
+  const claude = ctx.outputMaybe("code_review", { nodeId: `${ticketId}:code-review` }) as
+    | { severity: string; feedback: string; issues: string[] | null }
+    | undefined;
+  const codex = ctx.outputMaybe("code_review_codex", { nodeId: `${ticketId}:code-review-codex` }) as
+    | { severity: string; feedback: string; issues: string[] | null }
+    | undefined;
+  const gemini = ctx.outputMaybe("code_review_gemini", { nodeId: `${ticketId}:code-review-gemini` }) as
+    | { severity: string; feedback: string; issues: string[] | null }
+    | undefined;
 
   const severityRank: Record<string, number> = { critical: 3, major: 2, minor: 1, none: 0 };
   const severities = [claude?.severity, codex?.severity, gemini?.severity].filter(Boolean) as string[];
@@ -191,14 +221,14 @@ export function selectCodeReviews(ctx: SmithersCtx<RalphOutputs>, ticketId: stri
   };
 }
 
-export function selectClarifyingQuestions(ctx: SmithersCtx<RalphOutputs>, outputs: RalphOutputs) {
-  return ctx.outputMaybe(outputs.clarifying_questions, { nodeId: "clarifying-questions" });
+export function selectClarifyingQuestions(ctx: SmithersCtx<RalphOutputs>) {
+  return ctx.outputMaybe("clarifying_questions", { nodeId: "clarifying-questions" });
 }
 
-export function selectInterpretConfig(ctx: SmithersCtx<RalphOutputs>, outputs: RalphOutputs) {
-  return ctx.outputMaybe(outputs.interpret_config, { nodeId: "interpret-config" });
+export function selectInterpretConfig(ctx: SmithersCtx<RalphOutputs>) {
+  return ctx.outputMaybe("interpret_config", { nodeId: "interpret-config" });
 }
 
-export function selectMonitor(ctx: SmithersCtx<RalphOutputs>, outputs: RalphOutputs) {
-  return ctx.outputMaybe(outputs.monitor, { nodeId: "monitor" });
+export function selectMonitor(ctx: SmithersCtx<RalphOutputs>) {
+  return ctx.outputMaybe("monitor", { nodeId: "monitor" });
 }

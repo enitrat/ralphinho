@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { clarifyingQuestionsOutputSchema } from "./components/ClarifyingQuestions";
+import { clarifyingQuestionsOutputSchema, generateQuestionsOutputSchema } from "./components/ClarifyingQuestions";
 import { interpretConfigOutputSchema } from "./components/InterpretConfig";
 import { monitorOutputSchema } from "./components/Monitor";
 
@@ -20,6 +20,7 @@ const discoverTicketSchema = z.object({
 });
 
 export const ralphOutputSchemas = {
+  generate_questions: generateQuestionsOutputSchema,
   clarifying_questions: clarifyingQuestionsOutputSchema,
   interpret_config: interpretConfigOutputSchema,
   monitor: monitorOutputSchema,
@@ -49,12 +50,12 @@ export const ralphOutputSchemas = {
       issues: z.array(z.string()).nullable(),
       severity: z.enum(["none", "minor", "major", "critical"]),
       feedback: z.string(),
-    }).optional(),
+    }).nullable(),
     testCoverage: z.object({
       issues: z.array(z.string()).nullable(),
       severity: z.enum(["none", "minor", "major", "critical"]),
       feedback: z.string(),
-    }).optional(),
+    }).nullable(),
     codeQuality: z.object({
       issues: z.array(z.string()).nullable(),
       severity: z.enum(["none", "minor", "major", "critical"]),
@@ -69,7 +70,7 @@ export const ralphOutputSchemas = {
       issues: z.array(z.string()).nullable(),
       severity: z.enum(["none", "minor", "major", "critical"]),
       feedback: z.string(),
-    }).optional(),
+    }).nullable(),
     overallSeverity: z.enum(["none", "minor", "major", "critical"]),
     suggestedTickets: z.array(z.object({
       id: z.string(),

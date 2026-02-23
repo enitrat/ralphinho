@@ -179,9 +179,9 @@ export function SuperRalph({
 
   children,
 }: SuperRalphProps) {
-  const { findings: reviewFindings } = selectReviewTickets(ctx, focuses, outputs);
-  const { completed: completedTicketIds, unfinished: unfinishedTickets } = selectAllTickets(ctx, focuses, outputs);
-  const progressSummary = selectProgressSummary(ctx, outputs);
+  const { findings: reviewFindings } = selectReviewTickets(ctx, focuses);
+  const { completed: completedTicketIds, unfinished: unfinishedTickets } = selectAllTickets(ctx, focuses);
+  const progressSummary = selectProgressSummary(ctx);
 
   const { prefix = "📝", mainBranch = "main", emojiPrefixes = "✨ feat, 🐛 fix, ♻️ refactor, 📝 docs, 🧪 test" } = commitConfig;
 
@@ -197,8 +197,8 @@ export function SuperRalph({
   const ciCommands = postLandChecks.length > 0 ? postLandChecks : Object.values(testCmds);
 
   const ticketState = unfinishedTickets.map((ticket) => {
-    const latestLand = selectLand(ctx, ticket.id, outputs);
-    const latestReport = selectTicketReport(ctx, ticket.id, outputs);
+    const latestLand = selectLand(ctx, ticket.id);
+    const latestReport = selectTicketReport(ctx, ticket.id);
     const landed = latestLand?.merged === true;
     const evictedPendingRework = latestLand?.evicted === true && latestLand?.merged !== true;
     const reportComplete = latestReport?.status === "complete" && !evictedPendingRework;
@@ -229,14 +229,16 @@ export function SuperRalph({
     <Ralph until={false} maxIterations={Infinity} onMaxReached="return-last">
       <Parallel maxConcurrency={maxConcurrency}>
         {!skipPhases.has("PROGRESS") && (customUpdateProgress || (
-          <Task id="update-progress" output={outputs.progress} agent={reportingAgent} retries={taskRetries}>
-            <UpdateProgressPrompt
-              projectName={projectName}
-              progressFile={progressFile}
-              commitMessage={`${prefix} docs: update progress`}
-              completedTickets={completedTicketIds}
-            />
-          </Task>
+          <Worktree id="wt-update-progress" path="/tmp/workflow-wt-update-progress">
+            <Task id="update-progress" output={outputs.progress} agent={reportingAgent} retries={taskRetries}>
+              <UpdateProgressPrompt
+                projectName={projectName}
+                progressFile={progressFile}
+                commitMessage={`${prefix} docs: update progress`}
+                completedTickets={completedTicketIds}
+              />
+            </Task>
+          </Worktree>
         ))}
 
         {!skipPhases.has("CODEBASE_REVIEW") && (customCategoryReview ? (
@@ -244,25 +246,29 @@ export function SuperRalph({
         ) : (
           <Parallel maxConcurrency={maxConcurrency}>
             {focuses.map(({ id, name }) => (
-              <Task key={id} id={`codebase-review:${id}`} output={outputs.category_review} agent={reviewingAgent} retries={taskRetries}>
-                <CategoryReviewPrompt categoryId={id} categoryName={name} relevantDirs={focusDirs[id] ?? null} />
-              </Task>
+              <Worktree key={id} id={`wt-codebase-review-${id}`} path={`/tmp/workflow-wt-codebase-review-${id}`}>
+                <Task id={`codebase-review:${id}`} output={outputs.category_review} agent={reviewingAgent} retries={taskRetries}>
+                  <CategoryReviewPrompt categoryId={id} categoryName={name} relevantDirs={focusDirs[id] ?? null} />
+                </Task>
+              </Worktree>
             ))}
           </Parallel>
         ))}
 
         {!skipPhases.has("DISCOVER") && (customDiscover || (
-          <Task id="discover" output={outputs.discover} agent={planningAgent} retries={taskRetries}>
-            <DiscoverPrompt
-              projectName={projectName}
-              specsPath={specsPath}
-              referenceFiles={referenceFiles}
-              categories={focuses}
-              completedTicketIds={completedTicketIds}
-              previousProgress={progressSummary}
-              reviewFindings={reviewFindings}
-            />
-          </Task>
+          <Worktree id="wt-discover" path="/tmp/workflow-wt-discover">
+            <Task id="discover" output={outputs.discover} agent={planningAgent} retries={taskRetries}>
+              <DiscoverPrompt
+                projectName={projectName}
+                specsPath={specsPath}
+                referenceFiles={referenceFiles}
+                categories={focuses}
+                completedTicketIds={completedTicketIds}
+                previousProgress={progressSummary}
+                reviewFindings={reviewFindings}
+              />
+            </Task>
+          </Worktree>
         ))}
 
         {!skipPhases.has("INTEGRATION_TEST") && (customIntegrationTest || (
@@ -270,16 +276,18 @@ export function SuperRalph({
             {focuses.map(({ id, name }) => {
               const suiteInfo = focusTestSuites[id] ?? { suites: [], setupHints: [], testDirs: [] };
               return (
-                <Task key={id} id={`integration-test:${id}`} output={outputs.integration_test} agent={testingAgent} retries={taskRetries}>
-                  <IntegrationTestPrompt
-                    categoryId={id}
-                    categoryName={name}
-                    suites={suiteInfo.suites}
-                    setupHints={suiteInfo.setupHints}
-                    testDirs={suiteInfo.testDirs}
-                    findingsFile={findingsFile}
-                  />
-                </Task>
+                <Worktree key={id} id={`wt-integration-test-${id}`} path={`/tmp/workflow-wt-integration-test-${id}`}>
+                  <Task id={`integration-test:${id}`} output={outputs.integration_test} agent={testingAgent} retries={taskRetries}>
+                    <IntegrationTestPrompt
+                      categoryId={id}
+                      categoryName={name}
+                      suites={suiteInfo.suites}
+                      setupHints={suiteInfo.setupHints}
+                      testDirs={suiteInfo.testDirs}
+                      findingsFile={findingsFile}
+                    />
+                  </Task>
+                </Worktree>
               );
             })}
           </Parallel>
@@ -287,8 +295,8 @@ export function SuperRalph({
 
         {ticketState.map((ticketRuntime, ticketIndex) => {
           const ticket = ticketRuntime.ticket;
-          const researchData = selectResearch(ctx, ticket.id, outputs);
-          const planData = selectPlan(ctx, ticket.id, outputs);
+          const researchData = selectResearch(ctx, ticket.id);
+          const planData = selectPlan(ctx, ticket.id);
           const contextFilePath = researchData?.contextFilePath ?? `docs/context/${ticket.id}.md`;
           const planFilePath = planData?.planFilePath ?? `docs/plans/${ticket.id}.md`;
           const landed = ticketRuntime.landed;
@@ -316,7 +324,7 @@ export function SuperRalph({
           return (
             <Sequence key={ticket.id} skipIf={landed}>
               {/* Phase 1: Development (in worktree, on branch) */}
-              <Worktree id={`wt-${ticket.id}`} path={`/tmp/workflow-wt-${ticket.id}`} branch={`ticket/${ticket.id}`}>
+              <Worktree id={`wt-${ticket.id}`} path={`/tmp/workflow-wt-${ticket.id}`}>
                 <Sequence skipIf={reportComplete}>
                   {customResearch || (
                     <Task id={`${ticket.id}:research`} output={outputs.research} agent={ticketPlanningAgent} retries={taskRetries}>
@@ -356,10 +364,10 @@ export function SuperRalph({
                   {/* ValidationLoop */}
                   <Sequence>
                     {(() => {
-                      const latestImplement = selectImplement(ctx, ticket.id, outputs);
-                      const latestTest = selectTestResults(ctx, ticket.id, outputs);
-                      const latestSpecReview = selectSpecReview(ctx, ticket.id, outputs);
-                      const { worstSeverity: worstCodeSeverity, mergedIssues: mergedCodeIssues, mergedFeedback: mergedCodeFeedback } = selectCodeReviews(ctx, ticket.id, outputs);
+                      const latestImplement = selectImplement(ctx, ticket.id);
+                      const latestTest = selectTestResults(ctx, ticket.id);
+                      const latestSpecReview = selectSpecReview(ctx, ticket.id);
+                      const { worstSeverity: worstCodeSeverity, mergedIssues: mergedCodeIssues, mergedFeedback: mergedCodeFeedback } = selectCodeReviews(ctx, ticket.id);
 
                       const specApproved = latestSpecReview?.severity === "none";
                       const codeApproved = worstCodeSeverity === "none";
@@ -502,14 +510,14 @@ export function SuperRalph({
                         ticketTitle={ticket.title}
                         ticketCategory={ticket.category}
                         acceptanceCriteria={ticket.acceptanceCriteria ?? []}
-                        specSeverity={selectSpecReview(ctx, ticket.id, outputs)?.severity ?? "none"}
-                        codeSeverity={selectCodeReviews(ctx, ticket.id, outputs).worstSeverity}
+                        specSeverity={selectSpecReview(ctx, ticket.id)?.severity ?? "none"}
+                        codeSeverity={selectCodeReviews(ctx, ticket.id).worstSeverity}
                         allIssuesResolved={(ctx.outputMaybe("review_fix", { nodeId: `${ticket.id}:review-fix` }) as any)?.allIssuesResolved ?? true}
                         reviewRounds={1}
-                        goTests={selectTestResults(ctx, ticket.id, outputs)?.goTestsPassed ? "PASS" : "FAIL"}
-                        rustTests={selectTestResults(ctx, ticket.id, outputs)?.rustTestsPassed ? "PASS" : "FAIL"}
-                        e2eTests={selectTestResults(ctx, ticket.id, outputs)?.e2eTestsPassed ? "PASS" : "FAIL"}
-                        sqlcGen={selectTestResults(ctx, ticket.id, outputs)?.sqlcGenPassed ? "PASS" : "FAIL"}
+                        goTests={selectTestResults(ctx, ticket.id)?.goTestsPassed ? "PASS" : "FAIL"}
+                        rustTests={selectTestResults(ctx, ticket.id)?.rustTestsPassed ? "PASS" : "FAIL"}
+                        e2eTests={selectTestResults(ctx, ticket.id)?.e2eTestsPassed ? "PASS" : "FAIL"}
+                        sqlcGen={selectTestResults(ctx, ticket.id)?.sqlcGenPassed ? "PASS" : "FAIL"}
                       />
                     </Task>
                   )}

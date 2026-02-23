@@ -41,13 +41,12 @@ If the file doesn't exist yet, you'll create it.
    - If tests are **RUNNING**: check pass/fail counts, investigate failures
 3. Run the relevant test commands
 4. Update `{props.findingsFile}` with your findings for this category
-5. Commit and push:
+5. Commit your changes in this worktree:
 ```
 jj describe -m "{props.commitMessage || `📊 test(${props.categoryId}): update integration test findings`}"
-jj new
-jj bookmark set main -r @-
-jj git push --bookmark main
 ```
+
+Do NOT run `jj bookmark set main` or `jj git push` — landing is handled separately.
 
 ## CRITICAL: Document Blockers
 

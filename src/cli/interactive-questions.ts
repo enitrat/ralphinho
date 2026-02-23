@@ -1,39 +1,54 @@
 #!/usr/bin/env bun
 /**
- * Interactive Questions UI - External Process
+ * Interactive Questions UI - Tabbed Navigation Edition
  *
- * This script is launched by the ClarifyingQuestions Smithers component
- * to collect user answers via a keyboard-navigable interface.
- *
- * Usage:
- *   bun interactive-questions.ts <questions-file.json> <answers-output.json>
- *
- * Input format (questions-file.json):
- *   { "questions": [ { "question": "...", "choices": [...] } ] }
- *
- * Output format (answers-output.json):
- *   { "answers": [ { "question": "...", "answer": "...", "isCustom": false } ] }
+ * Shows visual tabs at the top for all questions with ←/→ navigation
  */
 
 import { readFile, writeFile } from "node:fs/promises";
 import type { ClarificationQuestion, ClarificationAnswer } from "./clarifications.ts";
 
-/**
- * Interactive keyboard-navigable multiple choice selector.
- * Users can use arrow keys to navigate and Enter to select.
- */
+type AnswerState = {
+  index: number;
+  isCustom: boolean;
+  value: string;
+};
+
+function renderTabs(currentIdx: number, total: number, answered: boolean[]) {
+  const tabs: string[] = [];
+  for (let i = 0; i < total; i++) {
+    const num = i + 1;
+    const isCurrent = i === currentIdx;
+    const isAnswered = answered[i];
+    
+    if (isCurrent) {
+      tabs.push(`\x1b[1m\x1b[36m[${num}]\x1b[0m`); // Bold cyan for current
+    } else if (isAnswered) {
+      tabs.push(`\x1b[32m[${num}]\x1b[0m`); // Green for answered
+    } else {
+      tabs.push(`\x1b[90m[${num}]\x1b[0m`); // Gray for unanswered
+    }
+  }
+  return tabs.join(" ");
+}
+
 async function promptMultipleChoice(params: {
   question: string;
   choices: Array<{ label: string; description: string }>;
+  questionIndex: number;
+  totalQuestions: number;
+  answered: boolean[];
   allowCustom?: boolean;
-}): Promise<{ index: number; isCustom: boolean; customValue?: string }> {
+  previousAnswer?: AnswerState;
+}): Promise<{ index: number; isCustom: boolean; customValue?: string; navigateTo?: number }> {
   return await new Promise((resolve) => {
-    let selectedIndex = 0;
+    let selectedIndex = params.previousAnswer?.index ?? 0;
     let customInputMode = false;
-    let customInputValue = "";
+    let customInputValue = params.previousAnswer?.isCustom ? params.previousAnswer.value : "";
     const totalChoices = params.choices.length + (params.allowCustom ? 1 : 0);
+    
+    if (selectedIndex >= totalChoices) selectedIndex = 0;
 
-    // Enable raw mode to capture individual keypresses
     if (process.stdin.isTTY) {
       process.stdin.setRawMode(true);
     }
@@ -41,17 +56,24 @@ async function promptMultipleChoice(params: {
     process.stdin.setEncoding("utf8");
 
     const render = () => {
-      // Clear screen and move cursor to top
       process.stdout.write("\x1B[2J\x1B[H");
-
+      
+      // Tab bar at top
+      console.log(renderTabs(params.questionIndex, params.totalQuestions, params.answered));
+      console.log("");
+      
+      // Progress
+      console.log(`\x1b[1mQuestion ${params.questionIndex + 1} of ${params.totalQuestions}\x1b[0m\n`);
+      
+      // Question
       console.log(`${params.question}\n`);
 
+      // Choices
       for (let i = 0; i < params.choices.length; i++) {
         const choice = params.choices[i];
         const prefix = i === selectedIndex && !customInputMode ? "→ " : "  ";
         const highlight = i === selectedIndex && !customInputMode ? "\x1b[1m\x1b[36m" : "";
         const reset = i === selectedIndex && !customInputMode ? "\x1b[0m" : "";
-
         console.log(`${highlight}${prefix}${i + 1}. ${choice.label}${reset}`);
         console.log(`     ${choice.description}\n`);
       }
@@ -64,22 +86,28 @@ async function promptMultipleChoice(params: {
         const reset = isCustomSelected && !customInputMode ? "\x1b[0m" : "";
 
         console.log(`${highlight}${prefix}${customIndex + 1}. Custom Answer${reset}`);
-        console.log(`     Write your own answer to this question\n`);
+        console.log(`     Write your own answer\n`);
 
-        // Show input box when custom is selected
         if (isCustomSelected || customInputMode) {
-          console.log("\x1b[1m\x1b[33m✎ Custom Answer:\x1b[0m");
+          console.log("\x1b[1m\x1b[33m✎ Your answer:\x1b[0m");
           console.log(`┌${"─".repeat(78)}┐`);
-          console.log(`│ \x1b[36m${customInputValue}\x1b[7m \x1b[0m${" ".repeat(Math.max(0, 76 - customInputValue.length))}│`);
+          const displayValue = customInputValue.slice(0, 76);
+          console.log(`│ \x1b[36m${displayValue}\x1b[7m \x1b[0m${" ".repeat(Math.max(0, 76 - displayValue.length))}│`);
           console.log(`└${"─".repeat(78)}┘`);
         }
       }
 
-      if (customInputMode || (params.allowCustom && selectedIndex === params.choices.length)) {
-        console.log("\n\x1b[90mType your answer, Enter to confirm, ↑/↓ to navigate away\x1b[0m");
-      } else {
-        console.log("\n\x1b[90mUse ↑/↓ arrows to navigate, Enter to select, or type a number (1-" + totalChoices + ")\x1b[0m");
-      }
+      // Navigation hints
+      console.log("\n\x1b[90m" + "─".repeat(80) + "\x1b[0m");
+      const hints = [
+        "↑/↓: Navigate choices",
+        "Enter: Confirm",
+        "←/→ or ,/.: Switch question",
+        params.questionIndex === params.totalQuestions - 1 ? "F: Finish" : null,
+        "Ctrl+C: Cancel",
+        "1-" + totalChoices + ": Quick select",
+      ].filter(Boolean);
+      console.log("\x1b[90m" + hints.join(" | ") + "\x1b[0m");
     };
 
     render();
@@ -87,65 +115,73 @@ async function promptMultipleChoice(params: {
     const onKeypress = async (key: string) => {
       const isOnCustomOption = params.allowCustom && selectedIndex === params.choices.length;
 
-      // Handle navigation
       if (key === "\u001b[A") {
-        // Up arrow
         selectedIndex = (selectedIndex - 1 + totalChoices) % totalChoices;
-        // Clear custom input when navigating away
         if (!isOnCustomOption) {
           customInputValue = "";
           customInputMode = false;
         }
         render();
       } else if (key === "\u001b[B") {
-        // Down arrow
         selectedIndex = (selectedIndex + 1) % totalChoices;
-        // Clear custom input when navigating away
         if (!isOnCustomOption) {
           customInputValue = "";
           customInputMode = false;
         }
         render();
+      } else if (key === "\u001b[D" || key === "," || key === "\u001b[C" || key === ".") {
+        // Left/right arrows or comma/period to switch questions
+        const direction = (key === "\u001b[D" || key === ",") ? -1 : 1;
+        const newIndex = params.questionIndex + direction;
+        if (newIndex >= 0 && newIndex < params.totalQuestions) {
+          cleanup();
+          resolve({ 
+            index: selectedIndex, 
+            isCustom: customInputMode || (isOnCustomOption && customInputValue.length > 0), 
+            customValue: customInputValue,
+            navigateTo: newIndex 
+          });
+        }
+      } else if (key === "f" || key === "F") {
+        if (params.questionIndex === params.totalQuestions - 1) {
+          cleanup();
+          resolve({ 
+            index: selectedIndex, 
+            isCustom: customInputMode || (isOnCustomOption && customInputValue.length > 0), 
+            customValue: customInputValue 
+          });
+        }
       } else if (key === "\r" || key === "\n") {
-        // Enter key
         if (isOnCustomOption) {
-          // Confirm custom input
           if (customInputValue.trim()) {
             cleanup();
             resolve({ index: params.choices.length, isCustom: true, customValue: customInputValue.trim() });
           } else {
-            // Empty input - enable typing mode
             customInputMode = true;
             render();
           }
         } else {
-          // Regular selection
           cleanup();
           resolve({ index: selectedIndex, isCustom: false });
         }
       } else if (key === "\u0003") {
-        // Ctrl+C
         cleanup();
-        console.log("\n\nInterrupted by user");
+        console.log("\n\nCancelled");
         process.exit(1);
       } else if (key === "\u007f" || key === "\b") {
-        // Backspace - only when on custom option
         if (isOnCustomOption && customInputValue.length > 0) {
           customInputValue = customInputValue.slice(0, -1);
           customInputMode = true;
           render();
         }
       } else if (key.length === 1 && key >= " " && key <= "~") {
-        // Printable character
         const num = parseInt(key, 10);
         if (!isNaN(num) && num >= 1 && num <= totalChoices && !customInputMode) {
-          // Number key for quick selection (only if not typing)
           selectedIndex = num - 1;
           customInputValue = "";
           customInputMode = false;
           render();
         } else if (isOnCustomOption) {
-          // Type into custom input when on custom option
           customInputValue += key;
           customInputMode = true;
           render();
@@ -175,7 +211,6 @@ async function main() {
 
   const [questionsPath, answersPath] = args;
 
-  // Read questions
   const questionsJson = await readFile(questionsPath, "utf8");
   const questionsData = JSON.parse(questionsJson);
   const questions: ClarificationQuestion[] = questionsData.questions;
@@ -186,49 +221,77 @@ async function main() {
   }
 
   const answers: ClarificationAnswer[] = [];
+  const answerStates: (AnswerState | undefined)[] = new Array(questions.length).fill(undefined);
+  const answered: boolean[] = new Array(questions.length).fill(false);
+  
+  let currentQuestionIndex = 0;
 
-  console.log("\n" + "=".repeat(80));
-  console.log("SUPER RALPH CLARIFYING QUESTIONS");
-  console.log("=".repeat(80));
-  console.log("\nPlease answer the following questions to customize your workflow.");
-  console.log("Use arrow keys to navigate, Enter to select, or type a number.\n");
+  while (currentQuestionIndex < questions.length) {
+    const q = questions[currentQuestionIndex];
+    const previousState = answerStates[currentQuestionIndex];
 
-  for (let i = 0; i < questions.length; i++) {
-    const q = questions[i];
-
-    // Use keyboard-navigable prompt
     const result = await promptMultipleChoice({
-      question: `[Question ${i + 1}/${questions.length}] ${q.question}`,
-      choices: q.choices,
-      allowCustom: true,
-    });
-
-    let answer = "";
-    let isCustom = result.isCustom;
-
-    if (result.isCustom && result.customValue) {
-      answer = result.customValue;
-    } else {
-      const selected = q.choices[result.index];
-      answer = `${selected.label}: ${selected.description}`;
-    }
-
-    // Clear screen and show confirmation
-    process.stdout.write("\x1B[2J\x1B[H");
-    console.log(`\n[Question ${i + 1}/${questions.length}] ${q.question}`);
-    console.log(`✓ Selected: ${isCustom ? "Custom - " + answer : q.choices[result.index].label}\n`);
-
-    // Brief pause to show selection
-    await new Promise((resolve) => setTimeout(resolve, 800));
-
-    answers.push({
       question: q.question,
-      answer,
-      isCustom,
+      choices: q.choices,
+      questionIndex: currentQuestionIndex,
+      totalQuestions: questions.length,
+      answered,
+      allowCustom: true,
+      previousAnswer: previousState,
     });
+
+    // Save answer
+    if (result.isCustom && result.customValue) {
+      answerStates[currentQuestionIndex] = {
+        index: result.index,
+        isCustom: true,
+        value: result.customValue,
+      };
+    } else {
+      answerStates[currentQuestionIndex] = {
+        index: result.index,
+        isCustom: false,
+        value: q.choices[result.index].label,
+      };
+    }
+    answered[currentQuestionIndex] = true;
+
+    // Navigate
+    if (result.navigateTo !== undefined) {
+      currentQuestionIndex = result.navigateTo;
+    } else {
+      currentQuestionIndex++;
+    }
   }
 
-  // Clear screen and show summary
+  // Build final answers
+  for (let i = 0; i < questions.length; i++) {
+    const state = answerStates[i];
+    const q = questions[i];
+    
+    if (!state) {
+      answers.push({
+        question: q.question,
+        answer: `${q.choices[0].label}: ${q.choices[0].description}`,
+        isCustom: false,
+      });
+    } else if (state.isCustom) {
+      answers.push({
+        question: q.question,
+        answer: state.value,
+        isCustom: true,
+      });
+    } else {
+      const choice = q.choices[state.index];
+      answers.push({
+        question: q.question,
+        answer: `${choice.label}: ${choice.description}`,
+        isCustom: false,
+      });
+    }
+  }
+
+  // Summary
   process.stdout.write("\x1B[2J\x1B[H");
   console.log("\n" + "=".repeat(80));
   console.log("CLARIFICATION COMPLETE");
@@ -242,9 +305,7 @@ async function main() {
   console.log(summary);
   console.log("");
 
-  // Write answers to output file
   await writeFile(answersPath, JSON.stringify({ answers }, null, 2), "utf8");
-
   console.log(`\nAnswers saved to: ${answersPath}\n`);
   process.exit(0);
 }
