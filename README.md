@@ -215,6 +215,89 @@ Or run additional logic in parallel:
 
 These steps default to <SuperRalph.Component when not provided.
 
+## Differences with Origin
+
+`super-ralph-lite` is a fork of [`super-ralph`](https://github.com/zama/super-ralph) that introduces **complexity-aware pipelines** to reduce wasted agent invocations. The changes are motivated by production data showing ~80% waste from running a fixed 10-stage pipeline on trivial tickets.
+
+All changes live in the opinionated layer — Smithers primitives are untouched.
+
+### 1. Complexity Tiers
+
+Upstream runs every ticket through 10 stages. We introduce four tiers that control which stages run:
+
+| Tier | Stages | Use Case |
+|------|--------|----------|
+| **trivial** | implement → build-verify | Comment cleanup, JSDoc, config tweaks, dead code removal |
+| **small** | implement → test → build-verify | Single-file changes with testable behavior |
+| **medium** | research → plan → implement → test → build-verify → code-review | Multi-file features, API changes, new integrations |
+| **large** | research → plan → implement → test → build-verify → spec-review → code-review → review-fix → report | Architectural changes, security-sensitive work |
+
+A trivial ticket uses 2 agent calls instead of 10. Default tier is `medium` for backward compatibility.
+
+**Files:** `src/schemas.ts` (tier definitions), `src/selectors.ts` (`isTicketTierComplete`)
+
+### 2. Deduplication at Discovery
+
+The `Discover` prompt now receives the list of existing in-progress tickets (with their tier and current pipeline stage). New deduplication rules prevent:
+
+- Tickets that overlap with existing or completed tickets
+- Tickets that could be folded into an existing ticket's scope (without exploding it)
+- Re-discovery of already-addressed work
+
+**File:** `src/prompts/Discover.mdx`
+
+### 3. Trivial Work Batching
+
+Related trivial changes are grouped into a single ticket per category instead of creating one ticket per micro-change. Example: instead of three separate tickets for "remove stale comment", "add JSDoc", and "extract constant", one ticket: "Housekeeping: cleanup query-patterns module".
+
+**File:** `src/prompts/Discover.mdx`
+
+### 4. Tier-Aware Scheduling
+
+The scheduler now sees each ticket's tier, current pipeline stage, and remaining stages. New scheduling rules:
+
+- **Rule 3 rewritten:** Schedule the correct next stage for the ticket's tier. Trivial tickets start at `implement` (skip research/plan). Large tickets start at `research`.
+- **Rule 9 (new):** Only schedule `review-fix` when a preceding review returned issues. If all reviews passed clean, skip it.
+- **Rule 10 (new):** When a ticket's tier is complete (final stage for its tier has output), stop scheduling pipeline stages — the ticket is ready for the merge queue.
+
+**File:** `src/components/TicketScheduler.tsx`
+
+### 5. Tier-Based Completion
+
+Upstream considers a ticket "complete" only when the `report` stage finishes. We replace this with `isTicketTierComplete()` which checks whether the **final stage of the ticket's tier** has output:
+
+- Trivial ticket → complete after `build-verify`
+- Small ticket → complete after `build-verify`
+- Medium ticket → complete after `code-review`
+- Large ticket → complete after `report`
+
+This drives the merge queue: tickets enter the queue as soon as their tier is done, not after a full 10-stage pipeline.
+
+**Files:** `src/selectors.ts`, `src/components/SuperRalph.tsx`
+
+### 6. Conflict-Aware Merge Queue
+
+The merge queue now receives file-touch metadata (`filesModified`, `filesCreated`) from each ticket's implementation output. A new `buildFileOverlapAnalysis()` function detects file overlaps between queued tickets and instructs the merge coordinator to:
+
+- Land non-overlapping tickets in parallel (speculative)
+- Land overlapping tickets sequentially, rebasing each onto the updated main before the next
+
+This prevents the systematic rebase conflicts that caused 0 landings in the upstream production run.
+
+**File:** `src/components/AgenticMergeQueue.tsx`
+
+### 7. Summary of File Changes
+
+| File | What Changed |
+|------|-------------|
+| `src/schemas.ts` | Added `COMPLEXITY_TIERS`, `ComplexityTier` type, tier helpers, `complexityTier` on discover schema |
+| `src/selectors.ts` | Added `complexityTier` to `Ticket`, `normalizeComplexityTier()`, `isTicketTierComplete()` |
+| `src/prompts/Discover.mdx` | Tier assignment instructions, dedup rules, batching rules, existing tickets context |
+| `src/components/TicketScheduler.tsx` | Tier-aware prompt, "Next Stages" / "Tier Done" columns, rules 9+10 |
+| `src/components/SuperRalph.tsx` | `tierComplete` replaces `reportComplete`, file-touch metadata to merge queue |
+| `src/components/AgenticMergeQueue.tsx` | File overlap analysis, conflict-aware landing instructions |
+| `src/index.ts` | Exports for new types and functions |
+
 ## License
 
 MIT
