@@ -265,7 +265,7 @@ export function Monitor({
         }
 
         // Input handler
-        renderer.addInputHandler((seq: string) => {
+        renderer.prependInputHandler((seq: string) => {
           if (!isRunning) return false;
 
           if (seq === "q" || seq === "Q") {
