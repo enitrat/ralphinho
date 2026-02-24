@@ -30,12 +30,7 @@ export type SuperRalphProps = {
   maxConcurrency: number;
   taskRetries?: number;
 
-  agents: Record<string, {
-    agent: any;
-    description: string;
-    isScheduler?: boolean;
-    isMergeQueue?: boolean;
-  }>;
+  agents: Record<string, AgentLike>;
 
   dbPath?: string;
   progressFile?: string;
@@ -52,17 +47,17 @@ export type SuperRalphProps = {
   children?: ReactNode;
 };
 
-type AgentPool = Record<string, { agent: any; description: string; isScheduler?: boolean; isMergeQueue?: boolean }>;
+type AgentPool = Record<string, AgentLike>;
 
 function resolveAgent(pool: AgentPool, agentId: string | undefined): AgentLike {
-  if (agentId && pool[agentId]) return pool[agentId].agent;
-  return Object.values(pool)[0]?.agent;
+  if (agentId && pool[agentId]) return pool[agentId];
+  return Object.values(pool)[0];
 }
 
 function buildAgentPoolDescription(pool: AgentPool): string {
   const entries = Object.entries(pool);
   if (entries.length === 0) return "(no agents registered)";
-  const rows = entries.map(([id, { description }]) => `| ${id} | ${description} |`);
+  const rows = entries.map(([id, agent]) => `| ${id} | ${(agent as any).model ?? id} |`);
   return ["| Agent ID | Description |", "|----------|-------------|", ...rows].join("\n");
 }
 
@@ -93,8 +88,8 @@ export function SuperRalph({
   // Resolve scheduler + merge queue agents from pool flags
   const agentIds = Object.keys(agentPool);
   const defaultAgentId = agentIds[0];
-  const schedulerAgentId = Object.entries(agentPool).find(([, e]) => e.isScheduler)?.[0] ?? defaultAgentId;
-  const mergeQueueAgentId = Object.entries(agentPool).find(([, e]) => e.isMergeQueue)?.[0] ?? schedulerAgentId;
+  const schedulerAgentId = defaultAgentId;
+  const mergeQueueAgentId = defaultAgentId;
   const schedulerAgent = resolveAgent(agentPool, schedulerAgentId);
   const agentPoolContext = buildAgentPoolDescription(agentPool);
   const ciCommands = postLandChecks.length > 0 ? postLandChecks : Object.values(testCmds);
