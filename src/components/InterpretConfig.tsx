@@ -139,8 +139,7 @@ export function InterpretConfig({
     <Task
       id="interpret-config"
       output={interpretConfigOutputSchema}
-      agent={primaryAgent}
-      fallbackAgent={fallbackAgent}
+      agent={fallbackAgent ? [primaryAgent, fallbackAgent] : primaryAgent}
     >
       {interpretPrompt}
     </Task>

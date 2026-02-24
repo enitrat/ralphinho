@@ -97,6 +97,7 @@ export type MergeQueueRequest = {
   ticket: MergeQueueTicket;
   queueSnapshot: MergeQueueTicket[];
   readyForQueue: boolean;
+  postRebaseReviewAgent?: AgentLike;
 };
 
 const REQUEST_MARKER = "SUPER_RALPH_SPECULATIVE_MERGE_QUEUE_REQUEST";
@@ -320,6 +321,7 @@ const priorityRank: Record<MergeQueueTicket["priority"], number> = {
 type EvictReason =
   | "rebase_conflict"
   | "ci_failed"
+  | "review_failed"
   | "push_failed"
   | "fast_forward_failed"
   | "fetch_failed";
@@ -331,6 +333,7 @@ export class SpeculativeMergeQueueCoordinator {
   private orderingStrategy: MergeQueueOrderingStrategy = "report-complete-fifo";
   private maxSpeculativeDepth = 1;
   private postLandChecks: string[] = [];
+  private postRebaseReviewAgent?: AgentLike;
 
   constructor(
     private repoRoot: string,
@@ -342,6 +345,9 @@ export class SpeculativeMergeQueueCoordinator {
     this.orderingStrategy = request.orderingStrategy;
     this.maxSpeculativeDepth = Math.max(1, Math.floor(request.maxSpeculativeDepth || 1));
     this.postLandChecks = request.postLandChecks ?? [];
+    if (request.postRebaseReviewAgent) {
+      this.postRebaseReviewAgent = request.postRebaseReviewAgent;
+    }
 
     this.ingestSnapshot(request.queueSnapshot);
     const requestIndex = request.queueSnapshot.findIndex(
@@ -506,6 +512,94 @@ export class SpeculativeMergeQueueCoordinator {
           rebaseFailure.details,
         );
         continue;
+      }
+
+      // Post-rebase review gate: LLM inspects rebased state for semantic issues
+      if (this.postRebaseReviewAgent) {
+        const reviewResults = await Promise.all(
+          window.map(async (entry) => {
+            try {
+              const [logResult, diffResult, mainChangesResult] = await Promise.all([
+                runJjCommand(this.repoRoot, [
+                  "log", "-r", `main..${bookmarkRev(entry.ticket.ticketId)}`, "--reversed",
+                ]),
+                runJjCommand(this.repoRoot, [
+                  "diff", "-r", `roots(main..${bookmarkRev(entry.ticket.ticketId)})`, "--stat",
+                ]),
+                runJjCommand(this.repoRoot, [
+                  "log", "-r", `${bookmarkRev(entry.ticket.ticketId)}..main`, "--reversed",
+                ]),
+              ]);
+
+              const prompt = [
+                "POST-REBASE REVIEW",
+                "",
+                `Ticket: ${entry.ticket.ticketId}`,
+                `Title: ${entry.ticket.ticketTitle}`,
+                `Category: ${entry.ticket.ticketCategory}`,
+                "",
+                "This ticket's branch was just rebased onto the latest main. Review the rebased state for semantic issues",
+                "that a clean file-level merge might miss (e.g. conflicting logic, broken imports, duplicated functionality,",
+                "incompatible API changes).",
+                "",
+                "## Rebased commits",
+                "```",
+                logResult.code === 0 ? logResult.stdout.trim() : "(could not retrieve log)",
+                "```",
+                "",
+                "## Diff summary",
+                "```",
+                diffResult.code === 0 ? diffResult.stdout.trim() : "(could not retrieve diff)",
+                "```",
+                "",
+                "## Changes landed on main since branch point",
+                "```",
+                mainChangesResult.code === 0 ? mainChangesResult.stdout.trim() : "(none or could not retrieve)",
+                "```",
+                "",
+                'Respond with JSON: { "approved": true } or { "approved": false, "reason": "..." }',
+              ].join("\n");
+
+              const result = await this.postRebaseReviewAgent!.generate({ prompt });
+              const output = typeof result.output === "string" ? result.output : JSON.stringify(result.output);
+
+              // Try to parse structured output
+              const jsonMatch = output.match(/\{[^}]*"approved"\s*:\s*(true|false)[^}]*\}/);
+              if (jsonMatch) {
+                const parsed = JSON.parse(jsonMatch[0]);
+                if (parsed.approved === false) {
+                  return { approved: false as const, reason: parsed.reason ?? "Review agent rejected post-rebase state" };
+                }
+              } else if (/\brejected?\b|\bnot\s+approved?\b|\bfailed?\b/i.test(output) && !/\bapproved\b/i.test(output)) {
+                return { approved: false as const, reason: `Review agent indicated rejection: ${truncate(output, 500)}` };
+              }
+
+              return { approved: true as const };
+            } catch {
+              // Default to approved on error — don't block the queue on agent failures
+              return { approved: true as const };
+            }
+          }),
+        );
+
+        const reviewFailIdx = reviewResults.findIndex((r) => !r.approved);
+        if (reviewFailIdx !== -1) {
+          const failedEntry = window[reviewFailIdx]!;
+          const failedReview = reviewResults[reviewFailIdx]!;
+          if (reviewFailIdx > 0) {
+            // Land entries before the failure
+            await this.landPrefix(window.slice(0, reviewFailIdx));
+          }
+          for (const follower of window.slice(reviewFailIdx + 1)) {
+            follower.invalidatedCount += 1;
+          }
+          await this.evictEntry(
+            failedEntry,
+            "review_failed",
+            !failedReview.approved ? failedReview.reason : "Post-rebase review failed",
+          );
+          continue;
+        }
       }
 
       const ciResults = await Promise.all(

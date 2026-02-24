@@ -232,3 +232,18 @@ export function selectInterpretConfig(ctx: SmithersCtx<RalphOutputs>) {
 export function selectMonitor(ctx: SmithersCtx<RalphOutputs>) {
   return ctx.outputMaybe("monitor", { nodeId: "monitor" });
 }
+
+export function selectTicketPipelineStage(ctx: SmithersCtx<RalphOutputs>, ticketId: string): string {
+  const land = ctx.latest?.("land", `${ticketId}:land`);
+  if ((land as any)?.merged) return "landed";
+  if (ctx.outputMaybe("report", { nodeId: `${ticketId}:report` })) return "report";
+  if (ctx.outputMaybe("review_fix", { nodeId: `${ticketId}:review-fix` })) return "review_fix";
+  if (ctx.outputMaybe("code_review", { nodeId: `${ticketId}:code-review` })) return "code_review";
+  if (ctx.outputMaybe("spec_review", { nodeId: `${ticketId}:spec-review` })) return "spec_review";
+  if (ctx.outputMaybe("build_verify", { nodeId: `${ticketId}:build-verify` })) return "build_verify";
+  if (ctx.outputMaybe("test_results", { nodeId: `${ticketId}:test` })) return "test";
+  if (ctx.outputMaybe("implement", { nodeId: `${ticketId}:implement` })) return "implement";
+  if (ctx.outputMaybe("plan", { nodeId: `${ticketId}:plan` })) return "plan";
+  if (ctx.outputMaybe("research", { nodeId: `${ticketId}:research` })) return "research";
+  return "not_started";
+}

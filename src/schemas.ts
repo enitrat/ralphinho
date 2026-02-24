@@ -2,6 +2,8 @@ import { z } from "zod";
 import { clarifyingQuestionsOutputSchema, generateQuestionsOutputSchema } from "./components/ClarifyingQuestions";
 import { interpretConfigOutputSchema } from "./components/InterpretConfig";
 import { monitorOutputSchema } from "./components/Monitor";
+import { ticketScheduleSchema } from "./components/TicketScheduler";
+import { mergeQueueResultSchema } from "./components/AgenticMergeQueue";
 
 /**
  * Standard output schemas for Ralph workflow pattern.
@@ -14,9 +16,9 @@ const discoverTicketSchema = z.object({
   description: z.string(),
   category: z.string(),
   priority: z.enum(["critical", "high", "medium", "low"]),
-  acceptanceCriteria: z.array(z.string()).nullable().optional(),
-  relevantFiles: z.array(z.string()).nullable().optional(),
-  referenceFiles: z.array(z.string()).nullable().optional(),
+  acceptanceCriteria: z.array(z.string()).nullable(),
+  relevantFiles: z.array(z.string()).nullable(),
+  referenceFiles: z.array(z.string()).nullable(),
 });
 
 export const ralphOutputSchemas = {
@@ -166,10 +168,14 @@ export const ralphOutputSchemas = {
     ciPassed: z.boolean(),
     summary: z.string(),
     evicted: z.boolean().default(false),
-    evictionReason: z.string().nullable().optional(),
-    evictionDetails: z.string().nullable().optional(),
-    attemptedLog: z.string().nullable().optional(),
-    attemptedDiffSummary: z.string().nullable().optional(),
-    landedOnMainSinceBranch: z.string().nullable().optional(),
+    evictionReason: z.string().nullable(),
+    evictionDetails: z.string().nullable(),
+    attemptedLog: z.string().nullable(),
+    attemptedDiffSummary: z.string().nullable(),
+    landedOnMainSinceBranch: z.string().nullable(),
   }),
+
+  ticket_schedule: ticketScheduleSchema,
+
+  merge_queue_result: mergeQueueResultSchema,
 };

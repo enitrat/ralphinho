@@ -26,6 +26,7 @@ import {
   selectClarifyingQuestions,
   selectInterpretConfig,
   selectMonitor,
+  selectTicketPipelineStage,
 } from "./selectors";
 
 import type { Ticket, RalphOutputs } from "./selectors";
@@ -35,14 +36,38 @@ import {
   ClarifyingQuestions,
   InterpretConfig,
   Monitor,
+  TicketResume,
+  TicketScheduler,
+  ticketScheduleSchema,
+  ticketAssignmentSchema,
+  computePipelineStage,
+  AgenticMergeQueue,
+  mergeQueueResultSchema,
   clarifyingQuestionsOutputSchema,
   interpretConfigOutputSchema,
   monitorOutputSchema,
 } from "./components";
+
+import {
+  AgentRegistry,
+  getAgentRegistry,
+  resetAgentRegistry,
+} from "./agentRegistry";
+import type { AgentMetadata, AgentStats, AgentRegistrySnapshot } from "./agentRegistry";
+
+import {
+  loadCrossRunTicketState,
+  getResumableTickets,
+  pipelineStageIndex,
+} from "./durability";
 import type { SuperRalphProps } from "./components/SuperRalph";
 import type { ClarifyingQuestionsOutput, ClarifyingQuestionsProps } from "./components/ClarifyingQuestions";
 import type { InterpretConfigOutput, InterpretConfigProps } from "./components/InterpretConfig";
 import type { MonitorOutput, MonitorProps } from "./components/Monitor";
+import type { TicketResumeProps } from "./components/TicketResume";
+import type { TicketSchedule, TicketAssignment, TicketSchedulerProps, TicketSchedulerTicket } from "./components/TicketScheduler";
+import type { AgenticMergeQueueProps, AgenticMergeQueueTicket, MergeQueueResult } from "./components/AgenticMergeQueue";
+import type { CrossRunTicketState } from "./durability";
 import { useSuperRalph } from "./hooks/useSuperRalph";
 import type { SuperRalphContext, UseSuperRalphConfig } from "./hooks/useSuperRalph";
 import { ralphOutputSchemas } from "./schemas";
@@ -64,6 +89,7 @@ export {
   selectClarifyingQuestions,
   selectInterpretConfig,
   selectMonitor,
+  selectTicketPipelineStage,
 
   // Hooks
   useSuperRalph,
@@ -73,6 +99,23 @@ export {
   ClarifyingQuestions,
   InterpretConfig,
   Monitor,
+  TicketResume,
+  TicketScheduler,
+  ticketScheduleSchema,
+  ticketAssignmentSchema,
+  computePipelineStage,
+  AgenticMergeQueue,
+  mergeQueueResultSchema,
+
+  // Agent Registry
+  AgentRegistry,
+  getAgentRegistry,
+  resetAgentRegistry,
+
+  // Durability
+  loadCrossRunTicketState,
+  getResumableTickets,
+  pipelineStageIndex,
 
   // Schemas
   ralphOutputSchemas,
@@ -93,4 +136,16 @@ export type {
   InterpretConfigProps,
   MonitorOutput,
   MonitorProps,
+  TicketResumeProps,
+  TicketSchedule,
+  TicketAssignment,
+  TicketSchedulerProps,
+  TicketSchedulerTicket,
+  AgenticMergeQueueProps,
+  AgenticMergeQueueTicket,
+  MergeQueueResult,
+  AgentMetadata,
+  AgentStats,
+  AgentRegistrySnapshot,
+  CrossRunTicketState,
 };

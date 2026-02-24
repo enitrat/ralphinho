@@ -153,8 +153,7 @@ Return valid JSON only, no markdown, no explanations.`;
         <Task
           id="generate-questions"
           output={generateQuestionsOutputSchema}
-          agent={primaryAgent}
-          fallbackAgent={fallbackAgent}
+          agent={fallbackAgent ? [primaryAgent, fallbackAgent] : primaryAgent}
         >
           {questionGenerationPrompt}
         </Task>
