@@ -45,7 +45,7 @@
     "cli": "bun run src/cli/index.ts"
   },
   "peerDependencies": {
-    "smithers-orchestrator": "*"
+    "smithers-orchestrator": "^0.9.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
