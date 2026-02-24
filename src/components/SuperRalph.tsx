@@ -1,6 +1,6 @@
 import { Ralph, Parallel } from "smithers-orchestrator";
 import type { SmithersCtx, AgentLike, ClaudeCodeAgent, CodexAgent } from "smithers-orchestrator";
-import { selectAllTickets, selectReviewTickets, selectProgressSummary, selectLand, selectTicketReport, selectImplement, isTicketTierComplete } from "../selectors";
+import { selectAllTickets, selectProgressSummary, selectLand, selectTicketReport, selectImplement, isTicketTierComplete } from "../selectors";
 import type { RalphOutputs, Ticket } from "../selectors";
 import React, { type ReactNode } from "react";
 import { Database } from "bun:sqlite";
@@ -85,8 +85,7 @@ export function SuperRalph({
   maxSpeculativeDepth = 3,
 }: SuperRalphProps) {
 
-  const { findings: reviewFindings } = selectReviewTickets(ctx, focuses);
-  const { completed: completedTicketIds, unfinished: unfinishedTickets } = selectAllTickets(ctx, focuses);
+  const { completed: completedTicketIds, unfinished: unfinishedTickets } = selectAllTickets(ctx);
   const progressSummary = selectProgressSummary(ctx);
   const { prefix = "📝", mainBranch = "main", emojiPrefixes = "✨ feat, 🐛 fix, ♻️ refactor, 📝 docs, 🧪 test" } = commitConfig;
 
@@ -157,7 +156,7 @@ export function SuperRalph({
     projectName, specsPath, referenceFiles, buildCmds, testCmds,
     codeStyle, reviewChecklist, progressFile, findingsFile,
     prefix, mainBranch, emojiPrefixes, testSuites, focusTestSuites, focusDirs,
-    completedTicketIds, progressSummary, reviewFindings, focuses,
+    completedTicketIds, progressSummary, reviewFindings: null, focuses,
   };
 
   return (

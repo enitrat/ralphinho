@@ -11,8 +11,6 @@ import { COMPLEXITY_TIERS, type ComplexityTier } from "../schemas";
 const JOB_TYPES = [
   "discovery",
   "progress-update",
-  "codebase-review",
-  "integration-test",
   "ticket:research",
   "ticket:plan",
   "ticket:implement",
@@ -25,11 +23,11 @@ const JOB_TYPES = [
 ] as const;
 
 export const scheduledJobSchema = z.object({
-  jobId: z.string().describe("Stable unique ID (e.g. 'T-1:research', 'discovery', 'codebase-review:cat-5')"),
+  jobId: z.string().describe("Stable unique ID (e.g. 'T-1:research', 'discovery', 'progress-update')"),
   jobType: z.enum(JOB_TYPES).describe("Type of job to schedule"),
   agentId: z.string().describe("Agent ID from the pool to assign"),
   ticketId: z.string().nullable().describe("Ticket ID for ticket pipeline jobs, null for global jobs"),
-  focusId: z.string().nullable().describe("Focus/category ID for codebase-review and integration-test jobs, null otherwise"),
+  focusId: z.string().nullable().describe("Reserved for future use, null for all current job types"),
   reason: z.string().describe("Brief reason for scheduling this job with this agent"),
 });
 
@@ -73,8 +71,6 @@ export function computePipelineStage(ctx: SmithersCtx<any>, ticketId: string): s
 export const JOB_TYPE_TO_OUTPUT_KEY: Record<string, string> = {
   "discovery": "discover",
   "progress-update": "progress",
-  "codebase-review": "category_review",
-  "integration-test": "integration_test",
   "ticket:research": "research",
   "ticket:plan": "plan",
   "ticket:implement": "implement",
@@ -212,8 +208,6 @@ Available stage jobs:
 ### Global jobs (ticketId=null)
 - \`discovery\` — Find new tickets to work on (focusId=null, jobId="discovery")
 - \`progress-update\` — Update progress file (focusId=null, jobId="progress-update")
-- \`codebase-review\` — Review a focus area (requires focusId, jobId="codebase-review:<focusId>")
-- \`integration-test\` — Run integration tests for a category (requires focusId, jobId="integration-test:<focusId>")
 
 ## Scheduling Rules
 

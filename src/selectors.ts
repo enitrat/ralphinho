@@ -77,32 +77,6 @@ type OutputType<K extends SchemaKey> = ReturnType<SmithersCtx<RalphOutputs>["out
   ? R
   : unknown;
 
-export function selectReviewTickets(
-  ctx: SmithersCtx<RalphOutputs>,
-  focuses: ReadonlyArray<{ readonly id: string }>
-): { tickets: Ticket[]; findings: string | null } {
-  const tickets: Ticket[] = [];
-  const summaryParts: string[] = [];
-
-  for (const { id } of focuses) {
-    const review = ctx.outputMaybe("category_review", { nodeId: `codebase-review:${id}` });
-    if (review && Array.isArray((review as any).suggestedTickets)) {
-      for (const candidate of (review as any).suggestedTickets) {
-        const normalized = normalizeTicket(candidate);
-        if (normalized) tickets.push(normalized);
-      }
-    }
-    if (review && (review as any).overallSeverity !== "none") {
-      summaryParts.push(`${id} (${(review as any).overallSeverity}): ${(review as any).specCompliance?.feedback}`);
-    }
-  }
-
-  return {
-    tickets,
-    findings: summaryParts.length > 0 ? summaryParts.join("\n") : null,
-  };
-}
-
 export function selectDiscoverTickets(ctx: SmithersCtx<RalphOutputs>): Ticket[] {
   const discoverOutput = ctx.outputMaybe("discover", { nodeId: "discover" });
   if (!discoverOutput || !Array.isArray((discoverOutput as any).tickets)) return [];
@@ -130,21 +104,8 @@ export function selectProgressSummary(ctx: SmithersCtx<RalphOutputs>): string | 
 
 export function selectAllTickets(
   ctx: SmithersCtx<RalphOutputs>,
-  focuses: ReadonlyArray<{ readonly id: string }>
 ): { all: Ticket[]; completed: string[]; unfinished: Ticket[] } {
-  const { tickets: reviewTickets } = selectReviewTickets(ctx, focuses);
-  const featureTickets = selectDiscoverTickets(ctx);
-
-  // Merge and deduplicate tickets (review tickets take priority)
-  const seenIds = new Set<string>();
-  const all: Ticket[] = [];
-  for (const ticket of [...reviewTickets.sort(sortByPriority), ...featureTickets.sort(sortByPriority)]) {
-    if (!seenIds.has(ticket.id)) {
-      seenIds.add(ticket.id);
-      all.push(ticket);
-    }
-  }
-
+  const all = selectDiscoverTickets(ctx).sort(sortByPriority);
   const completed = selectCompletedTicketIds(ctx, all);
   const unfinished = all.filter((t) => !completed.includes(t.id));
 

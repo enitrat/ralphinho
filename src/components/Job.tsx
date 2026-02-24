@@ -6,7 +6,7 @@ import type { RalphOutputs, Ticket } from "../selectors";
 import type { ScheduledJob } from "../scheduledTasks";
 import UpdateProgressPrompt from "../prompts/UpdateProgress.mdx";
 import DiscoverPrompt from "../prompts/Discover.mdx";
-import IntegrationTestPrompt from "../prompts/IntegrationTest.mdx";
+
 import ResearchPrompt from "../prompts/Research.mdx";
 import PlanPrompt from "../prompts/Plan.mdx";
 import ImplementPrompt from "../prompts/Implement.mdx";
@@ -16,7 +16,7 @@ import SpecReviewPrompt from "../prompts/SpecReview.mdx";
 import CodeReviewPrompt from "../prompts/CodeReview.mdx";
 import ReviewFixPrompt from "../prompts/ReviewFix.mdx";
 import ReportPrompt from "../prompts/Report.mdx";
-import CategoryReviewPrompt from "../prompts/CategoryReview.mdx";
+
 
 export type JobProps = {
   job: ScheduledJob;
@@ -97,31 +97,6 @@ export function Job({
           />
         </Task>
       );
-
-    case "codebase-review": {
-      const focus = job.focusId ? focusMap.get(job.focusId) : null;
-      if (!focus) return null;
-      return wrapWorktree(`codebase-review-${focus.id}`,
-        <Task id={job.jobId} output={outputs.category_review} agent={agent} retries={retries}>
-          <CategoryReviewPrompt categoryId={focus.id} categoryName={focus.name} relevantDirs={focusDirs[focus.id] ?? null} />
-        </Task>
-      );
-    }
-
-    case "integration-test": {
-      const focus = job.focusId ? focusMap.get(job.focusId) : null;
-      if (!focus) return null;
-      const suiteInfo = focusTestSuites[focus.id] ?? { suites: [], setupHints: [], testDirs: [] };
-      return wrapWorktree(`integration-test-${focus.id}`,
-        <Task id={job.jobId} output={outputs.integration_test} agent={agent} retries={retries}>
-          <IntegrationTestPrompt
-            categoryId={focus.id} categoryName={focus.name}
-            suites={suiteInfo.suites} setupHints={suiteInfo.setupHints}
-            testDirs={suiteInfo.testDirs} findingsFile={findingsFile}
-          />
-        </Task>
-      );
-    }
 
     // --- Ticket pipeline jobs ---
     default: {

@@ -76,49 +76,6 @@ export const ralphOutputSchemas = {
     completionEstimate: z.string(),
   }),
 
-  category_review: z.object({
-    categoryId: z.string(),
-    categoryName: z.string(),
-    specCompliance: z.object({
-      issues: z.array(z.string()).nullable(),
-      severity: z.enum(["none", "minor", "major", "critical"]),
-      feedback: z.string(),
-    }),
-    architectureAlignment: z.object({
-      issues: z.array(z.string()).nullable(),
-      severity: z.enum(["none", "minor", "major", "critical"]),
-      feedback: z.string(),
-    }).nullable(),
-    testCoverage: z.object({
-      issues: z.array(z.string()).nullable(),
-      severity: z.enum(["none", "minor", "major", "critical"]),
-      feedback: z.string(),
-    }).nullable(),
-    codeQuality: z.object({
-      issues: z.array(z.string()).nullable(),
-      severity: z.enum(["none", "minor", "major", "critical"]),
-      feedback: z.string(),
-    }),
-    testing: z.object({
-      issues: z.array(z.string()).nullable(),
-      severity: z.enum(["none", "minor", "major", "critical"]),
-      feedback: z.string(),
-    }),
-    jjNativeCompliance: z.object({
-      issues: z.array(z.string()).nullable(),
-      severity: z.enum(["none", "minor", "major", "critical"]),
-      feedback: z.string(),
-    }).nullable(),
-    overallSeverity: z.enum(["none", "minor", "major", "critical"]),
-    suggestedTickets: z.array(z.object({
-      id: z.string(),
-      title: z.string(),
-      description: z.string(),
-      category: z.string(),
-      priority: z.enum(["critical", "high", "medium", "low"]),
-    })),
-  }),
-
   research: z.object({
     contextFilePath: z.string(),
     summary: z.string(),
@@ -187,15 +144,6 @@ export const ralphOutputSchemas = {
     reviewRounds: z.number(),
     struggles: z.array(z.string()).nullable(),
     lessonsLearned: z.array(z.string()).nullable(),
-  }),
-
-  integration_test: z.object({
-    categoryId: z.string(),
-    status: z.enum(["not_setup", "blocked", "partial", "running", "passing"]),
-    summary: z.string(),
-    blockers: z.array(z.string()).nullable(),
-    needsHumanIntervention: z.array(z.string()).nullable(),
-    suggestedTickets: z.array(z.string()).nullable(),
   }),
 
   land: z.object({

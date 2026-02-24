@@ -14,7 +14,6 @@
 
 import {
   selectAllTickets,
-  selectReviewTickets,
   selectDiscoverTickets,
   selectCompletedTicketIds,
   selectProgressSummary,
@@ -96,7 +95,6 @@ export {
 
   // Selectors
   selectAllTickets,
-  selectReviewTickets,
   selectDiscoverTickets,
   selectCompletedTicketIds,
   selectProgressSummary,

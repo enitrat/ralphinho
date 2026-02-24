@@ -260,6 +260,8 @@ The scheduler now sees each ticket's tier, current pipeline stage, and remaining
 - **Rule 9 (new):** Only schedule `review-fix` when a preceding review returned issues. If all reviews passed clean, skip it.
 - **Rule 10 (new):** When a ticket's tier is complete (final stage for its tier has output), stop scheduling pipeline stages — the ticket is ready for the merge queue.
 
+Additionally, the `codebase-review` and `integration-test` global job types have been **removed**. Upstream uses these to continuously audit focus areas and generate review tickets, which caused ticket explosion and noisy duplicate work. Tickets now come exclusively from the `discovery` job (PRD-driven). The `progress-update` job is retained for observability.
+
 **File:** `src/components/TicketScheduler.tsx`
 
 ### 5. Tier-Based Completion
@@ -290,13 +292,16 @@ This prevents the systematic rebase conflicts that caused 0 landings in the upst
 
 | File | What Changed |
 |------|-------------|
-| `src/schemas.ts` | Added `COMPLEXITY_TIERS`, `ComplexityTier` type, tier helpers, `complexityTier` on discover schema |
-| `src/selectors.ts` | Added `complexityTier` to `Ticket`, `normalizeComplexityTier()`, `isTicketTierComplete()` |
+| `src/schemas.ts` | Added `COMPLEXITY_TIERS`, `ComplexityTier` type, tier helpers, `complexityTier` on discover schema. Removed `category_review` and `integration_test` output schemas |
+| `src/selectors.ts` | Added `complexityTier` to `Ticket`, `normalizeComplexityTier()`, `isTicketTierComplete()`. Removed `selectReviewTickets()`, simplified `selectAllTickets()` to use only discovery tickets |
 | `src/prompts/Discover.mdx` | Tier assignment instructions, dedup rules, batching rules, existing tickets context |
-| `src/components/TicketScheduler.tsx` | Tier-aware prompt, "Next Stages" / "Tier Done" columns, rules 9+10 |
-| `src/components/SuperRalph.tsx` | `tierComplete` replaces `reportComplete`, file-touch metadata to merge queue |
+| `src/components/TicketScheduler.tsx` | Tier-aware prompt, "Next Stages" / "Tier Done" columns, rules 9+10. Removed `codebase-review` and `integration-test` job types |
+| `src/components/SuperRalph.tsx` | `tierComplete` replaces `reportComplete`, file-touch metadata to merge queue. Removed review ticket merging |
+| `src/components/Job.tsx` | Removed `codebase-review` and `integration-test` job cases |
 | `src/components/AgenticMergeQueue.tsx` | File overlap analysis, conflict-aware landing instructions |
-| `src/index.ts` | Exports for new types and functions |
+| `src/index.ts` | Exports for new types and functions. Removed `selectReviewTickets` export |
+| `src/prompts/CategoryReview.mdx` | **Deleted** — no longer used |
+| `src/prompts/IntegrationTest.mdx` | **Deleted** — no longer used |
 
 ## License
 
