@@ -33,11 +33,13 @@ function printHelp() {
 Usage:
   super-ralph "prompt text"
   super-ralph ./PROMPT.md
+  super-ralph --resume <run-id>
 
 Options:
   --cwd <path>                    Repo root (default: current directory)
   --max-concurrency <n>           Workflow max concurrency override
   --run-id <id>                   Explicit Smithers run id
+  --resume <run-id>               Resume a previous workflow run with OpenTUI monitoring
   --dry-run                       Generate workflow files but do not execute
   --skip-questions                Skip the clarifying questions phase
   --help                          Show this help
@@ -46,6 +48,7 @@ Examples:
   super-ralph "Build a React todo app"
   super-ralph ./specs/feature.md --max-concurrency 8
   super-ralph "Add authentication" --skip-questions
+  super-ralph --resume sr-m3abc12-deadbeef
 `);
 }
 
@@ -580,10 +583,69 @@ Return ONLY valid JSON (no markdown fences, no commentary):
   return { answers, summary };
 }
 
+/**
+ * Launch the Smithers CLI for a workflow file.
+ * @param mode - "run" for a new run, "resume" to continue a previous one
+ */
+async function launchSmithers(opts: {
+  mode: "run" | "resume";
+  workflowPath: string;
+  repoRoot: string;
+  runId: string;
+  maxConcurrency: number;
+  smithersCliPath: string;
+}): Promise<number> {
+  const { mode, workflowPath, repoRoot, runId, maxConcurrency, smithersCliPath } = opts;
+
+  // Determine execution directory
+  let execCwd: string;
+  if (runningFromSource) {
+    execCwd = superRalphSourceRoot;
+  } else {
+    const smithersDir = dirname(dirname(smithersCliPath));
+    execCwd = existsSync(join(smithersDir, "node_modules")) ? smithersDir : repoRoot;
+  }
+
+  const superRalphPreload = join(superRalphSourceRoot, "preload.ts");
+  const useSharedPreload = existsSync(superRalphPreload);
+  const preloadPath = join(dirname(workflowPath), "preload.ts");
+  const effectivePreload = useSharedPreload ? superRalphPreload : preloadPath;
+
+  const args = [
+    "-r",
+    effectivePreload,
+    smithersCliPath,
+    mode,
+    workflowPath,
+    "--root",
+    repoRoot,
+    "--run-id",
+    runId,
+    "--max-concurrency",
+    String(maxConcurrency),
+  ];
+
+  const env = { ...process.env, USE_CLI_AGENTS: "1", SMITHERS_DEBUG: "1" };
+  delete (env as any).CLAUDECODE;
+
+  const proc = Bun.spawn(["bun", "--no-install", ...args], {
+    cwd: execCwd,
+    env: env as any,
+    stdout: "inherit",
+    stderr: "inherit",
+    stdin: "inherit",
+  });
+
+  return proc.exited;
+}
+
 async function main() {
   const parsed = parseArgs(process.argv.slice(2));
 
-  if (parsed.flags.help || parsed.positional.length === 0) {
+  // --resume <run-id>: resume a previous workflow run
+  const resumeRunId = typeof parsed.flags.resume === "string" ? parsed.flags.resume : null;
+
+  if (parsed.flags.help || (!resumeRunId && parsed.positional.length === 0)) {
     printHelp();
     process.exit(parsed.flags.help ? 0 : 1);
   }
@@ -592,6 +654,61 @@ async function main() {
     typeof parsed.flags.cwd === "string" ? parsed.flags.cwd : process.cwd(),
   );
 
+  // ── Resume path ──────────────────────────────────────────────────────
+  if (resumeRunId) {
+    console.log("🔄 Super Ralph - Resuming workflow\n");
+
+    const smithersCliPath = findSmithersCliPath(repoRoot);
+    if (!smithersCliPath) {
+      throw new Error(
+        "Could not find smithers CLI. Install smithers-orchestrator in this repo:\n  bun add smithers-orchestrator",
+      );
+    }
+
+    const workflowPath = join(repoRoot, ".super-ralph", "generated", "workflow.tsx");
+    if (!existsSync(workflowPath)) {
+      throw new Error(
+        `No workflow file found at ${workflowPath}\nCannot resume without the generated workflow from the original run.`,
+      );
+    }
+
+    const dbPath = join(repoRoot, ".super-ralph/workflow.db");
+    if (!existsSync(dbPath)) {
+      throw new Error(
+        `No database found at ${dbPath}\nCannot resume without the workflow database.`,
+      );
+    }
+
+    const maxConcurrency = typeof parsed.flags["max-concurrency"] === "string"
+      ? Math.max(1, Number(parsed.flags["max-concurrency"]) || 6)
+      : 6;
+
+    console.log(`📁 Repo: ${repoRoot}`);
+    console.log(`🔧 Workflow: ${workflowPath}`);
+    console.log(`💾 Database: ${dbPath}`);
+    console.log(`🆔 Run ID: ${resumeRunId}`);
+    console.log(`⚡ Concurrency: ${maxConcurrency}\n`);
+    console.log("🎬 Resuming workflow execution...\n");
+
+    const exitCode = await launchSmithers({
+      mode: "resume",
+      workflowPath,
+      repoRoot,
+      runId: resumeRunId,
+      maxConcurrency,
+      smithersCliPath,
+    });
+
+    if (exitCode === 0) {
+      console.log("\n✅ Super Ralph workflow completed successfully!\n");
+    } else {
+      console.error(`\n❌ Workflow exited with code ${exitCode}\n`);
+      process.exit(exitCode);
+    }
+    return;
+  }
+
+  // ── New run path ─────────────────────────────────────────────────────
   const rawPromptInput = parsed.positional.join(" ").trim();
   const { promptText, promptSourcePath } = await readPromptInput(rawPromptInput, repoRoot);
 
@@ -702,47 +819,14 @@ async function main() {
 
   console.log("🎬 Starting workflow execution...\n");
 
-  // Execute the workflow using Smithers CLI
-  // Determine execution directory:
-  // - If running from super-ralph source, use super-ralph dir (has all deps including React)
-  // - Otherwise use smithers dir or repo root
-  let execCwd: string;
-  if (runningFromSource) {
-    execCwd = superRalphSourceRoot;
-  } else {
-    const smithersDir = dirname(dirname(smithersCliPath)); // Go up from src/cli to smithers root
-    execCwd = existsSync(join(smithersDir, "node_modules")) ? smithersDir : repoRoot;
-  }
-
-  // Use the preload that's in the directory with node_modules
-  const effectivePreload = useSharedPreload ? superRalphPreload : preloadPath;
-
-  const args = [
-    "-r",
-    effectivePreload,
-    smithersCliPath,
-    "run",
+  const exitCode = await launchSmithers({
+    mode: "run",
     workflowPath,
-    "--root",
     repoRoot,
-    "--run-id",
     runId,
-    "--max-concurrency",
-    String(maxConcurrencyOverride),
-  ];
-
-  const env = { ...process.env, USE_CLI_AGENTS: "1", SMITHERS_DEBUG: "1" };
-  delete (env as any).CLAUDECODE;
-
-  const proc = Bun.spawn(["bun", "--no-install", ...args], {
-    cwd: execCwd,
-    env: env as any,
-    stdout: "inherit",
-    stderr: "inherit",
-    stdin: "inherit",
+    maxConcurrency: maxConcurrencyOverride,
+    smithersCliPath,
   });
-
-  const exitCode = await proc.exited;
 
   if (exitCode === 0) {
     console.log("\n✅ Super Ralph workflow completed successfully!\n");
