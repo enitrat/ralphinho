@@ -332,14 +332,6 @@ const PACKAGE_SCRIPTS = ${JSON.stringify(packageScripts, null, 2)};
 const FALLBACK_CONFIG = ${JSON.stringify(fallbackConfig, null, 2)};
 const CLARIFICATION_SESSION = ${JSON.stringify(clarificationSession)};
 
-function getInterpretedConfig(ctx: any) {
-  const config = ctx.latest("interpret_config", "interpret-config");
-  if (!config) {
-    throw new Error("InterpretConfig did not produce output — cannot proceed without interpreted config. Check InterpretConfig task logs for errors.");
-  }
-  return config as any;
-}
-
 const { smithers, outputs, Workflow } = createSmithers(
   ralphOutputSchemas,
   { dbPath: DB_PATH }
@@ -378,52 +370,59 @@ const testingAgent = choose("claude", "Run tests and validate behavior changes."
 const reviewingAgent = choose("codex", "Review for regressions, spec drift, and correctness.");
 const reportingAgent = choose("claude", "Write concise, accurate ticket status reports.");
 
-export default smithers((ctx) => (
-  <Workflow name="super-ralph-full">
-    <Sequence>
-      {/* Step 1: Interpret Config (clarification session already collected by CLI) */}
-      <InterpretConfig
-        prompt={PROMPT_TEXT}
-        clarificationSession={CLARIFICATION_SESSION}
-        repoRoot={REPO_ROOT}
-        fallbackConfig={FALLBACK_CONFIG}
-        packageScripts={PACKAGE_SCRIPTS}
-        detectedAgents={{
-          claude: HAS_CLAUDE,
-          codex: HAS_CODEX,
-          gh: false,
-        }}
-        agent={planningAgent}
-      />
+export default smithers((ctx) => {
+  // Use outputMaybe so the first tree-build (before InterpretConfig runs) doesn't throw.
+  // The Sequence guarantees InterpretConfig completes before Parallel is scheduled,
+  // so by the time SuperRalph/Monitor actually start, this holds the real AI-generated config.
+  const interpretedConfig = ctx.outputMaybe("interpret_config", { nodeId: "interpret-config" }) ?? FALLBACK_CONFIG;
 
-      {/* Step 2: Run SuperRalph + Monitor in Parallel */}
-      <Parallel>
-        <SuperRalph
-          ctx={ctx}
-          outputs={outputs}
-          repoRoot={REPO_ROOT}
-          {...getInterpretedConfig(ctx)}
-          agents={{
-            planning: { agent: planningAgent, description: "Plan and research next tickets." },
-            implementation: { agent: implementationAgent, description: "Implement with test-driven development and jj workflows." },
-            testing: { agent: testingAgent, description: "Run tests and validate behavior changes." },
-            reviewing: { agent: reviewingAgent, description: "Review for regressions, spec drift, and correctness." },
-            reporting: { agent: reportingAgent, description: "Write concise, accurate ticket status reports." },
-          }}
-        />
-
-        <Monitor
-          dbPath={DB_PATH}
-          runId={ctx.runId}
-          config={getInterpretedConfig(ctx)}
-          clarificationSession={CLARIFICATION_SESSION}
+  return (
+    <Workflow name="super-ralph-full">
+      <Sequence>
+        {/* Step 1: Interpret Config (clarification session already collected by CLI) */}
+        <InterpretConfig
           prompt={PROMPT_TEXT}
+          clarificationSession={CLARIFICATION_SESSION}
           repoRoot={REPO_ROOT}
+          fallbackConfig={FALLBACK_CONFIG}
+          packageScripts={PACKAGE_SCRIPTS}
+          detectedAgents={{
+            claude: HAS_CLAUDE,
+            codex: HAS_CODEX,
+            gh: false,
+          }}
+          agent={planningAgent}
         />
-      </Parallel>
-    </Sequence>
-  </Workflow>
-));
+
+        {/* Step 2: Run SuperRalph + Monitor in Parallel */}
+        <Parallel>
+          <SuperRalph
+            ctx={ctx}
+            outputs={outputs}
+            repoRoot={REPO_ROOT}
+            {...interpretedConfig}
+            agents={{
+              planning: { agent: planningAgent, description: "Plan and research next tickets." },
+              implementation: { agent: implementationAgent, description: "Implement with test-driven development and jj workflows." },
+              testing: { agent: testingAgent, description: "Run tests and validate behavior changes." },
+              reviewing: { agent: reviewingAgent, description: "Review for regressions, spec drift, and correctness." },
+              reporting: { agent: reportingAgent, description: "Write concise, accurate ticket status reports." },
+            }}
+          />
+
+          <Monitor
+            dbPath={DB_PATH}
+            runId={ctx.runId}
+            config={interpretedConfig}
+            clarificationSession={CLARIFICATION_SESSION}
+            prompt={PROMPT_TEXT}
+            repoRoot={REPO_ROOT}
+          />
+        </Parallel>
+      </Sequence>
+    </Workflow>
+  );
+});
 `;
 }
 
