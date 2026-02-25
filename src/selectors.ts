@@ -78,14 +78,18 @@ type OutputType<K extends SchemaKey> = ReturnType<SmithersCtx<RalphOutputs>["out
   : unknown;
 
 export function selectDiscoverTickets(ctx: SmithersCtx<RalphOutputs>): Ticket[] {
-  const discoverOutput = ctx.outputMaybe("discover", { nodeId: "discover" });
-  if (!discoverOutput || !Array.isArray((discoverOutput as any).tickets)) return [];
-  const normalized: Ticket[] = [];
-  for (const candidate of (discoverOutput as any).tickets) {
-    const ticket = normalizeTicket(candidate);
-    if (ticket) normalized.push(ticket);
+  const allRows = ctx.outputs("discover")
+    .filter((row: any) => row?.nodeId === "discovery" && Array.isArray(row?.tickets))
+    .sort((a: any, b: any) => (Number(a.iteration) || 0) - (Number(b.iteration) || 0));
+
+  const ticketMap = new Map<string, Ticket>();
+  for (const row of allRows) {
+    for (const candidate of (row as any).tickets) {
+      const ticket = normalizeTicket(candidate);
+      if (ticket) ticketMap.set(ticket.id, ticket);
+    }
   }
-  return normalized;
+  return Array.from(ticketMap.values());
 }
 
 export function selectCompletedTicketIds(ctx: SmithersCtx<RalphOutputs>, tickets: Ticket[]): string[] {
@@ -98,7 +102,7 @@ export function selectCompletedTicketIds(ctx: SmithersCtx<RalphOutputs>, tickets
 }
 
 export function selectProgressSummary(ctx: SmithersCtx<RalphOutputs>): string | null {
-  const progress = ctx.outputMaybe("progress", { nodeId: "update-progress" });
+  const progress = ctx.latest("progress", "progress-update");
   return (progress as any)?.summary ?? null;
 }
 
