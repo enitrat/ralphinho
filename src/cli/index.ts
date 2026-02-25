@@ -40,14 +40,21 @@ Options:
   --max-concurrency <n>           Workflow max concurrency override
   --run-id <id>                   Explicit Smithers run id
   --resume <run-id>               Resume a previous workflow run with OpenTUI monitoring
+  --force-new                     Skip existing workflow detection, always regenerate
   --dry-run                       Generate workflow files but do not execute
   --skip-questions                Skip the clarifying questions phase
   --help                          Show this help
+
+If a previous workflow exists, you will be prompted to:
+  1) Regenerate (erase previous config, start fresh)
+  2) New run from existing workflow (reuse config, new run ID)
+  3) Resume the latest run (if a database exists)
 
 Examples:
   super-ralph "Build a React todo app"
   super-ralph ./specs/feature.md --max-concurrency 8
   super-ralph "Add authentication" --skip-questions
+  super-ralph "Fix bugs" --force-new
   super-ralph --resume sr-m3abc12-deadbeef
 `);
 }
@@ -295,7 +302,7 @@ function renderWorkflowFile(params: {
   // If running from super-ralph source for another repo, use absolute paths to source
   // Otherwise, use package imports
   const isSuperRalphRepo = existsSync(join(repoRoot, 'src/components/SuperRalph.tsx')) &&
-                           existsSync(join(repoRoot, 'src/components/ClarifyingQuestions.tsx'));
+                           existsSync(join(repoRoot, 'src/schemas.ts'));
 
   let importPrefix: string;
   if (isSuperRalphRepo) {
@@ -648,125 +655,172 @@ async function launchSmithers(opts: {
   return proc.exited;
 }
 
-async function main() {
-  const parsed = parseArgs(process.argv.slice(2));
+// ── Interactive prompt helper ─────────────────────────────────────────
 
-  // --resume <run-id>: resume a previous workflow run
-  const resumeRunId = typeof parsed.flags.resume === "string" ? parsed.flags.resume : null;
+async function promptChoice(message: string, options: string[]): Promise<number> {
+  console.log(message);
+  for (let i = 0; i < options.length; i++) {
+    console.log(`  ${i + 1}) ${options[i]}`);
+  }
+  process.stdout.write("\nChoice: ");
 
-  if (parsed.flags.help || (!resumeRunId && parsed.positional.length === 0)) {
-    printHelp();
-    process.exit(parsed.flags.help ? 0 : 1);
+  const reader = Bun.stdin.stream().getReader();
+  const { value } = await reader.read();
+  reader.releaseLock();
+  const input = new TextDecoder().decode(value).trim();
+  const choice = parseInt(input, 10);
+  console.log();
+
+  if (isNaN(choice) || choice < 1 || choice > options.length) {
+    console.log(`Invalid choice "${input}", defaulting to 1.\n`);
+    return 0;
+  }
+  return choice - 1;
+}
+
+// ── Detect previous workflow state ───────────────────────────────────
+
+type ExistingWorkflow = {
+  workflowPath: string;
+  dbPath: string;
+  hasDb: boolean;
+  latestRunId: string | null;
+  savedPrompt: string | null;
+};
+
+function detectExistingWorkflow(repoRoot: string): ExistingWorkflow | null {
+  const workflowPath = join(repoRoot, ".super-ralph", "generated", "workflow.tsx");
+  if (!existsSync(workflowPath)) return null;
+
+  const dbPath = join(repoRoot, ".super-ralph/workflow.db");
+  const hasDb = existsSync(dbPath);
+
+  let latestRunId: string | null = null;
+  if (hasDb) {
+    try {
+      const { Database } = require("bun:sqlite");
+      const db = new Database(dbPath, { readonly: true });
+      const row = db.prepare(
+        `SELECT run_id FROM _smithers_runs ORDER BY rowid DESC LIMIT 1`
+      ).get() as { run_id: string } | null;
+      latestRunId = row?.run_id ?? null;
+      db.close();
+    } catch {
+      // DB may not have the table yet or be corrupted — not fatal
+    }
   }
 
-  const repoRoot = resolve(
-    typeof parsed.flags.cwd === "string" ? parsed.flags.cwd : process.cwd(),
+  let savedPrompt: string | null = null;
+  const promptPath = join(repoRoot, ".super-ralph", "generated", "PROMPT.md");
+  if (existsSync(promptPath)) {
+    try {
+      const { readFileSync } = require("node:fs");
+      savedPrompt = readFileSync(promptPath, "utf8").trim() || null;
+    } catch {}
+  }
+
+  return { workflowPath, dbPath, hasDb, latestRunId, savedPrompt };
+}
+
+// ── Resume runner ────────────────────────────────────────────────────
+
+async function runResume(opts: {
+  repoRoot: string;
+  runId: string;
+  workflowPath: string;
+  dbPath: string;
+  savedPrompt: string;
+  maxConcurrency: number;
+  smithersCliPath: string;
+}): Promise<void> {
+  const { repoRoot, runId, workflowPath, dbPath, savedPrompt, maxConcurrency, smithersCliPath } = opts;
+
+  console.log("🔄 Super Ralph - Resuming workflow\n");
+  console.log(`📁 Repo: ${repoRoot}`);
+  console.log(`🔧 Workflow: ${workflowPath}`);
+  console.log(`💾 Database: ${dbPath}`);
+  console.log(`🆔 Run ID: ${runId}`);
+  console.log(`⚡ Concurrency: ${maxConcurrency}\n`);
+  console.log("🎬 Resuming workflow execution with live monitor...\n");
+
+  // Launch monitor alongside Smithers so it always opens on resume
+  const monitorScript = join(cliDir, "monitor-standalone.ts");
+  const monitorProc = Bun.spawn(
+    ["bun", monitorScript, dbPath, runId, basename(repoRoot), savedPrompt],
+    { cwd: repoRoot, stdout: "inherit", stderr: "inherit", stdin: "inherit" },
   );
 
-  // ── Resume path ──────────────────────────────────────────────────────
-  if (resumeRunId) {
-    console.log("🔄 Super Ralph - Resuming workflow\n");
+  // Tell the in-workflow <Monitor> to skip — the standalone monitor above handles TUI
+  process.env.SUPER_RALPH_SKIP_MONITOR = "1";
 
-    const smithersCliPath = findSmithersCliPath(repoRoot);
-    if (!smithersCliPath) {
-      throw new Error(
-        "Could not find smithers CLI. Install smithers-orchestrator in this repo:\n  bun add smithers-orchestrator",
-      );
-    }
+  const exitCode = await launchSmithers({
+    mode: "resume",
+    workflowPath,
+    repoRoot,
+    runId,
+    maxConcurrency,
+    smithersCliPath,
+  });
 
-    const workflowPath = join(repoRoot, ".super-ralph", "generated", "workflow.tsx");
-    if (!existsSync(workflowPath)) {
-      throw new Error(
-        `No workflow file found at ${workflowPath}\nCannot resume without the generated workflow from the original run.`,
-      );
-    }
+  // When Smithers finishes, kill the monitor if still running
+  try { monitorProc.kill(); } catch {}
 
-    const dbPath = join(repoRoot, ".super-ralph/workflow.db");
-    if (!existsSync(dbPath)) {
-      throw new Error(
-        `No database found at ${dbPath}\nCannot resume without the workflow database.`,
-      );
-    }
-
-    const maxConcurrency = typeof parsed.flags["max-concurrency"] === "string"
-      ? Math.max(1, Number(parsed.flags["max-concurrency"]) || 6)
-      : 6;
-
-    // Read saved prompt for the monitor header
-    const promptSpecPath = join(repoRoot, ".super-ralph", "generated", "PROMPT.md");
-    let savedPrompt = "";
-    if (existsSync(promptSpecPath)) {
-      try { savedPrompt = (await readFile(promptSpecPath, "utf8")).trim(); } catch {}
-    }
-
-    console.log(`📁 Repo: ${repoRoot}`);
-    console.log(`🔧 Workflow: ${workflowPath}`);
-    console.log(`💾 Database: ${dbPath}`);
-    console.log(`🆔 Run ID: ${resumeRunId}`);
-    console.log(`⚡ Concurrency: ${maxConcurrency}\n`);
-    console.log("🎬 Resuming workflow execution with live monitor...\n");
-
-    // Launch monitor alongside Smithers so it always opens on resume
-    const monitorScript = join(cliDir, "monitor-standalone.ts");
-    const monitorProc = Bun.spawn(
-      ["bun", monitorScript, dbPath, resumeRunId, basename(repoRoot), savedPrompt],
-      {
-        cwd: repoRoot,
-        stdout: "inherit",
-        stderr: "inherit",
-        stdin: "inherit",
-      },
-    );
-
-    // Tell the in-workflow <Monitor> to skip — the standalone monitor above handles TUI
-    process.env.SUPER_RALPH_SKIP_MONITOR = "1";
-
-    const exitCode = await launchSmithers({
-      mode: "resume",
-      workflowPath,
-      repoRoot,
-      runId: resumeRunId,
-      maxConcurrency,
-      smithersCliPath,
-    });
-
-    // When Smithers finishes, kill the monitor if still running
-    try { monitorProc.kill(); } catch {}
-
-    if (exitCode === 0) {
-      console.log("\n✅ Super Ralph workflow completed successfully!\n");
-    } else {
-      console.error(`\n❌ Workflow exited with code ${exitCode}\n`);
-      process.exit(exitCode);
-    }
-    return;
+  if (exitCode === 0) {
+    console.log("\n✅ Super Ralph workflow completed successfully!\n");
+  } else {
+    console.error(`\n❌ Workflow exited with code ${exitCode}\n`);
+    process.exit(exitCode);
   }
+}
 
-  // ── New run path ─────────────────────────────────────────────────────
-  const rawPromptInput = parsed.positional.join(" ").trim();
-  const { promptText, promptSourcePath } = await readPromptInput(rawPromptInput, repoRoot);
+// ── Fresh run from existing workflow ────────────────────────────────
 
-  if (!promptText) {
-    throw new Error("Prompt input is empty.");
+async function runFreshFromExisting(opts: {
+  repoRoot: string;
+  workflowPath: string;
+  dbPath: string;
+  maxConcurrency: number;
+  smithersCliPath: string;
+}): Promise<void> {
+  const { repoRoot, workflowPath, dbPath, maxConcurrency, smithersCliPath } = opts;
+  const runId = `sr-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+
+  console.log("🚀 Super Ralph - New run from existing workflow\n");
+  console.log(`📁 Repo: ${repoRoot}`);
+  console.log(`🔧 Workflow: ${workflowPath}`);
+  console.log(`💾 Database: ${dbPath}`);
+  console.log(`🆔 Run ID: ${runId}`);
+  console.log(`⚡ Concurrency: ${maxConcurrency}\n`);
+  console.log("🎬 Starting workflow execution...\n");
+
+  const exitCode = await launchSmithers({
+    mode: "run",
+    workflowPath,
+    repoRoot,
+    runId,
+    maxConcurrency,
+    smithersCliPath,
+  });
+
+  if (exitCode === 0) {
+    console.log("\n✅ Super Ralph workflow completed successfully!\n");
+  } else {
+    console.error(`\n❌ Workflow exited with code ${exitCode}\n`);
+    process.exit(exitCode);
   }
+}
 
-  console.log("🚀 Super Ralph - Smithers Workflow Edition\n");
+// ── Generate and run new workflow ───────────────────────────────────
 
-  await ensureJjAvailable(repoRoot);
-
-  const smithersCliPath = findSmithersCliPath(repoRoot);
-  if (!smithersCliPath) {
-    throw new Error(
-      "Could not find smithers CLI. Install smithers-orchestrator in this repo:\n  bun add smithers-orchestrator",
-    );
-  }
-
-  const detectedAgents = await detectAgents(repoRoot);
-  if (!detectedAgents.claude && !detectedAgents.codex) {
-    throw new Error(
-      "No supported coding agent CLI detected. Install claude and/or codex, then rerun.",
-    );
-  }
+async function runNewWorkflow(opts: {
+  parsed: ParsedArgs;
+  repoRoot: string;
+  promptText: string;
+  promptSourcePath: string | null;
+  smithersCliPath: string;
+  detectedAgents: { claude: boolean; codex: boolean; gh: boolean };
+}): Promise<void> {
+  const { parsed, repoRoot, promptText, promptSourcePath, smithersCliPath, detectedAgents } = opts;
 
   const generatedDir = join(repoRoot, ".super-ralph", "generated");
   await mkdir(generatedDir, { recursive: true });
@@ -803,8 +857,7 @@ async function main() {
 
   await writeFile(workflowPath, workflowSource, "utf8");
 
-  // Ensure the generated workflow can resolve node_modules (smithers-orchestrator, react, etc.)
-  // Bun resolves imports relative to the source file, so we symlink node_modules into the generated dir
+  // Ensure the generated workflow can resolve node_modules
   const generatedNodeModules = join(generatedDir, "node_modules");
   const sourceNodeModules = join(superRalphSourceRoot, "node_modules");
   if (!existsSync(generatedNodeModules) && existsSync(sourceNodeModules)) {
@@ -816,10 +869,9 @@ async function main() {
     }
   }
 
-  // Create preload - check if we have a shared preload from super-ralph source
+  // Create preload
   const superRalphPreload = join(superRalphSourceRoot, "preload.ts");
   const useSharedPreload = existsSync(superRalphPreload);
-
   if (!useSharedPreload) {
     await writeFile(
       preloadPath,
@@ -827,7 +879,6 @@ async function main() {
       "utf8",
     );
   }
-
   await writeFile(bunfigPath, `preload = ["./preload.ts"]\n`, "utf8");
 
   const runId = typeof parsed.flags["run-id"] === "string"
@@ -843,7 +894,7 @@ async function main() {
   console.log(`🔧 Workflow: ${workflowPath}`);
   console.log(`💾 Database: ${dbPath}`);
   console.log(`🆔 Run ID: ${runId}`);
-  console.log(`🤖 Agents: claude=${detectedAgents.claude} codex=${detectedAgents.codex} gh=${detectedAgents.gh}`);
+  console.log(`🤖 Agents: claude=${detectedAgents.claude} codex=${detectedAgents.codex}`);
   console.log(`⚡ Concurrency: ${maxConcurrencyOverride}\n`);
 
   if (parsed.flags["dry-run"]) {
@@ -868,6 +919,136 @@ async function main() {
     console.error(`\n❌ Workflow exited with code ${exitCode}\n`);
     process.exit(exitCode);
   }
+}
+
+// ── Main ─────────────────────────────────────────────────────────────
+
+async function main() {
+  const parsed = parseArgs(process.argv.slice(2));
+
+  // --resume <run-id>: explicit resume of a specific run
+  const resumeRunId = typeof parsed.flags.resume === "string" ? parsed.flags.resume : null;
+
+  if (parsed.flags.help || (!resumeRunId && parsed.positional.length === 0)) {
+    printHelp();
+    process.exit(parsed.flags.help ? 0 : 1);
+  }
+
+  const repoRoot = resolve(
+    typeof parsed.flags.cwd === "string" ? parsed.flags.cwd : process.cwd(),
+  );
+
+  const smithersCliPath = findSmithersCliPath(repoRoot);
+  if (!smithersCliPath) {
+    throw new Error(
+      "Could not find smithers CLI. Install smithers-orchestrator in this repo:\n  bun add smithers-orchestrator",
+    );
+  }
+
+  const maxConcurrency = typeof parsed.flags["max-concurrency"] === "string"
+    ? Math.max(1, Number(parsed.flags["max-concurrency"]) || 6)
+    : 6;
+
+  // ── Explicit --resume <run-id> ─────────────────────────────────────
+  if (resumeRunId) {
+    const workflowPath = join(repoRoot, ".super-ralph", "generated", "workflow.tsx");
+    if (!existsSync(workflowPath)) {
+      throw new Error(`No workflow file found at ${workflowPath}\nCannot resume without the generated workflow from the original run.`);
+    }
+    const dbPath = join(repoRoot, ".super-ralph/workflow.db");
+    if (!existsSync(dbPath)) {
+      throw new Error(`No database found at ${dbPath}\nCannot resume without the workflow database.`);
+    }
+
+    const promptSpecPath = join(repoRoot, ".super-ralph", "generated", "PROMPT.md");
+    let savedPrompt = "";
+    if (existsSync(promptSpecPath)) {
+      try { savedPrompt = (await readFile(promptSpecPath, "utf8")).trim(); } catch {}
+    }
+
+    return runResume({ repoRoot, runId: resumeRunId, workflowPath, dbPath, savedPrompt, maxConcurrency, smithersCliPath });
+  }
+
+  // ── New run path ───────────────────────────────────────────────────
+  const rawPromptInput = parsed.positional.join(" ").trim();
+  const { promptText, promptSourcePath } = await readPromptInput(rawPromptInput, repoRoot);
+
+  if (!promptText) {
+    throw new Error("Prompt input is empty.");
+  }
+
+  console.log("🚀 Super Ralph - Smithers Workflow Edition\n");
+
+  await ensureJjAvailable(repoRoot);
+
+  // ── Check for existing workflow ──────────────────────────────────
+  const existing = detectExistingWorkflow(repoRoot);
+
+  if (existing && !parsed.flags["force-new"]) {
+    console.log("Found an existing workflow from a previous session.");
+    if (existing.savedPrompt) {
+      const preview = existing.savedPrompt.length > 120
+        ? existing.savedPrompt.slice(0, 120) + "..."
+        : existing.savedPrompt;
+      console.log(`Previous prompt: "${preview}"`);
+    }
+    if (existing.latestRunId) {
+      console.log(`Latest run: ${existing.latestRunId}`);
+    }
+    console.log();
+
+    const options = [
+      "Regenerate workflow (erase previous config, start fresh)",
+      "New run from existing workflow (reuse config, new run ID)",
+    ];
+    if (existing.hasDb && existing.latestRunId) {
+      options.push(`Resume previous run (${existing.latestRunId})`);
+    }
+
+    const choice = await promptChoice("What would you like to do?", options);
+
+    switch (choice) {
+      case 1: {
+        // New run from existing workflow
+        return runFreshFromExisting({
+          repoRoot,
+          workflowPath: existing.workflowPath,
+          dbPath: existing.dbPath,
+          maxConcurrency,
+          smithersCliPath,
+        });
+      }
+      case 2: {
+        // Resume previous run
+        if (!existing.latestRunId) break; // shouldn't happen, but fall through to regenerate
+        return runResume({
+          repoRoot,
+          runId: existing.latestRunId,
+          workflowPath: existing.workflowPath,
+          dbPath: existing.dbPath,
+          savedPrompt: existing.savedPrompt ?? "",
+          maxConcurrency,
+          smithersCliPath,
+        });
+      }
+      // case 0: fall through to regenerate
+    }
+  }
+
+  // ── Regenerate workflow ────────────────────────────────────────────
+  const detectedAgents = await detectAgents(repoRoot);
+  if (!detectedAgents.claude && !detectedAgents.codex) {
+    throw new Error("No supported coding agent CLI detected. Install claude and/or codex, then rerun.");
+  }
+
+  return runNewWorkflow({
+    parsed,
+    repoRoot,
+    promptText,
+    promptSourcePath,
+    smithersCliPath,
+    detectedAgents,
+  });
 }
 
 main().catch((error) => {
