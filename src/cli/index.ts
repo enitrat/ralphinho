@@ -929,14 +929,72 @@ async function main() {
   // --resume <run-id>: explicit resume of a specific run
   const resumeRunId = typeof parsed.flags.resume === "string" ? parsed.flags.resume : null;
 
-  if (parsed.flags.help || (!resumeRunId && parsed.positional.length === 0)) {
+  if (parsed.flags.help) {
     printHelp();
-    process.exit(parsed.flags.help ? 0 : 1);
+    process.exit(0);
   }
 
   const repoRoot = resolve(
     typeof parsed.flags.cwd === "string" ? parsed.flags.cwd : process.cwd(),
   );
+
+  // No prompt given — check for existing workflow before falling back to help
+  if (!resumeRunId && parsed.positional.length === 0) {
+    const smithersCliPathEarly = findSmithersCliPath(repoRoot);
+    if (smithersCliPathEarly) {
+      const existing = detectExistingWorkflow(repoRoot);
+      if (existing) {
+        console.log("🚀 Super Ralph - Smithers Workflow Edition\n");
+        console.log("Found an existing workflow from a previous session.");
+        if (existing.savedPrompt) {
+          const preview = existing.savedPrompt.length > 120
+            ? existing.savedPrompt.slice(0, 120) + "..."
+            : existing.savedPrompt;
+          console.log(`Previous prompt: "${preview}"`);
+        }
+        if (existing.latestRunId) {
+          console.log(`Latest run: ${existing.latestRunId}`);
+        }
+        console.log();
+
+        const options = ["New run from existing workflow (reuse config, new run ID)"];
+        if (existing.hasDb && existing.latestRunId) {
+          options.push(`Resume previous run (${existing.latestRunId})`);
+        }
+        options.push("Exit (pass a prompt to regenerate)");
+
+        const maxConcurrency = typeof parsed.flags["max-concurrency"] === "string"
+          ? Math.max(1, Number(parsed.flags["max-concurrency"]) || 6)
+          : 6;
+
+        const choice = await promptChoice("What would you like to do?", options);
+
+        if (choice === 0) {
+          return runFreshFromExisting({
+            repoRoot,
+            workflowPath: existing.workflowPath,
+            dbPath: existing.dbPath,
+            maxConcurrency,
+            smithersCliPath: smithersCliPathEarly,
+          });
+        }
+        if (choice === 1 && existing.hasDb && existing.latestRunId) {
+          return runResume({
+            repoRoot,
+            runId: existing.latestRunId,
+            workflowPath: existing.workflowPath,
+            dbPath: existing.dbPath,
+            savedPrompt: existing.savedPrompt ?? "",
+            maxConcurrency,
+            smithersCliPath: smithersCliPathEarly,
+          });
+        }
+        process.exit(0);
+      }
+    }
+    printHelp();
+    process.exit(1);
+  }
 
   const smithersCliPath = findSmithersCliPath(repoRoot);
   if (!smithersCliPath) {
