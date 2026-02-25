@@ -10,6 +10,7 @@ import { TicketScheduler } from "./TicketScheduler";
 import { AgenticMergeQueue } from "./AgenticMergeQueue";
 import { Job } from "./Job";
 import { ensureTable, insertJob, removeJob, getActiveJobs, type ScheduledJob } from "../scheduledTasks";
+import { getResumableTickets, type CrossRunTicketState } from "../durability";
 
 // --- Props ---
 
@@ -151,6 +152,9 @@ export function SuperRalph({
   const activeCount = activeJobs.length;
   db.close();
 
+  // Check for resumable tickets from previous runs
+  const resumableTickets = getResumableTickets(dbPath, ctx.runId);
+
   // Shared props for <Job /> components
   const jobProps = {
     ctx, outputs, retries: taskRetries,
@@ -170,6 +174,7 @@ export function SuperRalph({
             agentPoolContext={agentPoolContext} focuses={focuses}
             maxConcurrency={maxConcurrency} agent={schedulerAgent}
             output={outputs.ticket_schedule} completedTicketIds={completedTicketIds}
+            resumableTickets={resumableTickets}
           />
         )}
 

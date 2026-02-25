@@ -161,7 +161,7 @@ export function Job({
                   contextFilePath={contextFilePath} researchSummary={researchData?.summary ?? null}
                   evictionContext={evictionContext} planFilePath={planFilePath}
                   tddPatterns={["Write tests FIRST, then implementation"]}
-                  commitPrefix={prefix} mainBranch={mainBranch}
+                  commitPrefix={prefix}
                 />
               </Task>
             );
@@ -177,9 +177,9 @@ export function Job({
                   testWritingGuidance={["Write unit tests AND integration tests"]}
                   implementationGuidance={["Follow architecture patterns from specs"]}
                   formatterCommands={Object.entries(buildCmds).map(([lang]) => `Format ${lang}`)}
-                  verifyCommands={Object.values(buildCmds)}
+                  verifyCommands={[...Object.values(buildCmds), ...Object.values(testCmds)]}
                   architectureRules={[`Read ${specsPath} for patterns`]}
-                  commitPrefix={prefix} mainBranch={mainBranch} emojiPrefixes={emojiPrefixes}
+                  commitPrefix={prefix} emojiPrefixes={emojiPrefixes}
                 />
               </Task>
             );
@@ -191,7 +191,7 @@ export function Job({
                   testSuites={testSuites.length > 0 ? testSuites : Object.entries(testCmds).map(([name, command]) => ({
                     name: `${name} tests`, command, description: `Run ${name} tests`,
                   }))}
-                  fixCommitPrefix="🐛 fix" mainBranch={mainBranch}
+                  fixCommitPrefix="🐛 fix"
                 />
               </Task>
             );
@@ -243,7 +243,7 @@ export function Job({
                   specIssues={latestSpecReview?.issues ?? null} codeSeverity={worstCodeSeverity}
                   codeFeedback={mergedCodeFeedback} codeIssues={mergedCodeIssues.length > 0 ? mergedCodeIssues : null}
                   validationCommands={Object.values(testCmds)}
-                  commitPrefix="🐛 fix" mainBranch={mainBranch} emojiPrefixes={emojiPrefixes}
+                  commitPrefix="🐛 fix" emojiPrefixes={emojiPrefixes}
                 />
               </Task>
             );

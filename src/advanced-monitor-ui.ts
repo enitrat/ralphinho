@@ -276,7 +276,7 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
         if (stageView?.status === "completed" || stageView?.status === "failed") {
           const col = STAGE_SUMMARY_COL[sd.table] || "summary";
           try {
-            const row = db.query(`SELECT ${col} FROM ${sd.table} WHERE run_id = ? AND node_id = ?`)
+            const row = db.query(`SELECT ${col} FROM ${sd.table} WHERE run_id = ? AND node_id = ? ORDER BY iteration DESC LIMIT 1`)
               .get(runId, `${ticketId}:${sd.nodeId}`) as any;
             if (row) summary = String(row[col] ?? "");
           } catch {}
@@ -286,7 +286,7 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
 
       let landSummary: string | undefined;
       try {
-        const row = db.query(`SELECT summary FROM land WHERE run_id = ? AND node_id = ?`)
+        const row = db.query(`SELECT summary FROM land WHERE run_id = ? AND node_id = ? ORDER BY iteration DESC LIMIT 1`)
           .get(runId, `${ticketId}:land`) as any;
         if (row) landSummary = row.summary;
       } catch {}
@@ -302,16 +302,16 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
     try {
       const db = new Database(dbPath, { readonly: true });
 
-      // 1. All discovered tickets
+      // 1. All discovered tickets (process in iteration order so later discoveries override)
       const ticketMap = new Map<string, { id: string; title: string; tier: string; priority: string }>();
       try {
-        const rows = db.query(`SELECT tickets FROM discover WHERE run_id = ?`).all(runId) as any[];
+        const rows = db.query(`SELECT tickets FROM discover WHERE run_id = ? ORDER BY iteration ASC`).all(runId) as any[];
         for (const row of rows) {
           try {
             const arr = JSON.parse(row.tickets);
             if (!Array.isArray(arr)) continue;
             for (const t of arr) {
-              if (t?.id && !ticketMap.has(t.id)) {
+              if (t?.id) {
                 ticketMap.set(t.id, {
                   id: t.id,
                   title: t.title || t.id,
@@ -349,21 +349,23 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
         stDb.close();
       } catch {}
 
-      // 4. Land status
+      // 4. Land status (latest iteration per ticket wins)
       const landMap = new Map<string, "landed" | "evicted">();
       try {
-        const rows = db.query(`SELECT node_id, merged, evicted FROM land WHERE run_id = ?`).all(runId) as any[];
+        const rows = db.query(`SELECT node_id, merged, evicted FROM land WHERE run_id = ? ORDER BY iteration DESC`).all(runId) as any[];
         for (const r of rows) {
           const tid = r.node_id.replace(/:land$/, "");
-          if (r.merged) landMap.set(tid, "landed");
-          else if (r.evicted) landMap.set(tid, "evicted");
+          if (!landMap.has(tid)) {
+            if (r.merged) landMap.set(tid, "landed");
+            else if (r.evicted) landMap.set(tid, "evicted");
+          }
         }
       } catch {}
 
-      // 5. Max concurrency
+      // 5. Max concurrency (latest iteration)
       let maxConcurrency = 0;
       try {
-        const row = db.query(`SELECT max_concurrency FROM interpret_config WHERE run_id = ? LIMIT 1`).get(runId) as any;
+        const row = db.query(`SELECT max_concurrency FROM interpret_config WHERE run_id = ? ORDER BY iteration DESC LIMIT 1`).get(runId) as any;
         if (row) maxConcurrency = row.max_concurrency || 0;
       } catch {}
 

@@ -4,6 +4,7 @@ import type { SmithersCtx } from "smithers-orchestrator";
 import { z } from "zod";
 import type { Ticket } from "../selectors";
 import type { ScheduledJob } from "../scheduledTasks";
+import type { CrossRunTicketState } from "../durability";
 import { COMPLEXITY_TIERS, type ComplexityTier } from "../schemas";
 
 // --- Schemas ---
@@ -108,6 +109,7 @@ export type TicketSchedulerProps = {
   agent: any;
   output: any;
   completedTicketIds: string[];
+  resumableTickets?: CrossRunTicketState[];
 };
 
 function getNextStagesForTier(tier: ComplexityTier, currentStage: string): string {
@@ -118,11 +120,39 @@ function getNextStagesForTier(tier: ComplexityTier, currentStage: string): strin
   return stages.slice(idx + 1).join(" → ");
 }
 
-function formatTicketTable(tickets: TicketState[]): string {
-  const header = "| ID | Title | Priority | Tier | Pipeline Stage | Next Stages | Landed | Tier Done |";
-  const sep    = "|----|-------|----------|------|----------------|-------------|--------|-----------|";
+/** Check if the latest completed stage for a ticket passed or failed */
+function getStageStatus(ctx: SmithersCtx<any>, ticketId: string, pipelineStage: string): "passed" | "failed" | "—" {
+  if (pipelineStage === "not_started" || pipelineStage === "landed") return "—";
+
+  switch (pipelineStage) {
+    case "test": {
+      const r = ctx.latest("test_results", `${ticketId}:test`) as any;
+      if (!r) return "—";
+      return (r.goTestsPassed && r.rustTestsPassed && r.e2eTestsPassed && r.sqlcGenPassed) ? "passed" : "failed";
+    }
+    case "build_verify": {
+      const r = ctx.latest("build_verify", `${ticketId}:build-verify`) as any;
+      if (!r) return "—";
+      return r.buildPassed ? "passed" : "failed";
+    }
+    case "code_review":
+    case "spec_review": {
+      const table = pipelineStage === "code_review" ? "code_review" : "spec_review";
+      const nodeId = pipelineStage === "code_review" ? `${ticketId}:code-review` : `${ticketId}:spec-review`;
+      const r = ctx.latest(table, nodeId) as any;
+      if (!r) return "—";
+      return r.severity === "critical" || r.severity === "major" ? "failed" : "passed";
+    }
+    default:
+      return "passed";
+  }
+}
+
+function formatTicketTable(ctx: SmithersCtx<any>, tickets: TicketState[]): string {
+  const header = "| ID | Title | Priority | Tier | Pipeline Stage | Stage Status | Next Stages | Landed | Tier Done |";
+  const sep    = "|----|-------|----------|------|----------------|--------------|-------------|--------|-----------|";
   const rows = tickets.map(({ ticket, pipelineStage, landed, tierComplete }) =>
-    `| ${ticket.id} | ${ticket.title} | ${ticket.priority} | ${ticket.complexityTier} | ${pipelineStage} | ${getNextStagesForTier(ticket.complexityTier, pipelineStage)} | ${landed ? "✓" : "✗"} | ${tierComplete ? "✓" : "✗"} |`,
+    `| ${ticket.id} | ${ticket.title} | ${ticket.priority} | ${ticket.complexityTier} | ${pipelineStage} | ${getStageStatus(ctx, ticket.id, pipelineStage)} | ${getNextStagesForTier(ticket.complexityTier, pipelineStage)} | ${landed ? "✓" : "✗"} | ${tierComplete ? "✓" : "✗"} |`,
   );
   return [header, sep, ...rows].join("\n");
 }
@@ -148,8 +178,9 @@ export function TicketScheduler({
   agent,
   output,
   completedTicketIds,
+  resumableTickets = [],
 }: TicketSchedulerProps) {
-  const ticketTable = formatTicketTable(ticketStates);
+  const ticketTable = formatTicketTable(ctx, ticketStates);
   const activeJobsTable = formatActiveJobs(activeJobs);
   const focusBlock = focuses.map(f => `- ${f.id}: ${f.name}`).join("\n");
   const now = new Date().toISOString();
@@ -179,7 +210,16 @@ ${agentPoolContext}
 
 ## Focus Areas
 ${focusBlock}
+${resumableTickets.length > 0 ? `
+## Resumable Tickets from Previous Runs
+The following ${resumableTickets.length} ticket(s) were in-progress in a prior run but never landed. **Prioritize these over discovering new tickets** — they represent partially-completed work.
 
+| Ticket ID | Pipeline Stage | Last Run | Iteration |
+|-----------|---------------|----------|-----------|
+${resumableTickets.map(t => `| ${t.ticketId} | ${t.pipelineStage} | ${t.latestRunId.slice(0, 12)} | ${t.iteration} |`).join("\n")}
+
+Schedule the next pipeline stage for each resumable ticket before scheduling any \`discovery\` jobs. Tickets further in the pipeline should be prioritized (report > review > test > implement > research).
+` : ""}
 ## Job Types You Can Schedule
 
 ### Ticket pipeline jobs (require ticketId, focusId=null)
@@ -230,6 +270,12 @@ Available stage jobs:
 9. **Conditional review-fix.** Only schedule \`ticket:review-fix\` when a preceding review (spec-review or code-review) returned severity > "none". If all reviews passed clean, skip review-fix and proceed to the next stage.
 
 10. **Respect tier completion.** When a ticket's "Tier Done" column shows ✓, do NOT schedule any more pipeline stages for it — it is ready for the merge queue.
+
+11. **Handle failed stages.** Check the "Stage Status" column. If a stage shows **failed**, do NOT advance to the next stage. Instead:
+    - **test failed** → Re-schedule \`ticket:implement\` so the agent can fix the failing tests, then re-schedule \`ticket:test\`.
+    - **build_verify failed** → Re-schedule \`ticket:implement\` to fix build errors, then re-schedule \`ticket:build-verify\`.
+    - **code_review or spec_review failed (major/critical)** → Schedule \`ticket:review-fix\` (if the tier includes it), otherwise re-schedule \`ticket:implement\`.
+    - A stage with status "passed" or "—" can be advanced normally.
 
 ## Instructions
 Output exactly the jobs to enqueue in the \`jobs\` array. Each job fills one concurrency slot.`;

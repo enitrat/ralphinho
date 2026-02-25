@@ -170,7 +170,7 @@ Return valid JSON only, no markdown, no explanations.`;
           if (preGeneratedQuestions) {
             questions = preGeneratedQuestions;
           } else {
-            const generated = (ctx as any).outputMaybe("generate-questions");
+            const generated = ctx.latest("generate_questions" as any, "generate-questions");
             if (!generated?.questions || !Array.isArray(generated.questions)) {
               throw new Error("Failed to generate clarifying questions");
             }
