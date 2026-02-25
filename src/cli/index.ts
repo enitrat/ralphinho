@@ -371,9 +371,10 @@ const reviewingAgent = choose("codex", "Review for regressions, spec drift, and 
 const reportingAgent = choose("claude", "Write concise, accurate ticket status reports.");
 
 export default smithers((ctx) => {
-  // Use outputMaybe so the first tree-build (before InterpretConfig runs) doesn't throw.
-  // The Sequence guarantees InterpretConfig completes before Parallel is scheduled,
-  // so by the time SuperRalph/Monitor actually start, this holds the real AI-generated config.
+  // FALLBACK_CONFIG is used only during the first tree-build, before InterpretConfig has run.
+  // The engine re-evaluates this function each iteration, and <Sequence> guarantees InterpretConfig
+  // completes before <Parallel> is ever scheduled — so SuperRalph and Monitor always receive
+  // the real AI-generated config when they actually execute.
   const interpretedConfig = ctx.outputMaybe("interpret_config", { nodeId: "interpret-config" }) ?? FALLBACK_CONFIG;
 
   return (
