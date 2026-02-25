@@ -156,7 +156,7 @@ export function SuperRalph({
     projectName, specsPath, referenceFiles, buildCmds, testCmds,
     codeStyle, reviewChecklist, progressFile, findingsFile,
     prefix, mainBranch, emojiPrefixes, testSuites, focusTestSuites, focusDirs,
-    completedTicketIds, progressSummary, reviewFindings: null, focuses,
+    completedTicketIds, unfinishedTickets, progressSummary, reviewFindings: null, focuses,
   };
 
   return (

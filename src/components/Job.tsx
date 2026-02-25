@@ -4,6 +4,7 @@ import type { SmithersCtx, AgentLike } from "smithers-orchestrator";
 import { selectResearch, selectPlan, selectImplement, selectTestResults, selectSpecReview, selectCodeReviews, selectLand } from "../selectors";
 import type { RalphOutputs, Ticket } from "../selectors";
 import type { ScheduledJob } from "../scheduledTasks";
+import { computePipelineStage } from "./TicketScheduler";
 import UpdateProgressPrompt from "../prompts/UpdateProgress.mdx";
 import DiscoverPrompt from "../prompts/Discover.mdx";
 
@@ -46,6 +47,7 @@ export type JobProps = {
   focusTestSuites: Record<string, { suites: string[]; setupHints: string[]; testDirs: string[] }>;
   focusDirs: Record<string, string[]>;
   completedTicketIds: string[];
+  unfinishedTickets: Ticket[];
   progressSummary: string | null;
   reviewFindings: string | null;
   focuses: ReadonlyArray<{ readonly id: string; readonly name: string }>;
@@ -73,7 +75,7 @@ export function Job({
   projectName, specsPath, referenceFiles, buildCmds, testCmds,
   codeStyle, reviewChecklist, progressFile, findingsFile,
   prefix, mainBranch, emojiPrefixes, testSuites, focusTestSuites, focusDirs,
-  completedTicketIds, progressSummary, reviewFindings, focuses,
+  completedTicketIds, unfinishedTickets, progressSummary, reviewFindings, focuses,
 }: JobProps) {
   switch (job.jobType) {
     // --- Global jobs ---
@@ -83,6 +85,12 @@ export function Job({
           <DiscoverPrompt
             projectName={projectName} specsPath={specsPath} referenceFiles={referenceFiles}
             categories={focuses} completedTicketIds={completedTicketIds}
+            existingTickets={unfinishedTickets.map(t => ({
+              id: t.id,
+              title: t.title,
+              complexityTier: t.complexityTier,
+              pipelineStage: computePipelineStage(ctx, t.id),
+            }))}
             previousProgress={progressSummary} reviewFindings={reviewFindings}
           />
         </Task>
