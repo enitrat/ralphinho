@@ -325,6 +325,14 @@ const PACKAGE_SCRIPTS = ${JSON.stringify(packageScripts, null, 2)};
 const FALLBACK_CONFIG = ${JSON.stringify(fallbackConfig, null, 2)};
 const CLARIFICATION_SESSION = ${JSON.stringify(clarificationSession)};
 
+function getInterpretedConfig(ctx: any) {
+  const config = ctx.outputMaybe("interpret_config", { nodeId: "interpret-config" });
+  if (!config) {
+    throw new Error("InterpretConfig did not produce output — cannot proceed without interpreted config. Check InterpretConfig task logs for errors.");
+  }
+  return config as any;
+}
+
 const { smithers, outputs, Workflow } = createSmithers(
   ralphOutputSchemas,
   { dbPath: DB_PATH }
@@ -386,7 +394,7 @@ export default smithers((ctx) => (
         <SuperRalph
           ctx={ctx}
           outputs={outputs}
-          {...((ctx.outputMaybe("interpret-config", outputs.interpret_config) as any) || FALLBACK_CONFIG)}
+          {...getInterpretedConfig(ctx)}
           agents={{
             planning: { agent: planningAgent, description: "Plan and research next tickets." },
             implementation: { agent: implementationAgent, description: "Implement with test-driven development and jj workflows." },
@@ -399,7 +407,7 @@ export default smithers((ctx) => (
         <Monitor
           dbPath={DB_PATH}
           runId={ctx.runId}
-          config={(ctx.outputMaybe("interpret-config", outputs.interpret_config) as any) || FALLBACK_CONFIG}
+          config={getInterpretedConfig(ctx)}
           clarificationSession={CLARIFICATION_SESSION}
           prompt={PROMPT_TEXT}
           repoRoot={REPO_ROOT}

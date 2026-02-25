@@ -80,7 +80,7 @@ export function Job({
   switch (job.jobType) {
     // --- Global jobs ---
     case "discovery":
-      return wrapWorktree("discover",
+      return wrapWorktree(job.jobId,
         <Task id={job.jobId} output={outputs.discover} agent={agent} retries={retries}>
           <DiscoverPrompt
             projectName={projectName} specsPath={specsPath} referenceFiles={referenceFiles}
@@ -97,7 +97,7 @@ export function Job({
       );
 
     case "progress-update":
-      return wrapWorktree("update-progress",
+      return wrapWorktree(job.jobId,
         <Task id={job.jobId} output={outputs.progress} agent={agent} retries={retries}>
           <UpdateProgressPrompt
             projectName={projectName} progressFile={progressFile}
