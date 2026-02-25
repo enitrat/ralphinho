@@ -1,10 +1,11 @@
 /**
  * Standalone OpenTUI Monitor UI logic.
  *
- * Four-panel dashboard:
+ * Layout:
  *  - Top: Phase indicator + global stats bar
  *  - Left: Pipeline kanban (per-ticket stage progress)
- *  - Right: Active jobs / ticket detail / event log / captured logs
+ *  - Right: 3 stacked panels — Active Jobs | Event Log | Captured Logs
+ *    Tab cycles focus between panels for scrolling.
  *
  * Shared between:
  *  - The Smithers <Monitor> component (in-workflow)
@@ -111,7 +112,7 @@ interface PollData {
   phase: WorkflowPhase;
   mergeQueueActivity: MergeQueueActivity | null;
   schedulerReasoning: string | null;
-  discoveryCount: number;  // How many discovery rounds have completed
+  discoveryCount: number;
 }
 
 interface TicketDetail {
@@ -177,16 +178,6 @@ function stageIcon(s: StageStatus): string {
   }
 }
 
-// Plain (no ANSI) version for width calculations
-function stageIconPlain(s: StageStatus): string {
-  switch (s) {
-    case "completed": return "\u2713";
-    case "running":   return "\u25D0";
-    case "failed":    return "\u2717";
-    default:          return "\u00B7";
-  }
-}
-
 // --- Exports ---
 
 export interface MonitorUIOptions {
@@ -194,7 +185,7 @@ export interface MonitorUIOptions {
   runId: string;
   projectName: string;
   prompt: string;
-  logFile?: string;  // Path to write captured stdout/stderr
+  logFile?: string;
 }
 
 export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: boolean; status: string }> {
@@ -208,8 +199,6 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
   const scheduledDbPath = join(dirname(dbPath), "..", "scheduled-tasks.db");
 
   // ── Console capture ──
-  // Redirect stdout/stderr to a ring buffer + optional log file so they don't
-  // corrupt the alternate screen. Restore on exit.
   const capturedLogs = new RingBuffer(200);
   const origStdoutWrite = process.stdout.write.bind(process.stdout);
   const origStderrWrite = process.stderr.write.bind(process.stderr);
@@ -224,7 +213,6 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
 
   function captureWrite(chunk: string | Uint8Array): boolean {
     const text = typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
-    // Split on newlines, skip empty
     for (const line of text.split("\n")) {
       const trimmed = line.trimEnd();
       if (trimmed) capturedLogs.push(`${fmtTime()} ${trimmed}`);
@@ -235,7 +223,6 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
     return true;
   }
 
-  // Install capture — any console.log/error from Smithers or agents goes here
   process.stdout.write = captureWrite as any;
   process.stderr.write = captureWrite as any;
 
@@ -260,16 +247,16 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
     mergeQueueActivity: null, schedulerReasoning: null, discoveryCount: 0,
   };
   let selectedIdx = 0;
-  let focus: "pipeline" | "jobs" | "detail" | "events" | "logs" = "pipeline";
+  // focus: pipeline = left panel; jobs/events/logs = right panels
+  let focus: "pipeline" | "jobs" | "events" | "logs" = "pipeline";
   let detail: TicketDetail | null = null;
   let isRunning = true;
-  let lastError: string | null = null;  // Surface DB errors instead of swallowing
+  let lastError: string | null = null;
   const eventLog: EventLogEntry[] = [];
   let prevPhase: WorkflowPhase = "starting";
 
   function addEvent(message: string) {
     eventLog.push({ time: fmtTime(), message });
-    // Keep last 100 events
     if (eventLog.length > 100) eventLog.shift();
   }
 
@@ -310,9 +297,9 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
   });
   root.add(content);
 
-  // Left: Pipeline
+  // ── Left: Pipeline ──
   const pipeBox = new BoxRenderable(renderer, {
-    id: "pipeBox", border: true, title: " Pipeline ", width: "60%",
+    id: "pipeBox", border: true, title: " Pipeline ", width: "45%",
     flexDirection: "column", borderColor: c.selected,
   });
   content.add(pipeBox);
@@ -323,29 +310,61 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
   const pipeText = new TextRenderable(renderer, { id: "pipeText", content: "Waiting for discovery..." });
   pipeScroll.add(pipeText);
 
-  // Right: Jobs / Detail / Events / Logs
-  const rightBox = new BoxRenderable(renderer, {
-    id: "rightBox", border: true, title: " Active Jobs ", flexGrow: 1,
+  // ── Right: 3 stacked panels ──
+  const rightCol = new BoxRenderable(renderer, {
+    id: "rightCol", border: false, flexGrow: 1, flexDirection: "column",
+  });
+  content.add(rightCol);
+
+  // Panel 1: Active Jobs (fixed height)
+  const jobsBox = new BoxRenderable(renderer, {
+    id: "jobsBox", border: true, title: " Active Jobs ", height: 9,
     flexDirection: "column", borderColor: c.border,
   });
-  content.add(rightBox);
+  rightCol.add(jobsBox);
 
-  const rightScroll = new ScrollBoxRenderable(renderer, { id: "rightScroll", flexGrow: 1, scrollY: true });
-  rightBox.add(rightScroll);
+  const jobsScroll = new ScrollBoxRenderable(renderer, { id: "jobsScroll", flexGrow: 1, scrollY: true });
+  jobsBox.add(jobsScroll);
+  const jobsText = new TextRenderable(renderer, { id: "jobsText", content: "No active jobs" });
+  jobsScroll.add(jobsText);
 
-  const rightText = new TextRenderable(renderer, { id: "rightText", content: "No active jobs" });
-  rightScroll.add(rightText);
+  // Panel 2: Event Log (flexible, bigger)
+  const eventsBox = new BoxRenderable(renderer, {
+    id: "eventsBox", border: true, title: " Event Log ", flexGrow: 2,
+    flexDirection: "column", borderColor: c.border,
+  });
+  rightCol.add(eventsBox);
+
+  const eventsScroll = new ScrollBoxRenderable(renderer, { id: "eventsScroll", flexGrow: 1, scrollY: true });
+  eventsBox.add(eventsScroll);
+  const eventsText = new TextRenderable(renderer, { id: "eventsText", content: "No events yet" });
+  eventsScroll.add(eventsText);
+
+  // Panel 3: Captured Logs (flexible)
+  const logsBox = new BoxRenderable(renderer, {
+    id: "logsBox", border: true, title: " Logs ", flexGrow: 1,
+    flexDirection: "column", borderColor: c.border,
+  });
+  rightCol.add(logsBox);
+
+  const logsScroll = new ScrollBoxRenderable(renderer, { id: "logsScroll", flexGrow: 1, scrollY: true });
+  logsBox.add(logsScroll);
+  const logsText = new TextRenderable(renderer, { id: "logsText", content: "No output captured" });
+  logsScroll.add(logsText);
 
   const footer = new TextRenderable(renderer, {
     id: "footer", height: 1,
-    content: "\u2191\u2193:Nav | Enter:Details | Tab:Switch | E:Events | L:Logs | Esc:Back | Q:Quit",
+    content: "\u2191\u2193:Nav | Enter:Detail | Tab:Focus | Esc:Back | Q:Quit",
   });
   root.add(footer);
 
   // ── Update display ──
   function update() {
+    // Focus borders
     pipeBox.borderColor = focus === "pipeline" ? c.selected : c.border;
-    rightBox.borderColor = focus !== "pipeline" ? c.selected : c.border;
+    jobsBox.borderColor = (focus === "jobs" || focus === "detail" as any) ? c.selected : c.border;
+    eventsBox.borderColor = focus === "events" ? c.selected : c.border;
+    logsBox.borderColor = focus === "logs" ? c.selected : c.border;
 
     // Phase indicator
     const phaseInfo = PHASE_DISPLAY[data.phase];
@@ -374,33 +393,25 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
     const errorIndicator = lastError ? ` | \x1b[31mERR\x1b[0m` : "";
     statsText.content = `Discovered: ${discovered} | In Pipeline: ${inPipeline} | Landed: ${landed} | Evicted: ${evicted} | Jobs: ${slots}${errorIndicator}`;
 
-    // Pipeline panel — varies by phase
+    // ── Pipeline panel ──
     if (data.phase === "starting" || data.phase === "interpreting") {
-      const lines = [
+      pipeText.content = [
         data.phase === "starting"
           ? "Workflow starting up..."
           : "AI is interpreting your prompt and configuring the pipeline...",
         "",
         "This usually takes 1-2 minutes.",
-        "",
-        "The AI reads your prompt, clarification answers, and the",
-        "repository structure to configure: project name, focus areas,",
-        "build/test commands, code style, and review checklist.",
-      ];
-      pipeText.content = lines.join("\n");
+      ].join("\n");
     } else if (data.phase === "discovering" && data.tickets.length === 0) {
       const lines = [
         "Discovering tickets from specs and codebase...",
         "",
         `Discovery rounds completed: ${data.discoveryCount}`,
-        "",
-        "The agent reads your specs, browses the codebase,",
-        "and generates tickets with complexity tiers.",
       ];
       if (data.activeJobs.length > 0) {
         const discoverJob = data.activeJobs.find(j => j.jobType === "discovery");
         if (discoverJob) {
-          lines.push("", `Running for ${fmtElapsed(discoverJob.elapsedMs)} on ${discoverJob.agentId}`);
+          lines.push("", `Running for ${fmtElapsed(discoverJob.elapsedMs)}`);
         }
       }
       pipeText.content = lines.join("\n");
@@ -419,52 +430,30 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
       pipeText.content = lines.join("\n");
     }
 
-    // Right panel
-    if (focus === "detail" && detail) {
-      rightBox.title = ` ${detail.id} `;
+    // ── Jobs panel (or detail view) ──
+    if (detail) {
+      jobsBox.title = ` ${detail.id} `;
       const lines = [
         detail.title,
         `${detail.tier} | ${detail.priority}`,
         "",
         ...detail.stages.map(s => {
           const icon = stageIcon(s.status as StageStatus);
-          const summary = s.summary ? `: ${s.summary}` : "";
-          return `${s.abbr} ${icon} ${s.status}${truncate(summary, 40)}`;
+          const summary = s.summary ? `: ${truncate(s.summary, 35)}` : "";
+          return `${s.abbr} ${icon} ${s.status}${summary}`;
         }),
       ];
-      if (detail.landSummary) {
-        lines.push("", "Land:", detail.landSummary);
-      }
-      rightText.content = lines.join("\n");
-    } else if (focus === "events") {
-      rightBox.title = ` Event Log (${eventLog.length}) `;
-      if (eventLog.length === 0) {
-        rightText.content = "No events yet";
-      } else {
-        // Show most recent events first
-        const recent = eventLog.slice(-30).reverse();
-        rightText.content = recent.map(e => `${e.time} ${e.message}`).join("\n");
-      }
-    } else if (focus === "logs") {
-      rightBox.title = ` Captured Logs (${capturedLogs.length}) `;
-      const lines = capturedLogs.getAll();
-      if (lines.length === 0) {
-        rightText.content = "No captured output";
-      } else {
-        // Show most recent 40 lines
-        rightText.content = lines.slice(-40).join("\n");
-      }
+      if (detail.landSummary) lines.push("", detail.landSummary);
+      jobsText.content = lines.join("\n");
     } else {
-      // Jobs panel (default for focus === "jobs" or "pipeline")
-      rightBox.title = ` Active Jobs (${data.activeJobs.length}) `;
+      jobsBox.title = ` Active Jobs (${data.activeJobs.length}) `;
       if (data.activeJobs.length === 0) {
-        // Show context-aware empty state
         if (data.phase === "starting" || data.phase === "interpreting") {
-          rightText.content = "Waiting for pipeline to start...";
+          jobsText.content = "Waiting for pipeline to start...";
         } else if (data.phase === "done") {
-          rightText.content = "\x1b[32mAll work complete!\x1b[0m";
+          jobsText.content = "\x1b[32mAll work complete!\x1b[0m";
         } else {
-          rightText.content = "No active jobs — scheduler will fill slots shortly";
+          jobsText.content = "No active jobs";
         }
       } else {
         const lines = data.activeJobs.map(j => {
@@ -473,31 +462,33 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
           const icon = j.jobType === "discovery" ? "\uD83D\uDD0D"
                      : j.jobType.startsWith("ticket:") ? "\u25D0"
                      : "\u2699";
-          return `${icon} ${truncate(label, 20).padEnd(20)} ${truncate(j.agentId, 10).padEnd(10)} ${fmtElapsed(j.elapsedMs)}`;
+          return `${icon} ${truncate(label, 22).padEnd(22)} ${fmtElapsed(j.elapsedMs)}`;
         });
 
-        // If merge queue is active, append merge info
         if (data.mergeQueueActivity) {
           const mq = data.mergeQueueActivity;
-          lines.push("");
-          lines.push("\x1b[1mMerge Queue:\x1b[0m");
-          for (const t of mq.ticketsLanded) {
-            lines.push(`  \x1b[32m\u2714\x1b[0m ${t.ticketId}: ${truncate(t.summary, 40)}`);
-          }
-          for (const t of mq.ticketsEvicted) {
-            lines.push(`  \x1b[31m\u2718\x1b[0m ${t.ticketId}: ${truncate(t.reason, 40)}`);
-          }
-          for (const t of mq.ticketsSkipped) {
-            lines.push(`  \x1b[90m\u2014\x1b[0m ${t.ticketId}: ${truncate(t.reason, 40)}`);
-          }
-          if (mq.summary) {
-            lines.push(`  ${truncate(mq.summary, 50)}`);
-          }
+          lines.push("", "\x1b[1mMerge Queue:\x1b[0m");
+          for (const t of mq.ticketsLanded) lines.push(`  \x1b[32m\u2714\x1b[0m ${t.ticketId}: ${truncate(t.summary, 35)}`);
+          for (const t of mq.ticketsEvicted) lines.push(`  \x1b[31m\u2718\x1b[0m ${t.ticketId}: ${truncate(t.reason, 35)}`);
+          for (const t of mq.ticketsSkipped) lines.push(`  \x1b[90m\u2014\x1b[0m ${t.ticketId}: ${truncate(t.reason, 35)}`);
         }
 
-        rightText.content = lines.join("\n");
+        jobsText.content = lines.join("\n");
       }
     }
+
+    // ── Event Log panel ──
+    eventsBox.title = ` Event Log (${eventLog.length}) `;
+    eventsText.content = eventLog.length === 0
+      ? "No events yet"
+      : eventLog.slice(-40).reverse().map(e => `${e.time} ${e.message}`).join("\n");
+
+    // ── Logs panel ──
+    logsBox.title = ` Logs (${capturedLogs.length}) `;
+    const logLines = capturedLogs.getAll();
+    logsText.content = logLines.length === 0
+      ? "No output captured"
+      : logLines.slice(-40).join("\n");
 
     renderer.requestRender();
   }
@@ -534,11 +525,8 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
         const row = db.query(`SELECT summary FROM land WHERE run_id = ? AND node_id = ? ORDER BY iteration DESC LIMIT 1`)
           .get(runId, `${ticketId}:land`) as any;
         if (row) landSummary = row.summary;
-      } catch {
-        // land table may not exist yet
-      }
+      } catch {}
 
-      // Also check merge_queue_result for land info
       if (!landSummary) {
         try {
           const rows = db.query(`SELECT tickets_landed, tickets_evicted FROM merge_queue_result WHERE run_id = ? ORDER BY iteration DESC LIMIT 1`)
@@ -551,9 +539,7 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
             if (landedEntry) landSummary = `Landed: ${landedEntry.summary}`;
             if (evictedEntry) landSummary = `Evicted: ${evictedEntry.reason} — ${evictedEntry.details}`;
           }
-        } catch {
-          // merge_queue_result table may not exist yet
-        }
+        } catch {}
       }
 
       db.close();
@@ -571,36 +557,12 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
     landed: number,
     mergeQueueActive: boolean,
   ): WorkflowPhase {
-    // All tickets landed and no active jobs
-    if (tickets.length > 0 && landed === tickets.length && activeJobs.length === 0) {
-      return "done";
-    }
-
-    // Merge queue is actively running
-    if (mergeQueueActive) {
-      return "merging";
-    }
-
-    // InterpretConfig hasn't completed
-    if (!hasInterpretConfig) {
-      return "interpreting";
-    }
-
-    // Have tickets in the pipeline
-    if (tickets.length > 0 && tickets.some(t => t.landStatus !== "landed")) {
-      return "pipeline";
-    }
-
-    // No tickets yet but discovery job is running
-    if (activeJobs.some(j => j.jobType === "discovery")) {
-      return "discovering";
-    }
-
-    // InterpretConfig done but no tickets and no discovery — brief transitional state
-    if (tickets.length === 0) {
-      return "discovering";
-    }
-
+    if (tickets.length > 0 && landed === tickets.length && activeJobs.length === 0) return "done";
+    if (mergeQueueActive) return "merging";
+    if (!hasInterpretConfig) return "interpreting";
+    if (tickets.length > 0 && tickets.some(t => t.landStatus !== "landed")) return "pipeline";
+    if (activeJobs.some(j => j.jobType === "discovery")) return "discovering";
+    if (tickets.length === 0) return "discovering";
     return "pipeline";
   }
 
@@ -609,7 +571,6 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
     const now = Date.now();
     lastError = null;
 
-    // Check if DB file exists yet
     if (!existsSync(dbPath)) {
       data = { ...data, phase: "starting" };
       return;
@@ -618,16 +579,14 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
     try {
       const db = new Database(dbPath, { readonly: true });
 
-      // 1. Check if InterpretConfig has completed
+      // 1. InterpretConfig status
       let hasInterpretConfig = false;
       try {
         const row = db.query(`SELECT 1 FROM interpret_config WHERE run_id = ? LIMIT 1`).get(runId) as any;
         hasInterpretConfig = !!row;
-      } catch {
-        // Table may not exist yet — that's fine, means InterpretConfig hasn't run
-      }
+      } catch {}
 
-      // 2. All discovered tickets (process in iteration order so later discoveries override)
+      // 2. Discovered tickets
       const ticketMap = new Map<string, { id: string; title: string; tier: string; priority: string }>();
       let discoveryCount = 0;
       try {
@@ -647,26 +606,18 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
                 });
               }
             }
-          } catch {
-            // Malformed JSON in a discovery row — skip it
-          }
+          } catch {}
         }
-      } catch {
-        // discover table doesn't exist yet
-      }
+      } catch {}
 
-      // 3. Node states from Smithers (one query for all)
-      const nodeState = new Map<string, string>(); // node_id -> state
+      // 3. Node states
+      const nodeState = new Map<string, string>();
       try {
-        const rows = db.query(
-          `SELECT node_id, state FROM _smithers_nodes WHERE run_id = ? ORDER BY iteration ASC`
-        ).all(runId) as any[];
+        const rows = db.query(`SELECT node_id, state FROM _smithers_nodes WHERE run_id = ? ORDER BY iteration ASC`).all(runId) as any[];
         for (const r of rows) nodeState.set(r.node_id, r.state);
-      } catch {
-        // _smithers_nodes table may not exist yet
-      }
+      } catch {}
 
-      // 4. Active jobs from scheduled-tasks DB
+      // 4. Active jobs — prefer scheduled-tasks.db, fall back to _smithers_attempts
       let activeJobs: ActiveJob[] = [];
       try {
         if (existsSync(scheduledDbPath)) {
@@ -686,7 +637,22 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
         lastError = `scheduled-tasks.db: ${err instanceof Error ? err.message : "unknown"}`;
       }
 
-      // 5. Land status (latest iteration per ticket wins)
+      // Fallback: read in-progress from _smithers_attempts when scheduled-tasks.db is absent/empty
+      if (activeJobs.length === 0) {
+        try {
+          const rows = db.query(
+            `SELECT node_id, started_at_ms FROM _smithers_attempts WHERE run_id = ? AND state = 'in-progress' ORDER BY started_at_ms ASC`
+          ).all(runId) as any[];
+          activeJobs = rows.map(r => {
+            const parts = (r.node_id as string).split(":");
+            const jobType = parts.length > 1 ? `ticket:${parts[parts.length - 1]}` : r.node_id;
+            const ticketId = parts.length > 1 ? parts.slice(0, -1).join(":") : null;
+            return { jobType, agentId: "claude", ticketId, elapsedMs: now - (r.started_at_ms || now) };
+          });
+        } catch {}
+      }
+
+      // 5. Land status
       const landMap = new Map<string, "landed" | "evicted">();
       try {
         const rows = db.query(`SELECT node_id, merged, evicted FROM land WHERE run_id = ? ORDER BY iteration DESC`).all(runId) as any[];
@@ -697,15 +663,12 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
             else if (r.evicted) landMap.set(tid, "evicted");
           }
         }
-      } catch {
-        // land table may not exist yet
-      }
+      } catch {}
 
-      // 6. Also check merge_queue_result for landed/evicted tickets
+      // 6. Merge queue activity
       let mergeQueueActivity: MergeQueueActivity | null = null;
       let mergeQueueNodeActive = false;
       try {
-        // Check if merge queue node is currently running
         const mqState = nodeState.get("agentic-merge-queue");
         mergeQueueNodeActive = mqState === "in-progress";
 
@@ -715,47 +678,25 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
           const landed = JSON.parse(row.tickets_landed || "[]");
           const evicted = JSON.parse(row.tickets_evicted || "[]");
           const skipped = JSON.parse(row.tickets_skipped || "[]");
-
-          mergeQueueActivity = {
-            ticketsLanded: landed,
-            ticketsEvicted: evicted,
-            ticketsSkipped: skipped,
-            summary: row.summary || null,
-          };
-
-          // Also update landMap from merge queue results
-          for (const t of landed) {
-            if (t.ticketId && !landMap.has(t.ticketId)) {
-              landMap.set(t.ticketId, "landed");
-            }
-          }
-          for (const t of evicted) {
-            if (t.ticketId && !landMap.has(t.ticketId)) {
-              landMap.set(t.ticketId, "evicted");
-            }
-          }
+          mergeQueueActivity = { ticketsLanded: landed, ticketsEvicted: evicted, ticketsSkipped: skipped, summary: row.summary || null };
+          for (const t of landed) if (t.ticketId && !landMap.has(t.ticketId)) landMap.set(t.ticketId, "landed");
+          for (const t of evicted) if (t.ticketId && !landMap.has(t.ticketId)) landMap.set(t.ticketId, "evicted");
         }
-      } catch {
-        // merge_queue_result table may not exist yet
-      }
+      } catch {}
 
-      // 7. Max concurrency (latest iteration)
+      // 7. Max concurrency
       let maxConcurrency = 0;
       try {
         const row = db.query(`SELECT max_concurrency FROM interpret_config WHERE run_id = ? ORDER BY iteration DESC LIMIT 1`).get(runId) as any;
         if (row) maxConcurrency = row.max_concurrency || 0;
-      } catch {
-        // interpret_config table may not exist yet
-      }
+      } catch {}
 
-      // 8. Scheduler reasoning (latest)
+      // 8. Scheduler reasoning
       let schedulerReasoning: string | null = null;
       try {
         const row = db.query(`SELECT reasoning FROM ticket_schedule WHERE run_id = ? ORDER BY iteration DESC LIMIT 1`).get(runId) as any;
         if (row) schedulerReasoning = row.reasoning;
-      } catch {
-        // ticket_schedule table may not exist yet
-      }
+      } catch {}
 
       db.close();
 
@@ -778,12 +719,11 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
 
         tickets.push({
           id: t.id, title: t.title, tier: t.tier, priority: t.priority,
-          stages,
-          landStatus: landMap.get(t.id) || null,
+          stages, landStatus: landMap.get(t.id) || null,
         });
       });
 
-      // Sort: running first, then landed last, then by priority
+      // Sort: running first, landed last, then by priority
       const priOrd: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
       tickets.sort((a, b) => {
         const aRun = a.stages.some(s => s.status === "running") ? 0 : 1;
@@ -798,53 +738,30 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
       const landed = tickets.filter(t => t.landStatus === "landed").length;
       const evicted = tickets.filter(t => t.landStatus === "evicted").length;
 
-      // Detect workflow phase
-      const phase = detectPhase(
-        hasInterpretConfig, tickets, activeJobs, landed,
-        mergeQueueNodeActive,
-      );
+      const phase = detectPhase(hasInterpretConfig, tickets, activeJobs, landed, mergeQueueNodeActive);
 
       // Log phase transitions
       if (phase !== prevPhase) {
-        const phaseLabel = PHASE_DISPLAY[phase].label;
-        addEvent(`Phase: ${phaseLabel}`);
-        if (phase === "discovering" && prevPhase === "interpreting") {
-          addEvent("Config interpreted — starting ticket discovery");
-        } else if (phase === "pipeline" && prevPhase === "discovering") {
-          addEvent(`Tickets discovered (${tickets.length}) — pipeline starting`);
-        } else if (phase === "merging") {
-          addEvent("Merge queue activated — landing completed tickets");
-        } else if (phase === "done") {
-          addEvent(`All ${tickets.length} tickets landed — workflow complete`);
-        }
+        addEvent(`Phase: ${PHASE_DISPLAY[phase].label}`);
+        if (phase === "discovering" && prevPhase === "interpreting") addEvent("Config interpreted — starting ticket discovery");
+        else if (phase === "pipeline" && prevPhase === "discovering") addEvent(`Tickets discovered (${tickets.length}) — pipeline starting`);
+        else if (phase === "merging") addEvent("Merge queue activated — landing completed tickets");
+        else if (phase === "done") addEvent(`All ${tickets.length} tickets landed — workflow complete`);
         prevPhase = phase;
       }
 
-      // Log notable changes
-      if (data.landed < landed) {
-        const newlyLanded = landed - data.landed;
-        addEvent(`${newlyLanded} ticket(s) landed (total: ${landed}/${tickets.length})`);
-      }
-      if (data.evicted < evicted) {
-        const newlyEvicted = evicted - data.evicted;
-        addEvent(`${newlyEvicted} ticket(s) evicted`);
-      }
-      if (data.discovered < tickets.length) {
-        const newTickets = tickets.length - data.discovered;
-        addEvent(`${newTickets} new ticket(s) discovered (total: ${tickets.length})`);
-      }
+      if (data.landed < landed) addEvent(`${landed - data.landed} ticket(s) landed (total: ${landed}/${tickets.length})`);
+      if (data.evicted < evicted) addEvent(`${evicted - data.evicted} ticket(s) evicted`);
+      if (data.discovered < tickets.length) addEvent(`${tickets.length - data.discovered} new ticket(s) discovered (total: ${tickets.length})`);
 
       data = {
         tickets, activeJobs,
         discovered: tickets.length, landed, evicted,
         inPipeline: tickets.length - landed,
-        maxConcurrency,
-        phase, mergeQueueActivity, schedulerReasoning, discoveryCount,
+        maxConcurrency, phase, mergeQueueActivity, schedulerReasoning, discoveryCount,
       };
 
-      if (selectedIdx >= data.tickets.length) {
-        selectedIdx = Math.max(0, data.tickets.length - 1);
-      }
+      if (selectedIdx >= data.tickets.length) selectedIdx = Math.max(0, data.tickets.length - 1);
     } catch (err) {
       lastError = `Poll failed: ${err instanceof Error ? err.message : "unknown"}`;
     }
@@ -861,40 +778,25 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
   renderer.prependInputHandler((seq: string) => {
     if (!isRunning) return false;
 
-    // Ctrl+C or Q/q — exit
     if (seq === "\x03" || seq === "q" || seq === "Q") {
       shutdown();
       return true;
     }
 
-    // Tab — cycle through focus modes
+    // Tab — cycle focus: pipeline → jobs → events → logs → pipeline
     if (seq === "\t") {
-      const modes: typeof focus[] = ["pipeline", "jobs", "events", "logs"];
-      const idx = modes.indexOf(focus === "detail" ? "pipeline" : focus);
+      const modes: Array<typeof focus> = ["pipeline", "jobs", "events", "logs"];
+      const base = focus;
+      const idx = modes.indexOf(base);
       focus = modes[(idx + 1) % modes.length];
-      detail = null;
+      // Clear detail when leaving jobs panel
+      if (focus !== "jobs") detail = null;
       update();
       return true;
     }
 
-    // E — jump to events
-    if (seq === "e" || seq === "E") {
-      focus = "events";
-      detail = null;
-      update();
-      return true;
-    }
-
-    // L — jump to logs
-    if (seq === "l" || seq === "L") {
-      focus = "logs";
-      detail = null;
-      update();
-      return true;
-    }
-
-    // Esc — back to pipeline
-    if (seq === "\x1b" && (focus === "detail" || focus === "events" || focus === "logs")) {
+    // Esc — back to pipeline, clear detail
+    if (seq === "\x1b") {
       focus = "pipeline";
       detail = null;
       update();
@@ -908,17 +810,19 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
       if (seq === "\r" || seq === "\n") {
         const t = data.tickets[selectedIdx];
         if (t) {
-          focus = "detail";
+          focus = "jobs";
           fetchDetail(t.id).then(update);
         }
         return true;
       }
     }
 
-    // Scrolling in right panels
-    if (focus === "jobs" || focus === "detail" || focus === "events" || focus === "logs") {
-      if (seq === "\x1b[A") { rightScroll.scrollBy(-3, "step"); return true; }
-      if (seq === "\x1b[B") { rightScroll.scrollBy(3, "step"); return true; }
+    // Scroll in focused right panel
+    const scrollMap: Record<string, any> = { jobs: jobsScroll, events: eventsScroll, logs: logsScroll };
+    const activeScroll = scrollMap[focus];
+    if (activeScroll) {
+      if (seq === "\x1b[A") { activeScroll.scrollBy(-3, "step"); return true; }
+      if (seq === "\x1b[B") { activeScroll.scrollBy(3, "step"); return true; }
     }
 
     return false;
@@ -929,7 +833,6 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
   update();
   renderer.start();
 
-  // Adaptive polling: faster when jobs are active, slower when idle
   while (isRunning) {
     const interval = data.activeJobs.length > 0 ? 1500 : 3000;
     await new Promise(r => setTimeout(r, interval));
