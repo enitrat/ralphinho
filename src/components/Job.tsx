@@ -256,10 +256,12 @@ export function Job({
                   specSeverity={latestSpecReview?.severity ?? "none"} codeSeverity={worstCodeSeverity}
                   allIssuesResolved={(ctx.outputMaybe("review_fix", { nodeId: `${ticket.id}:review-fix` }) as any)?.allIssuesResolved ?? true}
                   reviewRounds={1}
-                  goTests={latestTest?.goTestsPassed ? "PASS" : "FAIL"}
-                  rustTests={latestTest?.rustTestsPassed ? "PASS" : "FAIL"}
-                  e2eTests={latestTest?.e2eTestsPassed ? "PASS" : "FAIL"}
-                  sqlcGen={latestTest?.sqlcGenPassed ? "PASS" : "FAIL"}
+                  testResults={latestTest ? [
+                    { name: "Go tests", status: latestTest.goTestsPassed ? "PASS" : "FAIL" },
+                    { name: "Rust tests", status: latestTest.rustTestsPassed ? "PASS" : "FAIL" },
+                    { name: "E2E tests", status: latestTest.e2eTestsPassed ? "PASS" : "FAIL" },
+                    { name: "sqlc gen", status: latestTest.sqlcGenPassed ? "PASS" : "FAIL" },
+                  ] : []}
                 />
               </Task>
             );
