@@ -49,6 +49,7 @@ export type SuperRalphProps = {
   mergeQueueOrdering?: MergeQueueOrderingStrategy;
   maxSpeculativeDepth?: number;
   mergeQueueId?: string;
+  repoRoot?: string;
   children?: ReactNode;
 };
 
@@ -83,6 +84,7 @@ export function SuperRalph({
   preLandChecks = [],
   postLandChecks = [],
   maxSpeculativeDepth = 3,
+  repoRoot = process.cwd(),
 }: SuperRalphProps) {
 
   const { completed: completedTicketIds, unfinished: unfinishedTickets } = selectAllTickets(ctx);
@@ -179,7 +181,7 @@ export function SuperRalph({
           ctx={ctx} outputs={outputs} tickets={mergeQueueTickets}
           agent={resolveAgent(agentPool, mergeQueueAgentId)}
           postLandChecks={ciCommands} preLandChecks={preLandChecks}
-          repoRoot={process.cwd()} mainBranch={mainBranch}
+          repoRoot={repoRoot} mainBranch={mainBranch}
           maxSpeculativeDepth={maxSpeculativeDepth} output={outputs.merge_queue_result}
         />
       </Parallel>

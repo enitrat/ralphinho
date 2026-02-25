@@ -394,6 +394,7 @@ export default smithers((ctx) => (
         <SuperRalph
           ctx={ctx}
           outputs={outputs}
+          repoRoot={REPO_ROOT}
           {...getInterpretedConfig(ctx)}
           agents={{
             planning: { agent: planningAgent, description: "Plan and research next tickets." },
