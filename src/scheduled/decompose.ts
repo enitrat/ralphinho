@@ -24,6 +24,7 @@ Your job is to:
 - Dependencies should only exist where there's a real code dependency (shared types, imports, etc.)
 - Don't create artificial sequential ordering — if two units can be done in parallel, they should have no deps between them
 - Acceptance criteria must be verifiable (not vague like "works correctly")
+- **Tests are part of the work unit, not a follow-on unit.** Do NOT create separate "write tests for X" units. Tests for a behavior are written alongside that behavior in the same unit. A unit that adds a feature includes both the implementation and the tests. A unit that fixes a bug includes the reproducing test and the fix. Never decompose "implement X" + "test X" as two separate units.
 
 ## Complexity Tiers
 
