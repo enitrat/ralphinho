@@ -4,10 +4,19 @@
  * The generated workflow:
  * 1. Loads work-plan.json at startup
  * 2. Uses a Ralph loop to process work units layer by layer (DAG-driven)
- * 3. Each layer runs units in Parallel (with Worktrees for isolation)
- * 4. Each unit runs through the quality pipeline:
- *    Research → Plan → Implement → Test → PRD-Review + Code-Review (parallel) → ReviewFix → FinalReview
- * 5. Completed units feed into an AgenticMergeQueue
+ * 3. Each layer has 2 phases:
+ *    a. Parallel quality pipelines — each unit runs in an isolated Worktree
+ *       on its own branch ("unit/{id}")
+ *    b. AgenticMergeQueue task — lands tier-complete units onto main,
+ *       evicts units with conflicts (conflict details fed back to implementer)
+ *    Land status is read directly from sw_merge_queue outputs — no separate
+ *    land-record phase needed.
+ * 4. Each unit's quality pipeline:
+ *    Research → Plan → Implement → Test → PRD-Review + Code-Review (parallel)
+ *    → ReviewFix → FinalReview
+ * 5. unitComplete() gates on landed=true — a unit is only "done" once its
+ *    changes are confirmed on main. Evicted units re-run on the next Ralph
+ *    pass with conflict context injected into the implement prompt.
  *
  * Unlike super-ralph's AI-driven scheduler, this is deterministic:
  * the DAG determines parallelism and ordering.
@@ -54,7 +63,8 @@ const PLAN_PATH = ${JSON.stringify(planPath)};
 const HAS_CLAUDE = ${detectedAgents.claude};
 const HAS_CODEX = ${detectedAgents.codex};
 const MAX_CONCURRENCY = ${maxConcurrency};
-const MAX_PASSES = 3; // Max review-fix iterations per unit
+const MAX_PASSES = 3; // Max Ralph iterations before giving up
+const MAIN_BRANCH = "main";
 
 // ── Load work plan ────────────────────────────────────────────────────
 
@@ -91,6 +101,12 @@ function computeLayers(units: any[]): any[][] {
 
 const layers = computeLayers(units);
 
+// Map each unit to its layer index (for reading merge queue outputs)
+const unitLayerMap = new Map<string, number>();
+layers.forEach((layer: any[], idx: number) => {
+  layer.forEach((u: any) => unitLayerMap.set(u.id, idx));
+});
+
 // ── Agent setup ───────────────────────────────────────────────────────
 
 const WORKSPACE_POLICY = \`
@@ -111,9 +127,9 @@ function buildSystemPrompt(role: string): string {
   return ["# Role: " + role, WORKSPACE_POLICY, JSON_OUTPUT].join("\\n\\n");
 }
 
-function createClaude(role: string) {
+function createClaude(role: string, model: string = "claude-sonnet-4-6") {
   return new ClaudeCodeAgent({
-    model: "claude-sonnet-4-6",
+    model,
     systemPrompt: buildSystemPrompt(role),
     cwd: REPO_ROOT,
     dangerouslySkipPermissions: true,
@@ -131,21 +147,80 @@ function createCodex(role: string) {
   });
 }
 
-function chooseAgent(primary: "claude" | "codex", role: string) {
+function chooseAgent(primary: "claude" | "codex" | "opus", role: string) {
+  if (primary === "opus" && HAS_CLAUDE) return createClaude(role, "claude-opus-4-6");
   if (primary === "claude" && HAS_CLAUDE) return createClaude(role);
   if (primary === "codex" && HAS_CODEX) return createCodex(role);
   if (HAS_CLAUDE) return createClaude(role);
   return createCodex(role);
 }
 
-const researcher = chooseAgent("claude", "Researcher — Gather context from codebase for implementation");
-const planner = chooseAgent("claude", "Planner — Create implementation plan from RFC section and context");
-const implementer = chooseAgent("codex", "Implementer — Write code following the plan");
-const tester = chooseAgent("claude", "Tester — Run tests and validate implementation");
-const prdReviewer = chooseAgent("claude", "PRD Reviewer — Verify implementation matches RFC specification");
-const codeReviewer = chooseAgent("claude", "Code Reviewer — Check code quality, conventions, security");
-const reviewFixer = chooseAgent("codex", "ReviewFixer — Fix issues found in code review");
-const finalReviewer = chooseAgent("claude", "Final Reviewer — Decide if unit is complete");
+// ── Merge queue prompt builder ────────────────────────────────────────
+
+function buildMergeQueuePrompt(
+  tickets: Array<{ id: string; name: string; filesModified: string[]; filesCreated: string[] }>,
+  repoRoot: string,
+  mainBranch: string,
+  testCmd: string
+): string {
+  var prompt = "# Merge Queue: Land completed units onto " + mainBranch + "\\n\\n";
+  prompt += "Repository: " + repoRoot + "\\n\\n";
+  prompt += "## Tickets to land (" + tickets.length + "):\\n\\n";
+  for (var i = 0; i < tickets.length; i++) {
+    var t = tickets[i];
+    prompt += "### " + t.id + ": " + t.name + "\\n";
+    prompt += "Branch/workspace: unit/" + t.id + "\\n";
+    prompt += "Worktree path: /tmp/workflow-wt-" + t.id + "\\n";
+    if (t.filesModified && t.filesModified.length > 0) {
+      prompt += "Files modified: " + t.filesModified.join(", ") + "\\n";
+    }
+    if (t.filesCreated && t.filesCreated.length > 0) {
+      prompt += "Files created: " + t.filesCreated.join(", ") + "\\n";
+    }
+    prompt += "\\n";
+  }
+  prompt += "## Instructions\\n\\n";
+  prompt += "This repository uses jj (Jujutsu VCS), colocated with git.\\n";
+  prompt += "Land each ticket onto " + mainBranch + " in order. For each ticket:\\n\\n";
+  prompt += "1. Verify the workspace exists: jj workspace list\\n";
+  prompt += "2. Switch to the ticket workspace (cd into /tmp/workflow-wt-{id})\\n";
+  prompt += "3. Rebase onto " + mainBranch + ": jj rebase -d " + mainBranch + "\\n";
+  prompt += "4. IF CONFLICT:\\n";
+  prompt += "   - Capture the full conflict details (which files, which lines, competing changes)\\n";
+  prompt += "   - Mark this ticket as EVICTED with complete conflict context\\n";
+  prompt += "   - Do NOT attempt to resolve the conflict — evict and move on\\n";
+  prompt += "5. IF CLEAN REBASE:\\n";
+  prompt += "   - Run tests to verify the rebased code still passes: " + testCmd + "\\n";
+  prompt += "   - IF TESTS FAIL: mark this ticket as EVICTED with the test failure output as details\\n";
+  prompt += "   - IF TESTS PASS: proceed to land\\n";
+  prompt += "   - Fast-forward main: jj bookmark set " + mainBranch + " --to @\\n";
+  prompt += "   - Push to remote: jj git push --bookmark " + mainBranch + "\\n";
+  prompt += "   - Capture the merge commit: jj log -r " + mainBranch + " --no-graph -T 'commit_id.short()'\\n";
+  prompt += "   - Mark ticket as LANDED with the commit hash\\n\\n";
+  prompt += "Process ALL tickets before returning results.\\n\\n";
+  prompt += "## Output format\\n";
+  prompt += "Return JSON with:\\n";
+  prompt += "- ticketsLanded: [{ticketId, mergeCommit, summary}] — successfully landed\\n";
+  prompt += "- ticketsEvicted: [{ticketId, reason, details}] — had conflicts\\n";
+  prompt += "  (details MUST include full conflict context: files, line ranges, competing changes)\\n";
+  prompt += "  (this context is fed directly back to the implementer on the next pass)\\n";
+  prompt += "- ticketsSkipped: [{ticketId, reason}] — skipped for other reasons\\n";
+  prompt += "- summary: overall summary string\\n";
+  prompt += "- nextActions: any follow-up needed, or null\\n";
+  return prompt;
+}
+
+// ── Agents ────────────────────────────────────────────────────────────
+
+const researcher    = chooseAgent("claude", "Researcher — Gather context from codebase for implementation");
+const planner       = chooseAgent("opus",   "Planner — Create implementation plan from RFC section and context");
+const implementer   = chooseAgent("codex",  "Implementer — Write code following the plan");
+const tester        = chooseAgent("claude", "Tester — Run tests and validate implementation");
+const prdReviewer   = chooseAgent("claude", "PRD Reviewer — Verify implementation matches RFC specification");
+const codeReviewer  = chooseAgent("opus",   "Code Reviewer — Check code quality, conventions, security");
+const reviewFixer   = chooseAgent("codex",  "ReviewFixer — Fix issues found in code review");
+const finalReviewer = chooseAgent("opus",   "Final Reviewer — Decide if unit is complete");
+const mergeQueueAgent = chooseAgent("opus", "MergeQueue Coordinator — Rebase and land unit branches onto main; evict on conflict");
 
 // ── Smithers setup ────────────────────────────────────────────────────
 
@@ -157,8 +232,10 @@ const { smithers, outputs, Workflow } = createSmithers(
 // ── Workflow ──────────────────────────────────────────────────────────
 
 export default smithers((ctx) => {
-  // Check unit completion — tier-aware: each tier completes at its last stage
-  const unitComplete = (unitId: string): boolean => {
+  // ── Quality-pipeline gate ──────────────────────────────────────────
+  // tierComplete: true when a unit has passed all quality checks for its tier.
+  // This does NOT mean the unit is done — it still needs to land on main.
+  const tierComplete = (unitId: string): boolean => {
     const unit = units.find((u: any) => u.id === unitId);
     const tier = unit?.tier ?? "large";
 
@@ -174,11 +251,9 @@ export default smithers((ctx) => {
         return cr?.approved ?? false;
       }
       case "medium": {
-        // If both reviews approved, review-fix is skipped → unit is complete
         const prd = ctx.latest("sw_prd_review", unitId + ":prd-review");
         const cr = ctx.latest("sw_code_review", unitId + ":code-review");
         if ((prd?.approved ?? false) && (cr?.approved ?? false)) return true;
-        // Otherwise check review-fix result
         const rf = ctx.latest("sw_review_fix", unitId + ":review-fix");
         return rf?.allIssuesResolved ?? false;
       }
@@ -189,6 +264,41 @@ export default smithers((ctx) => {
       }
     }
   };
+
+  // ── Landing gate ──────────────────────────────────────────────────
+  // Land status is read directly from sw_merge_queue outputs (no separate
+  // sw_land records). This eliminates the one-pass-behind propagation bug
+  // where Phase 3 compute tasks used stale render-time mqOutput values.
+  // Note: at render time these reflect the PREVIOUS pass's merge results,
+  // which is inherent to the React-like render model. Ralph re-evaluates
+  // on each iteration, so status converges within one extra render.
+
+  const unitLanded = (unitId: string): boolean => {
+    const layerIdx = unitLayerMap.get(unitId);
+    if (layerIdx === undefined) return false;
+    const mq = ctx.latest("sw_merge_queue", "merge-queue:layer-" + layerIdx);
+    return mq?.ticketsLanded?.some((t: any) => t.ticketId === unitId) ?? false;
+  };
+
+  const unitEvicted = (unitId: string): boolean => {
+    if (unitLanded(unitId)) return false; // landed supersedes eviction
+    const layerIdx = unitLayerMap.get(unitId);
+    if (layerIdx === undefined) return false;
+    const mq = ctx.latest("sw_merge_queue", "merge-queue:layer-" + layerIdx);
+    return mq?.ticketsEvicted?.some((t: any) => t.ticketId === unitId) ?? false;
+  };
+
+  const getEvictionContext = (unitId: string): string | null => {
+    if (unitLanded(unitId)) return null;
+    const layerIdx = unitLayerMap.get(unitId);
+    if (layerIdx === undefined) return null;
+    const mq = ctx.latest("sw_merge_queue", "merge-queue:layer-" + layerIdx);
+    const entry = mq?.ticketsEvicted?.find((t: any) => t.ticketId === unitId);
+    return entry?.details ?? null;
+  };
+
+  // unitComplete: a unit is done only once it has landed on main
+  const unitComplete = (unitId: string): boolean => unitLanded(unitId);
 
   // Check if tier requires a step
   const tierHasStep = (tier: string, step: string): boolean => {
@@ -208,43 +318,74 @@ export default smithers((ctx) => {
   const allUnitsComplete = units.every((u: any) => unitComplete(u.id));
   const done = currentPass >= MAX_PASSES || allUnitsComplete;
 
-  // Completed unit IDs for merge queue
-  const completedUnitIds = units
-    .filter((u: any) => unitComplete(u.id))
-    .map((u: any) => u.id);
-
   return (
     <Workflow name="scheduled-work" cache>
       <Ralph until={done} maxIterations={MAX_PASSES * units.length * 20} onMaxReached="return-last">
         <Sequence>
-          {/* Process each layer sequentially; units within a layer run in parallel */}
-          {layers.map((layer: any[], layerIdx: number) => (
-            <Parallel key={"layer-" + layerIdx} maxConcurrency={MAX_CONCURRENCY}>
-              {layer.map((unit: any) => {
-                const uid = unit.id;
-                if (unitComplete(uid)) return null;
+          {/* Process each layer sequentially.
+              Each layer runs as a Sequence of 2 phases:
+                1. Parallel quality pipelines (isolated Worktrees, one per unit)
+                2. AgenticMergeQueue — lands tier-complete units onto main
+              Land status is read directly from sw_merge_queue by unitLanded().
+              Evicted units re-run from Phase 1 on the next Ralph iteration,
+              with conflict context injected into their implement prompt. */}
+          {layers.map((layer: any[], layerIdx: number) => {
+            const mqNodeId = "merge-queue:layer-" + layerIdx;
 
-                // Read prior outputs for this unit
-                const research = ctx.outputMaybe("sw_research", { nodeId: uid + ":research" });
-                const plan = ctx.outputMaybe("sw_plan", { nodeId: uid + ":plan" });
-                const impl = ctx.outputMaybe("sw_implement", { nodeId: uid + ":implement" });
-                const test = ctx.outputMaybe("sw_test", { nodeId: uid + ":test" });
-                const prdReview = ctx.outputMaybe("sw_prd_review", { nodeId: uid + ":prd-review" });
-                const codeReview = ctx.outputMaybe("sw_code_review", { nodeId: uid + ":code-review" });
-                const reviewFix = ctx.outputMaybe("sw_review_fix", { nodeId: uid + ":review-fix" });
-                const finalReview = ctx.outputMaybe("sw_final_review", { nodeId: uid + ":final-review" });
+            // Units ready to land: tier-complete, not yet landed, and (if
+            // previously evicted) must have passing tests.
+            // Note: toMerge is computed at render time (one pass behind).
+            // The merge queue agent provides defense-in-depth by running
+            // tests after rebase before landing.
+            const toMerge = layer.filter((u: any) => {
+              if (unitLanded(u.id)) return false;
+              if (!tierComplete(u.id)) return false;
+              if (unitEvicted(u.id)) {
+                // Re-queue only if the implementer produced fresh passing tests
+                const freshTest = ctx.outputMaybe("sw_test", { nodeId: u.id + ":test" });
+                return freshTest?.testsPassed === true && freshTest?.buildPassed === true;
+              }
+              return true;
+            }).map((u: any) => {
+              const impl = ctx.outputMaybe("sw_implement", { nodeId: u.id + ":implement" });
+              return {
+                id: u.id,
+                name: u.name,
+                filesModified: (impl?.filesModified as string[] | null) ?? [],
+                filesCreated: (impl?.filesCreated as string[] | null) ?? [],
+              };
+            });
 
-                return (
-                  <Worktree key={uid} path={"/tmp/workflow-wt-" + uid}>
-                    <Sequence>
-                      {/* Research (large/medium only) */}
-                      {tierHasStep(unit.tier, "research") && (
-                        <Task
-                          id={uid + ":research"}
-                          output={outputs.sw_research}
-                          agent={researcher}
-                        >
-                          {\`# Research: \${unit.name}
+            return (
+              <Sequence key={"layer-" + layerIdx}>
+                {/* ── Phase 1: Quality pipelines ─────────────────── */}
+                <Parallel maxConcurrency={MAX_CONCURRENCY}>
+                  {layer.map((unit: any) => {
+                    const uid = unit.id;
+                    if (unitLanded(uid)) return null;
+
+                    // Read prior outputs for this unit
+                    const research   = ctx.outputMaybe("sw_research",     { nodeId: uid + ":research" });
+                    const plan       = ctx.outputMaybe("sw_plan",          { nodeId: uid + ":plan" });
+                    const impl       = ctx.outputMaybe("sw_implement",     { nodeId: uid + ":implement" });
+                    const test       = ctx.outputMaybe("sw_test",          { nodeId: uid + ":test" });
+                    const prdReview  = ctx.outputMaybe("sw_prd_review",    { nodeId: uid + ":prd-review" });
+                    const codeReview = ctx.outputMaybe("sw_code_review",   { nodeId: uid + ":code-review" });
+                    const reviewFix  = ctx.outputMaybe("sw_review_fix",    { nodeId: uid + ":review-fix" });
+                    const finalReview = ctx.outputMaybe("sw_final_review", { nodeId: uid + ":final-review" });
+                    const evictionCtx = getEvictionContext(uid);
+
+                    return (
+                      <Worktree key={uid} path={"/tmp/workflow-wt-" + uid} branch={"unit/" + uid}>
+                        <Sequence>
+                          {/* Research (large/medium only) */}
+                          {tierHasStep(unit.tier, "research") && (
+                            <Task
+                              id={uid + ":research"}
+                              output={outputs.sw_research}
+                              agent={researcher}
+                            >
+                              {\`# Research: \${unit.name}
 
 ## RFC File
 \${workPlan.source}
@@ -266,17 +407,17 @@ Gather all context needed to implement this work unit:
 
 ## Output
 Return JSON with: contextFilePath, findings (array), referencesRead (array), openQuestions (array)\`}
-                        </Task>
-                      )}
+                            </Task>
+                          )}
 
-                      {/* Plan (large/medium only) */}
-                      {tierHasStep(unit.tier, "plan") && (
-                        <Task
-                          id={uid + ":plan"}
-                          output={outputs.sw_plan}
-                          agent={planner}
-                        >
-                          {\`# Plan: \${unit.name}
+                          {/* Plan (large/medium only) */}
+                          {tierHasStep(unit.tier, "plan") && (
+                            <Task
+                              id={uid + ":plan"}
+                              output={outputs.sw_plan}
+                              agent={planner}
+                            >
+                              {\`# Plan: \${unit.name}
 
 ## RFC Section(s): \${unit.rfcSections.join(", ")}
 
@@ -300,16 +441,16 @@ Create a detailed implementation plan:
 
 ## Output
 Return JSON with: planFilePath, implementationSteps (array), filesToCreate (array), filesToModify (array), complexity\`}
-                        </Task>
-                      )}
+                            </Task>
+                          )}
 
-                      {/* Implement */}
-                      <Task
-                        id={uid + ":implement"}
-                        output={outputs.sw_implement}
-                        agent={implementer}
-                      >
-                        {\`# Implement: \${unit.name}
+                          {/* Implement */}
+                          <Task
+                            id={uid + ":implement"}
+                            output={outputs.sw_implement}
+                            agent={implementer}
+                          >
+                            {\`# Implement: \${unit.name}
 
 ## RFC Section(s): \${unit.rfcSections.join(", ")}
 
@@ -330,6 +471,7 @@ Return JSON with: planFilePath, implementationSteps (array), filesToCreate (arra
 \${codeReview?.feedback ? "## CODE REVIEW FEEDBACK\\n" + codeReview.feedback : ""}
 \${test && !test.testsPassed && test.failingSummary ? "## FAILING TESTS (FIX THESE FIRST)\\n" + test.failingSummary : ""}
 \${reviewFix?.summary ? "## REVIEW FIX SUMMARY\\n" + reviewFix.summary : ""}
+\${evictionCtx ? "## MERGE CONFLICT — RESOLVE BEFORE NEXT LANDING\\n" + evictionCtx + "\\n\\nYour previous implementation conflicted with another unit that landed first. Restructure your changes to avoid the conflicting files and lines described above. Commit all changes when done." : ""}
 
 ## Build/Test Commands
 Build: \${Object.values(workPlan.repo.buildCmds).join(" && ") || "none configured"}
@@ -344,15 +486,15 @@ Test: \${Object.values(workPlan.repo.testCmds).join(" && ") || "none configured"
 
 ## Output
 Return JSON with: summary, filesCreated (array), filesModified (array), whatWasDone, nextSteps (nullable), believesComplete (boolean)\`}
-                      </Task>
+                          </Task>
 
-                      {/* Test */}
-                      <Task
-                        id={uid + ":test"}
-                        output={outputs.sw_test}
-                        agent={tester}
-                      >
-                        {\`# Test: \${unit.name}
+                          {/* Test */}
+                          <Task
+                            id={uid + ":test"}
+                            output={outputs.sw_test}
+                            agent={tester}
+                          >
+                            {\`# Test: \${unit.name}
 
 ## What was implemented
 \${impl?.whatWasDone ?? "Unknown"}
@@ -376,18 +518,18 @@ Test: \${Object.values(workPlan.repo.testCmds).join(" && ") || "none configured"
 
 ## Output
 Return JSON with: buildPassed (boolean), testsPassed (boolean), testsPassCount (number), testsFailCount (number), failingSummary (nullable string), testOutput (string)\`}
-                      </Task>
+                          </Task>
 
-                      {/* PRD + Code Review (independent — run in parallel) */}
-                      <Parallel continueOnFail>
-                        {tierHasStep(unit.tier, "prd-review") && (
-                          <Task
-                            id={uid + ":prd-review"}
-                            output={outputs.sw_prd_review}
-                            agent={prdReviewer}
-                            continueOnFail
-                          >
-                            {\`# PRD Review: \${unit.name}
+                          {/* PRD + Code Review (independent — run in parallel) */}
+                          <Parallel continueOnFail>
+                            {tierHasStep(unit.tier, "prd-review") && (
+                              <Task
+                                id={uid + ":prd-review"}
+                                output={outputs.sw_prd_review}
+                                agent={prdReviewer}
+                                continueOnFail
+                              >
+                                {\`# PRD Review: \${unit.name}
 
 ## RFC Section(s): \${unit.rfcSections.join(", ")}
 
@@ -411,17 +553,17 @@ Severity guide: critical (missing core feature), major (spec deviation), minor (
 
 ## Output
 Return JSON with: severity ("critical"|"major"|"minor"|"none"), approved (boolean), feedback (string), issues (array of {severity, description, file, suggestion})\`}
-                          </Task>
-                        )}
+                              </Task>
+                            )}
 
-                        {tierHasStep(unit.tier, "code-review") && (
-                          <Task
-                            id={uid + ":code-review"}
-                            output={outputs.sw_code_review}
-                            agent={codeReviewer}
-                            continueOnFail
-                          >
-                            {\`# Code Review: \${unit.name}
+                            {tierHasStep(unit.tier, "code-review") && (
+                              <Task
+                                id={uid + ":code-review"}
+                                output={outputs.sw_code_review}
+                                agent={codeReviewer}
+                                continueOnFail
+                              >
+                                {\`# Code Review: \${unit.name}
 
 ## What was implemented
 \${impl?.whatWasDone ?? "Unknown"}
@@ -442,22 +584,22 @@ Severity guide: critical (security/crash), major (bugs/missing error handling), 
 
 ## Output
 Return JSON with: severity ("critical"|"major"|"minor"|"none"), approved (boolean), feedback (string), issues (array of {severity, description, file, suggestion})\`}
-                          </Task>
-                        )}
-                      </Parallel>
+                              </Task>
+                            )}
+                          </Parallel>
 
-                      {/* ReviewFix (medium/large, skip if both reviews approve) */}
-                      {tierHasStep(unit.tier, "review-fix") && (
-                        <Task
-                          id={uid + ":review-fix"}
-                          output={outputs.sw_review_fix}
-                          agent={reviewFixer}
-                          skipIf={
-                            (prdReview?.severity === "none" || !tierHasStep(unit.tier, "prd-review")) &&
-                            (codeReview?.severity === "none")
-                          }
-                        >
-                          {\`# Review Fix: \${unit.name}
+                          {/* ReviewFix (medium/large, skip if both reviews approve) */}
+                          {tierHasStep(unit.tier, "review-fix") && (
+                            <Task
+                              id={uid + ":review-fix"}
+                              output={outputs.sw_review_fix}
+                              agent={reviewFixer}
+                              skipIf={
+                                (prdReview?.severity === "none" || !tierHasStep(unit.tier, "prd-review")) &&
+                                (codeReview?.severity === "none")
+                              }
+                            >
+                              {\`# Review Fix: \${unit.name}
 
 ## PRD Review Issues (\${prdReview?.severity ?? "none"})
 \${prdReview?.issues ? JSON.stringify(prdReview.issues, null, 2) : "None"}
@@ -478,17 +620,17 @@ Test: \${Object.values(workPlan.repo.testCmds).join(" && ") || "none configured"
 
 ## Output
 Return JSON with: summary, fixesMade (array of {issue, fix, file}), falsePositives (array of {issue, reasoning}), allIssuesResolved (boolean)\`}
-                        </Task>
-                      )}
+                            </Task>
+                          )}
 
-                      {/* Final Review (large only — the gate) */}
-                      {tierHasStep(unit.tier, "final-review") && (
-                        <Task
-                          id={uid + ":final-review"}
-                          output={outputs.sw_final_review}
-                          agent={finalReviewer}
-                        >
-                          {\`# Final Review: \${unit.name}
+                          {/* Final Review (large only — the gate) */}
+                          {tierHasStep(unit.tier, "final-review") && (
+                            <Task
+                              id={uid + ":final-review"}
+                              output={outputs.sw_final_review}
+                              agent={finalReviewer}
+                            >
+                              {\`# Final Review: \${unit.name}
 
 ## Pass: \${currentPass + 1} of \${MAX_PASSES}
 
@@ -519,22 +661,40 @@ Issues resolved: \${reviewFix?.allIssuesResolved ?? "n/a"}
 
 ## Output
 Return JSON with: readyToMoveOn (boolean), reasoning (string — CRITICAL: this feeds back to implement on next pass), approved (boolean), qualityScore (1-10), remainingIssues (array of {severity, description, file})\`}
-                        </Task>
-                      )}
-                    </Sequence>
-                  </Worktree>
-                );
-              })}
-            </Parallel>
-          ))}
+                            </Task>
+                          )}
+                        </Sequence>
+                      </Worktree>
+                    );
+                  })}
+                </Parallel>
+
+                {/* ── Phase 2: Merge queue ────────────────────────── */}
+                {/* Runs after all quality pipelines finish for this layer.
+                    Lands tier-complete units onto main; evicts on conflict. */}
+                <Task
+                  id={mqNodeId}
+                  output={outputs.sw_merge_queue}
+                  agent={mergeQueueAgent}
+                  skipIf={toMerge.length === 0}
+                  retries={2}
+                >
+                  {buildMergeQueuePrompt(toMerge, REPO_ROOT, MAIN_BRANCH, Object.values(workPlan.repo.testCmds).join(" && ") || "none configured")}
+                </Task>
+
+                {/* Land status is now read directly from sw_merge_queue
+                    by unitLanded()/unitEvicted(). No separate Phase 3 needed. */}
+              </Sequence>
+            );
+          })}
 
           {/* Pass tracker */}
           <Task id="pass-tracker" output={outputs.sw_pass_tracker}>
             {{
               totalIterations: currentPass + 1,
-              unitsRun: units.filter((u: any) => !unitComplete(u.id)).map((u: any) => u.id),
-              unitsComplete: units.filter((u: any) => unitComplete(u.id)).map((u: any) => u.id),
-              summary: \`Pass \${currentPass + 1} of \${MAX_PASSES}. \${completedUnitIds.length}/\${units.length} units complete.\`,
+              unitsRun: units.filter((u: any) => !unitLanded(u.id)).map((u: any) => u.id),
+              unitsComplete: units.filter((u: any) => unitLanded(u.id)).map((u: any) => u.id),
+              summary: \`Pass \${currentPass + 1} of \${MAX_PASSES}. \${units.filter((u: any) => unitLanded(u.id)).length}/\${units.length} units landed on main.\`,
             }}
           </Task>
         </Sequence>

@@ -117,4 +117,28 @@ export const scheduledOutputSchemas = {
     unitsComplete: z.array(z.string()),
     summary: z.string(),
   }),
+
+  // ── Merge Queue Result (per-layer batch) ──────────────────────────
+  // Output of the merge queue agent that runs after each layer's
+  // quality pipelines complete. One record per layer per Ralph iteration.
+  // Land status is read directly from this output — no separate sw_land
+  // records needed. unitLanded()/unitEvicted() scan ticketsLanded/ticketsEvicted.
+  sw_merge_queue: z.object({
+    ticketsLanded: z.array(z.object({
+      ticketId: z.string(),
+      mergeCommit: z.string().nullable(),
+      summary: z.string(),
+    })),
+    ticketsEvicted: z.array(z.object({
+      ticketId: z.string(),
+      reason: z.string(),
+      details: z.string(), // conflict details — shown to implementer on next pass
+    })),
+    ticketsSkipped: z.array(z.object({
+      ticketId: z.string(),
+      reason: z.string(),
+    })),
+    summary: z.string(),
+    nextActions: z.string().nullable(),
+  }),
 };
