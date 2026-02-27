@@ -91,6 +91,8 @@ export const scheduledOutputSchemas = {
       }),
     ),
     allIssuesResolved: z.boolean(),
+    buildPassed: z.boolean(),
+    testsPassed: z.boolean(),
   }),
 
   // ── Final Review (the gate) ───────────────────────────────────────
@@ -116,6 +118,24 @@ export const scheduledOutputSchemas = {
     unitsRun: z.array(z.string()),
     unitsComplete: z.array(z.string()),
     summary: z.string(),
+  }),
+
+  // ── Completion Report ────────────────────────────────────────────
+  // Generated after the Ralph loop ends, summarizing what landed,
+  // what failed, and suggested next steps.
+  sw_completion_report: z.object({
+    totalUnits: z.number(),
+    unitsLanded: z.array(z.string()),
+    unitsFailed: z.array(
+      z.object({
+        unitId: z.string(),
+        lastStage: z.string(),
+        reason: z.string(),
+      }),
+    ),
+    passesUsed: z.number(),
+    summary: z.string(),
+    nextSteps: z.array(z.string()),
   }),
 
   // ── Merge Queue Result (per-layer batch) ──────────────────────────

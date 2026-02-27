@@ -190,11 +190,13 @@ export function buildFallbackConfig(
 
   if (existsSync(join(repoRoot, "go.mod"))) {
     buildCmds.go = buildCmds.go ?? "go build ./...";
+    buildCmds.govet = buildCmds.govet ?? "go vet ./...";
     testCmds.go = testCmds.go ?? "go test ./...";
   }
 
   if (existsSync(join(repoRoot, "Cargo.toml"))) {
     buildCmds.rust = buildCmds.rust ?? "cargo build";
+    buildCmds.clippy = buildCmds.clippy ?? "cargo clippy -- -D warnings";
     testCmds.rust = testCmds.rust ?? "cargo test";
   }
 
@@ -286,10 +288,12 @@ export async function scanRepo(repoRoot: string): Promise<RepoConfig> {
 
   if (existsSync(join(repoRoot, "go.mod"))) {
     buildCmds.go = buildCmds.go ?? "go build ./...";
+    buildCmds.govet = buildCmds.govet ?? "go vet ./...";
     testCmds.go = testCmds.go ?? "go test ./...";
   }
   if (existsSync(join(repoRoot, "Cargo.toml"))) {
     buildCmds.rust = buildCmds.rust ?? "cargo build";
+    buildCmds.clippy = buildCmds.clippy ?? "cargo clippy -- -D warnings";
     testCmds.rust = testCmds.rust ?? "cargo test";
   }
 

@@ -20,7 +20,8 @@ Your job is to:
 ## Rules
 
 - Each work unit should be a single, cohesive piece of work
-- Work units should be as independent as possible to maximize parallelism
+- **Prefer fewer, cohesive units over many granular ones.** Only split when units touch genuinely independent files. Each unit adds pipeline overhead (research, plan, implement, test, review) and merge risk. A larger unit that touches 5 related files is better than 3 small units that conflict at merge time.
+- **Minimize cross-unit file overlap.** If two units would modify the same file, strongly prefer combining them into one unit. Cross-unit file overlap causes merge conflicts that require expensive re-runs.
 - Dependencies should only exist where there's a real code dependency (shared types, imports, etc.)
 - Don't create artificial sequential ordering — if two units can be done in parallel, they should have no deps between them
 - Acceptance criteria must be verifiable (not vague like "works correctly")
@@ -77,7 +78,7 @@ ${rfcContent}
 
 ## Task
 
-Decompose this RFC into work units. Maximize parallelism — only add dependencies where there's a real code dependency. Return ONLY the JSON object.`;
+Decompose this RFC into work units. Prefer fewer cohesive units over many granular ones — minimize cross-unit file overlap to avoid merge conflicts. Only add dependencies where there's a real code dependency. Return ONLY the JSON object.`;
 }
 
 /**

@@ -318,8 +318,34 @@ export default smithers((ctx) => {
   const allUnitsComplete = units.every((u: any) => unitComplete(u.id));
   const done = currentPass >= MAX_PASSES || allUnitsComplete;
 
+  // ── Completion report data (computed at render time) ──────────
+  const landedIds = units.filter((u: any) => unitLanded(u.id)).map((u: any) => u.id);
+  const failedUnits = units
+    .filter((u: any) => !unitLanded(u.id))
+    .map((u: any) => {
+      const stages = ["final-review", "review-fix", "code-review", "prd-review", "test", "implement", "plan", "research"];
+      let lastStage = "not-started";
+      for (const stage of stages) {
+        const nodeId = u.id + ":" + stage;
+        const key = ("sw_" + stage.replace(/-/g, "_")) as keyof typeof outputs;
+        try {
+          if (ctx.outputMaybe(key, { nodeId })) {
+            lastStage = stage;
+            break;
+          }
+        } catch { /* schema key may not exist for this tier */ }
+      }
+      let reason = "Did not complete within " + MAX_PASSES + " passes";
+      const evCtx = getEvictionContext(u.id);
+      if (evCtx) reason = "Evicted from merge queue: " + evCtx.slice(0, 200);
+      const testOut = ctx.outputMaybe("sw_test", { nodeId: u.id + ":test" });
+      if (testOut && !testOut.testsPassed) reason = "Tests failing: " + (testOut.failingSummary ?? "unknown");
+      return { unitId: u.id, lastStage, reason };
+    });
+
   return (
     <Workflow name="scheduled-work" cache>
+      <Sequence>
       <Ralph until={done} maxIterations={MAX_PASSES * units.length * 20} onMaxReached="return-last">
         <Sequence>
           {/* Process each layer sequentially.
@@ -374,6 +400,18 @@ export default smithers((ctx) => {
                     const reviewFix  = ctx.outputMaybe("sw_review_fix",    { nodeId: uid + ":review-fix" });
                     const finalReview = ctx.outputMaybe("sw_final_review", { nodeId: uid + ":final-review" });
                     const evictionCtx = getEvictionContext(uid);
+
+                    // Gather dependency summaries for this unit's implement prompt
+                    const depSummaries = (unit.deps ?? []).map((depId: string) => {
+                      const depImpl = ctx.outputMaybe("sw_implement", { nodeId: depId + ":implement" });
+                      if (!depImpl) return null;
+                      return {
+                        id: depId,
+                        whatWasDone: depImpl.whatWasDone ?? "",
+                        filesCreated: (depImpl.filesCreated as string[] | null) ?? [],
+                        filesModified: (depImpl.filesModified as string[] | null) ?? [],
+                      };
+                    }).filter(Boolean) as Array<{ id: string; whatWasDone: string; filesCreated: string[]; filesModified: string[] }>;
 
                     return (
                       <Worktree key={uid} path={"/tmp/workflow-wt-" + uid} branch={"unit/" + uid}>
@@ -464,6 +502,8 @@ Return JSON with: planFilePath, implementationSteps (array), filesToCreate (arra
 \${plan?.implementationSteps ? "## Steps\\n" + (Array.isArray(plan.implementationSteps) ? plan.implementationSteps.map((s: string, i: number) => (i + 1) + ". " + s).join("\\n") : plan.implementationSteps) : ""}
 \${research?.contextFilePath ? "## Context\\nRead the context at: " + research.contextFilePath : ""}
 
+\${depSummaries.length > 0 ? "## Dependency Context\\nThese units completed before yours and their changes are on main:\\n" + depSummaries.map((d: any) => "### " + d.id + "\\n" + d.whatWasDone + "\\nFiles created: " + (d.filesCreated.length > 0 ? d.filesCreated.join(", ") : "none") + "\\nFiles modified: " + (d.filesModified.length > 0 ? d.filesModified.join(", ") : "none")).join("\\n\\n") : ""}
+
 \${impl?.summary ? "## Previous Implementation\\n" + impl.summary : ""}
 \${impl?.nextSteps ? "## Previous Next Steps\\n" + impl.nextSteps : ""}
 \${finalReview?.reasoning ? "## FINAL REVIEW FEEDBACK (address these issues)\\n" + finalReview.reasoning : ""}
@@ -477,12 +517,22 @@ Return JSON with: planFilePath, implementationSteps (array), filesToCreate (arra
 Build: \${Object.values(workPlan.repo.buildCmds).join(" && ") || "none configured"}
 Test: \${Object.values(workPlan.repo.testCmds).join(" && ") || "none configured"}
 
-## Task
+\${unit.tier === "trivial" ? \`## Task
+1. Make the change
+2. Run the build to verify it compiles
+3. Commit your work
+
+Do NOT write new tests for config, metadata, or mechanical changes.\` : unit.tier === "small" ? \`## Task
+1. Implement the changes
+2. Write tests if you added new behavior (skip tests for mechanical refactors, re-exports, or type-only changes)
+3. Run build and tests to verify
+4. Commit your work\` : \`## Task
 1. Read the plan and context documents
-2. Implement the changes
-3. Run the build after each significant change
-4. Write tests alongside the implementation
-5. Commit your work
+2. For new behavior: write a failing test first (TDD), then implement to make it pass
+3. For non-behavioral changes (types, docs, re-exports, config): implement directly without TDD
+4. Run the build after each significant change
+5. Run tests to verify
+6. Commit your work\`}
 
 ## Output
 Return JSON with: summary, filesCreated (array), filesModified (array), whatWasDone, nextSteps (nullable), believesComplete (boolean)\`}
@@ -617,9 +667,10 @@ Test: \${Object.values(workPlan.repo.testCmds).join(" && ") || "none configured"
 1. Address each issue in severity order (critical first)
 2. For each issue: fix and commit, or explain why it's a false positive
 3. Run build + tests after each fix
+4. After all fixes, run a final build + test pass and report the results
 
 ## Output
-Return JSON with: summary, fixesMade (array of {issue, fix, file}), falsePositives (array of {issue, reasoning}), allIssuesResolved (boolean)\`}
+Return JSON with: summary, fixesMade (array of {issue, fix, file}), falsePositives (array of {issue, reasoning}), allIssuesResolved (boolean), buildPassed (boolean), testsPassed (boolean)\`}
                             </Task>
                           )}
 
@@ -699,6 +750,28 @@ Return JSON with: readyToMoveOn (boolean), reasoning (string — CRITICAL: this 
           </Task>
         </Sequence>
       </Ralph>
+
+      {/* ── Completion Report ──────────────────────────────────────── */}
+      {/* Runs once after the Ralph loop finishes. Compute task (no agent). */}
+      <Task id="completion-report" output={outputs.sw_completion_report}>
+        {{
+          totalUnits: units.length,
+          unitsLanded: landedIds,
+          unitsFailed: failedUnits,
+          passesUsed: currentPass + 1,
+          summary: landedIds.length === units.length
+            ? "All " + units.length + " units landed successfully in " + (currentPass + 1) + " pass(es)."
+            : landedIds.length + "/" + units.length + " units landed. " + failedUnits.length + " unit(s) failed after " + (currentPass + 1) + " pass(es).",
+          nextSteps: failedUnits.length === 0
+            ? []
+            : [
+                "Review failed units and their eviction/test context in .ralphinho/workflow.db",
+                "Consider running 'ralphinho run --resume' to retry failed units",
+                ...failedUnits.map((f: any) => f.unitId + ": last reached " + f.lastStage + " — " + f.reason),
+              ],
+        }}
+      </Task>
+      </Sequence>
     </Workflow>
   );
 });
