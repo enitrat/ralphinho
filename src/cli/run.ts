@@ -1,12 +1,12 @@
 /**
  * ralphinho run — Execute or resume a scheduled workflow.
  *
- * Reads .ralphinho/config.json, generates the Smithers workflow file,
- * and launches execution.
+ * Reads .ralphinho/config.json and the generated workflow file,
+ * then launches execution.
  */
 
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -15,7 +15,6 @@ import {
   getRalphDir,
   launchSmithers,
   promptChoice,
-  ralphSourceRoot,
   type ParsedArgs,
 } from "./shared";
 import { ralphinhoConfigSchema, type RalphinhoConfig } from "../scheduled/types";
@@ -68,16 +67,17 @@ export async function runWorkflow(opts: {
 
   const dbPath = join(ralphDir, "workflow.db");
   const generatedDir = join(ralphDir, "generated");
-  await mkdir(generatedDir, { recursive: true });
-
   const workflowPath = join(generatedDir, "workflow.tsx");
+
+  if (!existsSync(workflowPath)) {
+    console.error(
+      "Error: No workflow file found. Run `ralphinho init` first.",
+    );
+    process.exit(1);
+  }
 
   // ── Resume path ─────────────────────────────────────────────────────
   if (resumeRunId) {
-    if (!existsSync(workflowPath)) {
-      console.error("Error: No generated workflow file found. Cannot resume.");
-      process.exit(1);
-    }
     if (!existsSync(dbPath)) {
       console.error("Error: No database found. Cannot resume.");
       process.exit(1);
@@ -100,7 +100,7 @@ export async function runWorkflow(opts: {
 
     console.log("Found an existing scheduled-work run.\n");
     const options = [
-      "Start fresh (new run ID, regenerate workflow)",
+      "Start fresh (new run ID)",
     ];
     if (latestRunId) {
       options.push(`Resume previous run (${latestRunId})`);
@@ -146,30 +146,6 @@ export async function runWorkflow(opts: {
   if (confirmChoice !== 0) {
     console.log("Cancelled.\n");
     process.exit(0);
-  }
-
-  // ── Generate workflow file ──────────────────────────────────────────
-  const { renderScheduledWorkflow } = await import("./render-scheduled-workflow");
-  const workflowSource = renderScheduledWorkflow({
-    repoRoot,
-    dbPath,
-    planPath,
-    detectedAgents: config.agents,
-    maxConcurrency,
-  });
-
-  await writeFile(workflowPath, workflowSource, "utf8");
-
-  // Ensure node_modules symlink
-  const generatedNodeModules = join(generatedDir, "node_modules");
-  const sourceNodeModules = join(ralphSourceRoot, "node_modules");
-  if (!existsSync(generatedNodeModules) && existsSync(sourceNodeModules)) {
-    try {
-      const { symlinkSync } = await import("fs");
-      symlinkSync(sourceNodeModules, generatedNodeModules, "dir");
-    } catch {
-      // ignore
-    }
   }
 
   const runId = `sw-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;

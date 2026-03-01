@@ -17,11 +17,13 @@ import {
   detectAgents,
   ensureJjAvailable,
   getRalphDir,
+  ralphSourceRoot,
   scanRepo,
   type ParsedArgs,
 } from "./shared";
 import { decomposeRFC, printPlanSummary } from "../scheduled/decompose";
 import type { RalphinhoConfig } from "../scheduled/types";
+import { renderScheduledWorkflow } from "./render-scheduled-workflow";
 
 export async function initScheduledWork(opts: {
   positional: string[];
@@ -113,9 +115,38 @@ export async function initScheduledWork(opts: {
   await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", "utf8");
   await writeFile(planPath, JSON.stringify(plan, null, 2) + "\n", "utf8");
 
+  // ── Generate workflow file ──────────────────────────────────────────
+  const generatedDir = join(ralphDir, "generated");
+  await mkdir(generatedDir, { recursive: true });
+
+  const dbPath = join(ralphDir, "workflow.db");
+  const workflowPath = join(generatedDir, "workflow.tsx");
+
+  const workflowSource = renderScheduledWorkflow({
+    repoRoot,
+    dbPath,
+    planPath,
+    detectedAgents: agents,
+    maxConcurrency,
+  });
+  await writeFile(workflowPath, workflowSource, "utf8");
+
+  // Ensure node_modules symlink so the generated file can resolve imports
+  const generatedNodeModules = join(generatedDir, "node_modules");
+  const sourceNodeModules = join(ralphSourceRoot, "node_modules");
+  if (!existsSync(generatedNodeModules) && existsSync(sourceNodeModules)) {
+    try {
+      const { symlinkSync } = await import("fs");
+      symlinkSync(sourceNodeModules, generatedNodeModules, "dir");
+    } catch {
+      // ignore
+    }
+  }
+
   console.log(`  Written:`);
   console.log(`    ${configPath}`);
   console.log(`    ${planPath}`);
+  console.log(`    ${workflowPath}`);
   console.log();
   console.log(
     `  Review and edit ${planPath} if needed, then run:`,
