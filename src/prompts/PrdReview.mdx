@@ -1,9 +1,11 @@
-SPEC COMPLIANCE REVIEW — Ticket: {props.ticketId}
+PRD COMPLIANCE REVIEW — Unit: {props.unitId}
 
-Title: {props.ticketTitle}
-Category: {props.ticketCategory}
+Title: {props.unitName}
+Category: {props.unitCategory}
 
-You are reviewing this ticket's implementation for **spec compliance only**.
+{props.acceptanceCriteria && props.acceptanceCriteria.length > 0 ? `\n## Acceptance Criteria\n${props.acceptanceCriteria.map((a, i) => `${i + 1}. ${a}`).join('\n')}` : ''}
+
+You are reviewing this unit's implementation for **spec compliance only**.
 You are NOT reviewing code quality — that's a separate review.
 
 ## Files to Review

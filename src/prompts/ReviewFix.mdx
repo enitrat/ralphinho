@@ -1,7 +1,7 @@
-REVIEW FIX PHASE — Ticket: {props.ticketId}
+REVIEW FIX PHASE — Unit: {props.unitId}
 
-Title: {props.ticketTitle}
-Category: {props.ticketCategory}
+Title: {props.unitName}
+Category: {props.unitCategory}
 
 Two reviews have been completed. Fix ALL issues from BOTH reviews.
 
@@ -41,8 +41,8 @@ You MUST commit and push your changes to the ticket branch before finishing. Unc
 
 1. `jj describe -m "{props.commitPrefix || 'EMOJI'} type(scope): description"` — describe each fix separately.
 2. `jj new` — create a new change for the next fix. Do NOT batch all fixes into one change.
-3. `jj bookmark set ticket/{props.ticketId} -r @`
-4. `jj git push --bookmark ticket/{props.ticketId}`
+3. {`jj bookmark set ${props.branchPrefix || "unit/"}${props.unitId} -r @`}
+4. {`jj git push --bookmark ${props.branchPrefix || "unit/"}${props.unitId}`}
 
 {props.emojiPrefixes ? `Emoji prefixes: ${props.emojiPrefixes}` : 'Use conventional commit prefixes'}
 

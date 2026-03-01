@@ -51,13 +51,11 @@ export type WorkPlan = z.infer<typeof workPlanSchema>;
 
 export const ralphinhoConfigSchema = z.object({
   /** Workflow mode */
-  mode: z.enum(["super-ralph", "scheduled-work"]),
+  mode: z.literal("scheduled-work"),
   /** Absolute path to repo root */
   repoRoot: z.string(),
   /** For scheduled-work: path to the source RFC file */
   rfcPath: z.string().optional(),
-  /** For super-ralph: the prompt text */
-  promptText: z.string().optional(),
   /** Detected agents */
   agents: z.object({
     claude: z.boolean(),
@@ -76,8 +74,8 @@ export type RalphinhoConfig = z.infer<typeof ralphinhoConfigSchema>;
 
 /**
  * Quality pipeline stages per tier for scheduled work.
- * Unlike super-ralph's ticket tiers, these always include review steps
- * because scheduled work is driven by a spec (the RFC).
+ * These always include review steps because scheduled work is
+ * driven by a spec (the RFC).
  */
 export const SCHEDULED_TIERS = {
   trivial: ["implement", "test"] as const,

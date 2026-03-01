@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 const cliDir = import.meta.dir || dirname(fileURLToPath(import.meta.url));
 export const ralphSourceRoot = dirname(dirname(cliDir));
 export const runningFromSource = existsSync(
-  join(ralphSourceRoot, "src/components/SuperRalph.tsx"),
+  join(ralphSourceRoot, "src/components/ScheduledWorkflow.tsx"),
 );
 
 // ── Arg parsing ───────────────────────────────────────────────────────

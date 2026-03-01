@@ -1,7 +1,11 @@
-TESTING PHASE — Ticket: {props.ticketId}
+TESTING PHASE — Unit: {props.unitId}
 
-Title: {props.ticketTitle}
-Category: {props.ticketCategory}
+Title: {props.unitName}
+Category: {props.unitCategory}
+
+{props.whatWasDone ? `\n## What was implemented\n${props.whatWasDone}` : ''}
+{props.filesCreated && props.filesCreated.length > 0 ? `\nFiles created: ${props.filesCreated.map(f => `- ${f}`).join('\n')}` : ''}
+{props.filesModified && props.filesModified.length > 0 ? `\nFiles modified: ${props.filesModified.map(f => `- ${f}`).join('\n')}` : ''}
 
 Run ALL of the following test categories and report results:
 
@@ -17,6 +21,6 @@ Run ALL of the following test categories and report results:
 If any tests fail and you need to fix code to make them pass, commit each fix atomically:
 - `jj describe -m "{props.fixCommitPrefix || '🐛 fix'}(SCOPE): what was fixed"`
 - `jj new`
-- After fixing: `jj bookmark set ticket/{props.ticketId} -r @` && `jj git push --bookmark ticket/{props.ticketId}`
+- After fixing: {`jj bookmark set ${props.branchPrefix || "unit/"}${props.unitId} -r @`} && {`jj git push --bookmark ${props.branchPrefix || "unit/"}${props.unitId}`}
 
 Report each category: passed or failed with details.

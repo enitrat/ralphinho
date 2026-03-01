@@ -3,7 +3,7 @@
  *
  * Layout:
  *  - Top: Phase indicator + global stats bar
- *  - Left: Pipeline kanban (per-ticket stage progress)
+ *  - Left: Pipeline kanban (per-unit stage progress)
  *  - Right: 3 stacked panels — Active Jobs | Event Log | Captured Logs
  *    Tab cycles focus between panels for scrolling.
  *
@@ -21,19 +21,18 @@ const DISPLAY_STAGES = [
   { key: "research",     abbr: "R", table: "research",     nodeId: "research" },
   { key: "plan",         abbr: "P", table: "plan",         nodeId: "plan" },
   { key: "implement",    abbr: "I", table: "implement",    nodeId: "implement" },
-  { key: "test",         abbr: "T", table: "test_results", nodeId: "test" },
-  { key: "build-verify", abbr: "B", table: "build_verify", nodeId: "build-verify" },
-  { key: "spec-review",  abbr: "S", table: "spec_review",  nodeId: "spec-review" },
+  { key: "test",         abbr: "T", table: "test",         nodeId: "test" },
+  { key: "prd-review",   abbr: "D", table: "prd_review",   nodeId: "prd-review" },
   { key: "code-review",  abbr: "V", table: "code_review",  nodeId: "code-review" },
   { key: "review-fix",   abbr: "F", table: "review_fix",   nodeId: "review-fix" },
-  { key: "report",       abbr: "G", table: "report",       nodeId: "report" },
+  { key: "final-review", abbr: "G", table: "final_review", nodeId: "final-review" },
 ] as const;
 
 const TIER_STAGES: Record<string, readonly string[]> = {
-  trivial: ["implement", "build-verify"],
-  small:   ["implement", "test", "build-verify"],
-  medium:  ["research", "plan", "implement", "test", "build-verify", "code-review"],
-  large:   ["research", "plan", "implement", "test", "build-verify", "spec-review", "code-review", "review-fix", "report"],
+  trivial: ["implement", "test"],
+  small:   ["implement", "test", "code-review"],
+  medium:  ["research", "plan", "implement", "test", "prd-review", "code-review", "review-fix"],
+  large:   ["research", "plan", "implement", "test", "prd-review", "code-review", "review-fix", "final-review"],
 };
 
 const PRIORITY_ABBR: Record<string, string> = { critical: "!!", high: "hi", medium: "md", low: "lo" };
@@ -41,24 +40,24 @@ const TIER_ABBR: Record<string, string> = { trivial: "trv", small: "sml", medium
 const JOB_ABBR: Record<string, string> = {
   "discovery": "discover", "progress-update": "progress",
   "ticket:research": "research", "ticket:plan": "plan", "ticket:implement": "impl",
-  "ticket:test": "test", "ticket:build-verify": "build", "ticket:spec-review": "spec-rev",
-  "ticket:code-review": "code-rev", "ticket:review-fix": "rev-fix", "ticket:report": "report",
+  "ticket:test": "test", "ticket:prd-review": "prd-rev",
+  "ticket:code-review": "code-rev", "ticket:review-fix": "rev-fix", "ticket:final-review": "final",
 };
 
 // Stage detail: which column to SELECT for human-readable summary
 const STAGE_SUMMARY_COL: Record<string, string> = {
-  research: "summary", plan: "plan_file_path", implement: "what_was_done",
-  test_results: "failing_summary", build_verify: "build_passed",
-  spec_review: "severity", code_review: "severity",
-  review_fix: "summary", report: "summary",
+  research: "context_file_path", plan: "plan_file_path", implement: "what_was_done",
+  test: "failing_summary",
+  prd_review: "severity", code_review: "severity",
+  review_fix: "summary", final_review: "reasoning",
 };
 
 // --- Workflow Phases ---
 
 type WorkflowPhase =
   | "starting"         // Before anything has run
-  | "interpreting"     // InterpretConfig running
-  | "discovering"      // Discovery job active, no tickets yet
+  | "interpreting"     // Initial setup before unit execution
+  | "discovering"      // Plan loading phase (legacy label)
   | "pipeline"         // Tickets being processed through stages
   | "merging"          // Merge queue actively landing tickets
   | "done";            // All tickets landed
@@ -66,7 +65,7 @@ type WorkflowPhase =
 const PHASE_DISPLAY: Record<WorkflowPhase, { label: string; icon: string }> = {
   starting:     { label: "Starting",          icon: "\u23F3" },  // ⏳
   interpreting: { label: "Interpreting Config", icon: "\u2699" }, // ⚙
-  discovering:  { label: "Discovering Tickets", icon: "\uD83D\uDD0D" }, // 🔍
+  discovering:  { label: "Loading Work Plan", icon: "\uD83D\uDD0D" }, // 🔍
   pipeline:     { label: "Pipeline Active",    icon: "\u25B6" },  // ▶
   merging:      { label: "Merge Queue",        icon: "\uD83D\uDD00" }, // 🔀
   done:         { label: "Complete",           icon: "\u2705" },  // ✅
@@ -197,6 +196,7 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
   const { Database } = await import("bun:sqlite");
 
   const scheduledDbPath = join(dirname(dbPath), "..", "scheduled-tasks.db");
+  const workPlanPath = join(dirname(dbPath), "work-plan.json");
 
   // ── Console capture ──
   const capturedLogs = new RingBuffer(200);
@@ -261,6 +261,9 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
   }
 
   addEvent("Monitor started");
+  if (existsSync(workPlanPath)) {
+    addEvent(`Work plan detected: ${workPlanPath}`);
+  }
 
   // ── Colors ──
   const c = {
@@ -270,8 +273,8 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
   };
 
   // ── Layout ──
-  const root = new BoxRenderable(renderer, {
-    id: "root", border: true, title: ` Super Ralph: ${projectName} `,
+const root = new BoxRenderable(renderer, {
+    id: "root", border: true, title: ` Scheduled Work: ${projectName} `,
     width: "100%", height: "100%", flexDirection: "column",
   });
   renderer.root.add(root);
@@ -373,7 +376,7 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
     let phaseExtra = "";
     if (data.phase === "discovering") {
       phaseExtra = data.discoveryCount > 0
-        ? ` (round ${data.discoveryCount + 1}, ${data.discovered} tickets found so far)`
+        ? ` (plan loaded, ${data.discovered} units found)`
         : " (initial discovery...)";
     } else if (data.phase === "merging") {
       const mq = data.mergeQueueActivity;
@@ -393,7 +396,7 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
     const { discovered, landed, evicted, inPipeline, activeJobs, maxConcurrency } = data;
     const slots = maxConcurrency ? `${activeJobs.length}/${maxConcurrency}` : `${activeJobs.length}`;
     const errorIndicator = lastError ? ` | \x1b[31mERR\x1b[0m` : "";
-    statsText.content = `Discovered: ${discovered} | In Pipeline: ${inPipeline} | Landed: ${landed} | Evicted: ${evicted} | Jobs: ${slots}${errorIndicator}`;
+    statsText.content = `Units: ${discovered} | In Pipeline: ${inPipeline} | Landed: ${landed} | Evicted: ${evicted} | Jobs: ${slots}${errorIndicator}`;
 
     // ── Pipeline panel ──
     if (data.phase === "starting" || data.phase === "interpreting") {
@@ -406,9 +409,9 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
       ].join("\n");
     } else if (data.phase === "discovering" && data.tickets.length === 0) {
       const lines = [
-        "Discovering tickets from specs and codebase...",
+        "Loading units from work plan...",
         "",
-        `Discovery rounds completed: ${data.discoveryCount}`,
+        `Plan loads completed: ${data.discoveryCount}`,
       ];
       if (data.activeJobs.length > 0) {
         const discoverJob = data.activeJobs.find(j => j.jobType === "discovery");
@@ -524,25 +527,18 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
 
       let landSummary: string | undefined;
       try {
-        const row = db.query(`SELECT summary FROM land WHERE run_id = ? AND node_id = ? ORDER BY iteration DESC LIMIT 1`)
-          .get(runId, `${ticketId}:land`) as any;
-        if (row) landSummary = row.summary;
+        const rows = db.query(`SELECT tickets_landed, tickets_evicted FROM merge_queue WHERE run_id = ? ORDER BY iteration DESC`)
+          .all(runId) as any[];
+        for (const row of rows) {
+          const landed = JSON.parse(row.tickets_landed || "[]");
+          const evicted = JSON.parse(row.tickets_evicted || "[]");
+          const landedEntry = landed.find((t: any) => t.ticketId === ticketId);
+          const evictedEntry = evicted.find((t: any) => t.ticketId === ticketId);
+          if (landedEntry) landSummary = `Landed: ${landedEntry.summary}`;
+          if (evictedEntry) landSummary = `Evicted: ${evictedEntry.reason} — ${evictedEntry.details}`;
+          if (landSummary) break;
+        }
       } catch {}
-
-      if (!landSummary) {
-        try {
-          const rows = db.query(`SELECT tickets_landed, tickets_evicted FROM merge_queue_result WHERE run_id = ? ORDER BY iteration DESC LIMIT 1`)
-            .all(runId) as any[];
-          for (const row of rows) {
-            const landed = JSON.parse(row.tickets_landed || "[]");
-            const evicted = JSON.parse(row.tickets_evicted || "[]");
-            const landedEntry = landed.find((t: any) => t.ticketId === ticketId);
-            const evictedEntry = evicted.find((t: any) => t.ticketId === ticketId);
-            if (landedEntry) landSummary = `Landed: ${landedEntry.summary}`;
-            if (evictedEntry) landSummary = `Evicted: ${evictedEntry.reason} — ${evictedEntry.details}`;
-          }
-        } catch {}
-      }
 
       db.close();
       detail = { id: ticket.id, title: ticket.title, tier: ticket.tier, priority: ticket.priority, stages, landSummary };
@@ -553,7 +549,7 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
 
   // ── Phase detection ──
   function detectPhase(
-    hasInterpretConfig: boolean,
+    hasWorkflowOutput: boolean,
     tickets: TicketView[],
     activeJobs: ActiveJob[],
     landed: number,
@@ -561,7 +557,7 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
   ): WorkflowPhase {
     if (tickets.length > 0 && landed === tickets.length && activeJobs.length === 0) return "done";
     if (mergeQueueActive) return "merging";
-    if (!hasInterpretConfig) return "interpreting";
+    if (!hasWorkflowOutput) return "interpreting";
     if (tickets.length > 0 && tickets.some(t => t.landStatus !== "landed")) return "pipeline";
     if (activeJobs.some(j => j.jobType === "discovery")) return "discovering";
     if (tickets.length === 0) return "discovering";
@@ -581,34 +577,31 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
     try {
       const db = new Database(dbPath, { readonly: true });
 
-      // 1. InterpretConfig status
-      let hasInterpretConfig = false;
+      // 1. Workflow output status
+      let hasWorkflowOutput = false;
       try {
-        const row = db.query(`SELECT 1 FROM interpret_config WHERE run_id = ? LIMIT 1`).get(runId) as any;
-        hasInterpretConfig = !!row;
+        const row = db.query(`SELECT 1 FROM pass_tracker WHERE run_id = ? LIMIT 1`).get(runId) as any;
+        hasWorkflowOutput = !!row;
       } catch {}
 
-      // 2. Discovered tickets
+      // 2. Units from the work plan file
       const ticketMap = new Map<string, { id: string; title: string; tier: string; priority: string }>();
       let discoveryCount = 0;
       try {
-        const rows = db.query(`SELECT tickets FROM discover WHERE run_id = ? ORDER BY iteration ASC`).all(runId) as any[];
-        discoveryCount = rows.length;
-        for (const row of rows) {
-          try {
-            const arr = JSON.parse(row.tickets);
-            if (!Array.isArray(arr)) continue;
-            for (const t of arr) {
-              if (t?.id) {
-                ticketMap.set(t.id, {
-                  id: t.id,
-                  title: t.title || t.id,
-                  tier: t.complexityTier || t.complexity_tier || "medium",
-                  priority: t.priority || "medium",
-                });
-              }
-            }
-          } catch {}
+        if (existsSync(workPlanPath)) {
+          const plan = JSON.parse(await Bun.file(workPlanPath).text()) as {
+            units?: Array<{ id: string; name?: string; tier?: string; priority?: string }>;
+          };
+          for (const unit of plan.units ?? []) {
+            if (!unit?.id) continue;
+            ticketMap.set(unit.id, {
+              id: unit.id,
+              title: unit.name || unit.id,
+              tier: unit.tier || "medium",
+              priority: unit.priority || "medium",
+            });
+          }
+          discoveryCount = ticketMap.size > 0 ? 1 : 0;
         }
       } catch {}
 
@@ -654,15 +647,22 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
         } catch {}
       }
 
-      // 5. Land status
+      // 5. Land status from merge_queue output
       const landMap = new Map<string, "landed" | "evicted">();
       try {
-        const rows = db.query(`SELECT node_id, merged, evicted FROM land WHERE run_id = ? ORDER BY iteration DESC`).all(runId) as any[];
+        const rows = db.query(`SELECT tickets_landed, tickets_evicted FROM merge_queue WHERE run_id = ? ORDER BY iteration DESC`).all(runId) as any[];
         for (const r of rows) {
-          const tid = r.node_id.replace(/:land$/, "");
-          if (!landMap.has(tid)) {
-            if (r.merged) landMap.set(tid, "landed");
-            else if (r.evicted) landMap.set(tid, "evicted");
+          const landed = JSON.parse(r.tickets_landed || "[]");
+          const evicted = JSON.parse(r.tickets_evicted || "[]");
+          for (const entry of landed) {
+            if (entry?.ticketId && !landMap.has(entry.ticketId)) {
+              landMap.set(entry.ticketId, "landed");
+            }
+          }
+          for (const entry of evicted) {
+            if (entry?.ticketId && !landMap.has(entry.ticketId)) {
+              landMap.set(entry.ticketId, "evicted");
+            }
           }
         }
       } catch {}
@@ -671,10 +671,11 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
       let mergeQueueActivity: MergeQueueActivity | null = null;
       let mergeQueueNodeActive = false;
       try {
-        const mqState = nodeState.get("agentic-merge-queue");
-        mergeQueueNodeActive = mqState === "in-progress";
+        mergeQueueNodeActive = [...nodeState.entries()].some(
+          ([nodeId, state]) => nodeId.startsWith("merge-queue:") && state === "in-progress",
+        );
 
-        const rows = db.query(`SELECT tickets_landed, tickets_evicted, tickets_skipped, summary FROM merge_queue_result WHERE run_id = ? ORDER BY iteration DESC LIMIT 1`).all(runId) as any[];
+        const rows = db.query(`SELECT tickets_landed, tickets_evicted, tickets_skipped, summary FROM merge_queue WHERE run_id = ? ORDER BY iteration DESC LIMIT 1`).all(runId) as any[];
         if (rows.length > 0) {
           const row = rows[0];
           const landed = JSON.parse(row.tickets_landed || "[]");
@@ -689,15 +690,18 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
       // 7. Max concurrency
       let maxConcurrency = 0;
       try {
-        const row = db.query(`SELECT max_concurrency FROM interpret_config WHERE run_id = ? ORDER BY iteration DESC LIMIT 1`).get(runId) as any;
-        if (row) maxConcurrency = row.max_concurrency || 0;
+        const row = db.query(`SELECT summary FROM pass_tracker WHERE run_id = ? ORDER BY iteration DESC LIMIT 1`).get(runId) as any;
+        if (row?.summary && typeof row.summary === "string") {
+          const m = /([0-9]+)\/([0-9]+)\s+units/.exec(row.summary);
+          if (m) maxConcurrency = Number(m[2]) || 0;
+        }
       } catch {}
 
-      // 8. Scheduler reasoning
+      // 8. Pass tracker summary
       let schedulerReasoning: string | null = null;
       try {
-        const row = db.query(`SELECT reasoning FROM ticket_schedule WHERE run_id = ? ORDER BY iteration DESC LIMIT 1`).get(runId) as any;
-        if (row) schedulerReasoning = row.reasoning;
+        const row = db.query(`SELECT summary FROM pass_tracker WHERE run_id = ? ORDER BY iteration DESC LIMIT 1`).get(runId) as any;
+        if (row) schedulerReasoning = row.summary;
       } catch {}
 
       db.close();
@@ -740,21 +744,21 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
       const landed = tickets.filter(t => t.landStatus === "landed").length;
       const evicted = tickets.filter(t => t.landStatus === "evicted").length;
 
-      const phase = detectPhase(hasInterpretConfig, tickets, activeJobs, landed, mergeQueueNodeActive);
+      const phase = detectPhase(hasWorkflowOutput, tickets, activeJobs, landed, mergeQueueNodeActive);
 
       // Log phase transitions
       if (phase !== prevPhase) {
         addEvent(`Phase: ${PHASE_DISPLAY[phase].label}`);
-        if (phase === "discovering" && prevPhase === "interpreting") addEvent("Config interpreted — starting ticket discovery");
-        else if (phase === "pipeline" && prevPhase === "discovering") addEvent(`Tickets discovered (${tickets.length}) — pipeline starting`);
-        else if (phase === "merging") addEvent("Merge queue activated — landing completed tickets");
-        else if (phase === "done") addEvent(`All ${tickets.length} tickets landed — workflow complete`);
+        if (phase === "discovering" && prevPhase === "interpreting") addEvent("Initialization complete — loading work plan");
+        else if (phase === "pipeline" && prevPhase === "discovering") addEvent(`Units loaded (${tickets.length}) — pipeline starting`);
+        else if (phase === "merging") addEvent("Merge queue activated — landing completed units");
+        else if (phase === "done") addEvent(`All ${tickets.length} units landed — workflow complete`);
         prevPhase = phase;
       }
 
-      if (data.landed < landed) addEvent(`${landed - data.landed} ticket(s) landed (total: ${landed}/${tickets.length})`);
-      if (data.evicted < evicted) addEvent(`${evicted - data.evicted} ticket(s) evicted`);
-      if (data.discovered < tickets.length) addEvent(`${tickets.length - data.discovered} new ticket(s) discovered (total: ${tickets.length})`);
+      if (data.landed < landed) addEvent(`${landed - data.landed} unit(s) landed (total: ${landed}/${tickets.length})`);
+      if (data.evicted < evicted) addEvent(`${evicted - data.evicted} unit(s) evicted`);
+      if (data.discovered < tickets.length) addEvent(`${tickets.length - data.discovered} new unit(s) loaded (total: ${tickets.length})`);
 
       data = {
         tickets, activeJobs,

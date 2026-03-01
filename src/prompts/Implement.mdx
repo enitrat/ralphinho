@@ -1,7 +1,7 @@
-IMPLEMENTATION PHASE — Ticket: {props.ticketId}
+IMPLEMENTATION PHASE — Unit: {props.unitId}
 
-Title: {props.ticketTitle}
-Category: {props.ticketCategory}
+Title: {props.unitName}
+Category: {props.unitCategory}
 
 ## Context
 
@@ -18,9 +18,13 @@ Implementation steps from plan:
 
 {props.failingTests ? `\nFIX THESE FAILING TESTS FIRST:\n${props.failingTests}` : ''}
 
+{props.acceptanceCriteria && props.acceptanceCriteria.length > 0 ? `\n## Acceptance Criteria\n${props.acceptanceCriteria.map((a, i) => `${i + 1}. ${a}`).join('\n')}` : ''}
+
+{props.depSummaries && props.depSummaries.length > 0 ? `\n## Dependency Context\nThese units completed before yours and their changes are on main:\n${props.depSummaries.map(d => `### ${d.id}\n${d.whatWasDone}\nFiles created: ${d.filesCreated.length > 0 ? d.filesCreated.join(', ') : 'none'}\nFiles modified: ${d.filesModified.length > 0 ? d.filesModified.join(', ') : 'none'}`).join('\n\n')}` : ''}
+
 ## Implementation Approach
 
-Assess whether TDD applies to this ticket. **Not all work needs new tests — don't write tests that test nothing meaningful.**
+Assess whether TDD applies to this unit. **Not all work needs new tests — don't write tests that test nothing meaningful.**
 
 **TDD applies** when the ticket changes observable behavior:
 - New features, public API surface, or code paths
@@ -60,12 +64,8 @@ Assess whether TDD applies to this ticket. **Not all work needs new tests — do
 
 1. Make the changes described in the plan
 2. Run typecheck — no new type errors
-{props.verifyCommands && props.verifyCommands.length > 0
-  ? props.verifyCommands.map(c => `3. Run \`${c}\` — existing tests must still pass`).join('\n')
-  : '3. Run existing tests — all suites must still pass'}
-{props.formatterCommands && props.formatterCommands.length > 0
-  ? `4. Run formatters: ${props.formatterCommands.join(', ')}`
-  : '4. Run formatters'}
+{props.verifyCommands && props.verifyCommands.length > 0 ? props.verifyCommands.map(c => `- Run \`${c}\` — existing tests must still pass`).join('\n') : '- Run existing tests — all suites must still pass'}
+{props.formatterCommands && props.formatterCommands.length > 0 ? `- Run formatters: ${props.formatterCommands.join(', ')}` : '- Run formatters'}
 
 ### Verify (both paths)
 
@@ -83,10 +83,10 @@ Assess whether TDD applies to this ticket. **Not all work needs new tests — do
 
 You MUST commit and push your changes to the ticket branch before finishing. Uncommitted work is lost work.
 
-1. `jj describe -m "{props.commitPrefix || 'EMOJI'} type(scope): description"` — describe your changes with a meaningful message.
+1. {`jj describe -m "${props.commitPrefix || "EMOJI"} type(scope): description"`} — describe your changes with a meaningful message.
 2. `jj new` — create a new change for the next logical step. Repeat describe+new for each atomic change.
-3. `jj bookmark set ticket/{props.ticketId} -r @`
-4. `jj git push --bookmark ticket/{props.ticketId}`
+3. {`jj bookmark set ${props.branchPrefix || "unit/"}${props.unitId} -r @`}
+4. {`jj git push --bookmark ${props.branchPrefix || "unit/"}${props.unitId}`}
 
 {props.emojiPrefixes ? `Emoji prefixes: ${props.emojiPrefixes}` : 'Use conventional commit prefixes'}
 

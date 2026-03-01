@@ -43,10 +43,6 @@ export async function runStatus(opts: { repoRoot: string }): Promise<void> {
     }
   }
 
-  if (config.mode === "super-ralph") {
-    console.log(`  Prompt: ${config.promptText?.slice(0, 100) ?? "(none)"}...`);
-  }
-
   const dbPath = join(ralphDir, "workflow.db");
   if (existsSync(dbPath)) {
     const latestRunId = getLatestRunId(dbPath);

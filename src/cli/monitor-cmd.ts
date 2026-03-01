@@ -50,7 +50,7 @@ export async function runMonitor(opts: {
   }
 
   const projectName = basename(repoRoot);
-  const prompt = config.promptText ?? config.rfcPath ?? "";
+  const prompt = config.rfcPath ?? "";
 
   console.log(`Launching monitor for run ${runId}...\n`);
 

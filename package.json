@@ -11,11 +11,9 @@
   },
   "exports": {
     ".": "./src/index.ts",
-    "./selectors": "./src/selectors.ts",
     "./components": "./src/components/index.ts",
     "./scheduled": "./src/scheduled/index.ts",
-    "./scheduled/schemas": "./src/scheduled/schemas.ts",
-    "./cli/clarifications": "./src/cli/clarifications.ts"
+    "./scheduled/schemas": "./src/scheduled/schemas.ts"
   },
   "files": [
     "src/",

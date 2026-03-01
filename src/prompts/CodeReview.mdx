@@ -1,7 +1,9 @@
-CODE QUALITY REVIEW — Ticket: {props.ticketId}
+CODE QUALITY REVIEW — Unit: {props.unitId}
 
-Title: {props.ticketTitle}
-Category: {props.ticketCategory}
+Title: {props.unitName}
+Category: {props.unitCategory}
+
+{props.whatWasDone ? `\nWhat was implemented: ${props.whatWasDone}` : ''}
 
 You are reviewing this ticket's implementation for **code quality only**.
 Spec compliance is reviewed separately — focus here on quality, correctness patterns, and maintainability.

@@ -1,172 +1,53 @@
 /**
- * Super Ralph Lite - Complexity-aware fork of Super Ralph
+ * Scheduled-work workflow toolkit — RFC-driven AI development engine.
  *
- * Encapsulates the ticket-driven development workflow with:
- * - Complexity-tiered pipelines (trivial/small/medium/large)
- * - Multi-agent code review
- * - TDD validation loops
- * - Automated ticket discovery with deduplication and batching
- * - Conflict-aware merge queue
- * - Stacked ticket processing with worktrees
- *
- * Forked from Super Ralph, generalized for mixed-complexity workloads.
+ * Provides:
+ * - QualityPipeline: per-unit quality pipeline (research → implement → test → review)
+ * - ScheduledWorkflow: orchestrator composing pipelines + merge queue
+ * - AgenticMergeQueue: lands completed units onto main
+ * - Monitor: TUI for observing workflow progress
+ * - Scheduled work types and schemas
  */
 
-import {
-  selectAllTickets,
-  selectDiscoverTickets,
-  selectCompletedTicketIds,
-  selectProgressSummary,
-  selectTicketReport,
-  selectResearch,
-  selectPlan,
-  selectImplement,
-  selectTestResults,
-  selectSpecReview,
-  selectCodeReviews,
-  selectClarifyingQuestions,
-  selectInterpretConfig,
-  selectMonitor,
-  selectTicketPipelineStage,
-  isTicketTierComplete,
-} from "./selectors";
-
-import type { Ticket, RalphOutputs } from "./selectors";
-
-import {
-  COMPLEXITY_TIERS,
-  getTierStages,
-  getTierFinalStage,
-  isTierStage,
-} from "./schemas";
-import type { ComplexityTier } from "./schemas";
-
-import {
-  SuperRalph,
-  Job,
-  InterpretConfig,
-  Monitor,
-  TicketScheduler,
-  ticketScheduleSchema,
-  scheduledJobSchema,
-  computePipelineStage,
-  isJobComplete,
-  JOB_TYPE_TO_OUTPUT_KEY,
+// Components
+export {
+  QualityPipeline,
+  ScheduledWorkflow,
   AgenticMergeQueue,
   mergeQueueResultSchema,
-  interpretConfigOutputSchema,
+  Monitor,
   monitorOutputSchema,
 } from "./components";
 
-import {
-  clarifyingQuestionsOutputSchema,
-  generateQuestionsOutputSchema,
-} from "./schemas";
-
-import {
-  AgentRegistry,
-  getAgentRegistry,
-  resetAgentRegistry,
-} from "./agentRegistry";
-import type { AgentMetadata, AgentStats, AgentRegistrySnapshot } from "./agentRegistry";
-
-import {
-  loadCrossRunTicketState,
-  getResumableTickets,
-  pipelineStageIndex,
-} from "./durability";
-import type { SuperRalphProps } from "./components/SuperRalph";
-import type { JobProps } from "./components/Job";
-import type { InterpretConfigOutput, InterpretConfigProps } from "./components/InterpretConfig";
-import type { MonitorOutput, MonitorProps } from "./components/Monitor";
-import type { TicketSchedule, TicketScheduleJob, TicketSchedulerProps, TicketState } from "./components/TicketScheduler";
-import type { AgenticMergeQueueProps, AgenticMergeQueueTicket, MergeQueueResult } from "./components/AgenticMergeQueue";
-import type { CrossRunTicketState } from "./durability";
-import { useSuperRalph } from "./hooks/useSuperRalph";
-import type { SuperRalphContext, UseSuperRalphConfig } from "./hooks/useSuperRalph";
-import { ralphOutputSchemas } from "./schemas";
-
-export {
-  // Complexity Tiers
-  COMPLEXITY_TIERS,
-  getTierStages,
-  getTierFinalStage,
-  isTierStage,
-
-  // Selectors
-  selectAllTickets,
-  selectDiscoverTickets,
-  selectCompletedTicketIds,
-  selectProgressSummary,
-  selectTicketReport,
-  selectResearch,
-  selectPlan,
-  selectImplement,
-  selectTestResults,
-  selectSpecReview,
-  selectCodeReviews,
-  selectClarifyingQuestions,
-  selectInterpretConfig,
-  selectMonitor,
-  selectTicketPipelineStage,
-  isTicketTierComplete,
-
-  // Hooks
-  useSuperRalph,
-
-  // Components
-  SuperRalph,
-  Job,
-  InterpretConfig,
-  Monitor,
-  TicketScheduler,
-  ticketScheduleSchema,
-  scheduledJobSchema,
-  computePipelineStage,
-  isJobComplete,
-  JOB_TYPE_TO_OUTPUT_KEY,
-  AgenticMergeQueue,
-  mergeQueueResultSchema,
-
-  // Agent Registry
-  AgentRegistry,
-  getAgentRegistry,
-  resetAgentRegistry,
-
-  // Durability
-  loadCrossRunTicketState,
-  getResumableTickets,
-  pipelineStageIndex,
-
-  // Schemas
-  ralphOutputSchemas,
-  clarifyingQuestionsOutputSchema,
-  generateQuestionsOutputSchema,
-  interpretConfigOutputSchema,
-  monitorOutputSchema,
-};
-
 export type {
-  ComplexityTier,
-  Ticket,
-  RalphOutputs,
-  SuperRalphProps,
-  JobProps,
-  SuperRalphContext,
-  UseSuperRalphConfig,
-  InterpretConfigOutput,
-  InterpretConfigProps,
-  MonitorOutput,
-  MonitorProps,
-  TicketSchedule,
-  TicketScheduleJob,
-  TicketSchedulerProps,
-  TicketState,
+  QualityPipelineProps,
+  QualityPipelineAgents,
+  DepSummary,
+  ScheduledWorkflowProps,
+  ScheduledWorkflowAgents,
   AgenticMergeQueueProps,
   AgenticMergeQueueTicket,
   MergeQueueResult,
-  AgentMetadata,
-  AgentStats,
-  AgentRegistrySnapshot,
-  CrossRunTicketState,
-};
+  MonitorOutput,
+  MonitorProps,
+} from "./components";
+
+// Scheduled work types
+export {
+  computeLayers,
+  validateDAG,
+  SCHEDULED_TIERS,
+  workPlanSchema,
+  workUnitSchema,
+  ralphinhoConfigSchema,
+} from "./scheduled/types";
+
+export type {
+  WorkPlan,
+  WorkUnit,
+  RalphinhoConfig,
+  ScheduledTier,
+} from "./scheduled/types";
+
+// Schemas
+export { scheduledOutputSchemas } from "./scheduled/schemas";

@@ -47,6 +47,10 @@ export type AgenticMergeQueueProps = {
   mainBranch?: string;
   maxSpeculativeDepth?: number;
   output: any;
+  /** Override the Task node ID (default: "agentic-merge-queue") */
+  nodeId?: string;
+  /** Branch prefix for unit branches (default: "ticket/") */
+  branchPrefix?: string;
 };
 
 const PRIORITY_ORDER: Record<AgenticMergeQueueTicket["priority"], number> = {
@@ -98,6 +102,7 @@ function buildMergeQueuePrompt(
   preLandChecks: string[],
   postLandChecks: string[],
   maxSpeculativeDepth: number,
+  branchPrefix: string = "ticket/",
 ): string {
   const readyTickets = tickets.filter((t) => t.reportComplete && !t.landed);
   const queueTable = buildQueueStatusTable(readyTickets);
@@ -144,7 +149,7 @@ ${preLandCmds}
 
 2. **Rebase onto ${mainBranch}** — Rebase the ticket branch onto the current tip of ${mainBranch}:
    \`\`\`
-   jj rebase -b bookmark("ticket/{ticketId}") -d ${mainBranch}
+   jj rebase -b bookmark("${branchPrefix}{ticketId}") -d ${mainBranch}
    \`\`\`
    If conflicts occur, attempt to understand the conflict. If it's trivially resolvable (e.g. lockfile, generated code), resolve it. Otherwise evict the ticket with detailed context about what conflicted and why.
 
@@ -153,7 +158,7 @@ ${postLandCmds}
 
 4. **Fast-forward ${mainBranch}** — If all checks pass:
    \`\`\`
-   jj bookmark set ${mainBranch} -r bookmark("ticket/{ticketId}")
+   jj bookmark set ${mainBranch} -r bookmark("${branchPrefix}{ticketId}")
    \`\`\`
 
 5. **Push** — Push the updated ${mainBranch}:
@@ -163,7 +168,7 @@ ${postLandCmds}
 
 6. **Cleanup** — Delete the ticket bookmark and close the worktree:
    \`\`\`
-   jj bookmark delete ticket/{ticketId}
+   jj bookmark delete ${branchPrefix}{ticketId}
    jj workspace close {worktreeName}
    \`\`\`
 
@@ -179,13 +184,13 @@ ${postLandCmds}
 ## Available jj Operations
 
 All operations use \`jj\` (NOT git). Key commands:
-- \`jj rebase -b bookmark("ticket/{ticketId}") -d ${mainBranch}\` — Rebase ticket onto main
-- \`jj bookmark set ${mainBranch} -r bookmark("ticket/{ticketId}")\` — Fast-forward main
+- \`jj rebase -b bookmark("${branchPrefix}{ticketId}") -d ${mainBranch}\` — Rebase ticket onto main
+- \`jj bookmark set ${mainBranch} -r bookmark("${branchPrefix}{ticketId}")\` — Fast-forward main
 - \`jj git push --bookmark ${mainBranch}\` — Push main to remote
 - \`jj git fetch\` — Fetch latest from remote
-- \`jj log -r "main..bookmark(\\"ticket/{ticketId}\\")" --reversed\` — Show ticket commits
-- \`jj diff -r "roots(main..bookmark(\\"ticket/{ticketId}\\"))" --summary\` — Show changed files
-- \`jj bookmark delete ticket/{ticketId}\` — Remove ticket bookmark
+- \`jj log -r "main..bookmark(\\"${branchPrefix}{ticketId}\\")" --reversed\` — Show ticket commits
+- \`jj diff -r "roots(main..bookmark(\\"${branchPrefix}{ticketId}\\"))" --summary\` — Show changed files
+- \`jj bookmark delete ${branchPrefix}{ticketId}\` — Remove ticket bookmark
 - \`jj workspace close {name}\` — Close a worktree
 
 ## Output Format
@@ -207,6 +212,8 @@ export function AgenticMergeQueue({
   mainBranch = "main",
   maxSpeculativeDepth = 4,
   output,
+  nodeId = "agentic-merge-queue",
+  branchPrefix = "ticket/",
 }: AgenticMergeQueueProps) {
   const readyTickets = tickets.filter((t) => t.reportComplete && !t.landed);
 
@@ -221,11 +228,12 @@ export function AgenticMergeQueue({
     preLandChecks,
     postLandChecks,
     maxSpeculativeDepth,
+    branchPrefix,
   );
 
   return (
     <Task
-      id="agentic-merge-queue"
+      id={nodeId}
       output={output}
       agent={agent}
       retries={2}

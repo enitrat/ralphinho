@@ -1,13 +1,13 @@
 /**
- * ralphinho run — Execute or resume a workflow.
+ * ralphinho run — Execute or resume a scheduled workflow.
  *
- * Reads .ralphinho/config.json to determine the mode, generates the
- * appropriate Smithers workflow file, and launches execution.
+ * Reads .ralphinho/config.json, generates the Smithers workflow file,
+ * and launches execution.
  */
 
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -16,7 +16,6 @@ import {
   launchSmithers,
   promptChoice,
   ralphSourceRoot,
-  runningFromSource,
   type ParsedArgs,
 } from "./shared";
 import { ralphinhoConfigSchema, type RalphinhoConfig } from "../scheduled/types";
@@ -29,28 +28,14 @@ export async function runWorkflow(opts: {
   const ralphDir = getRalphDir(repoRoot);
   const configPath = join(ralphDir, "config.json");
 
-  // ── Check for --resume ──────────────────────────────────────────────
   const resumeRunId =
     typeof flags.resume === "string" ? flags.resume : null;
 
   // ── Load config ─────────────────────────────────────────────────────
   if (!existsSync(configPath)) {
-    // Fallback: check for legacy .super-ralph
-    const legacyWorkflow = join(
-      repoRoot,
-      ".super-ralph",
-      "generated",
-      "workflow.tsx",
+    console.error(
+      "Error: No workflow initialized. Run `ralphinho init` first.",
     );
-    if (existsSync(legacyWorkflow)) {
-      console.log(
-        "Found legacy .super-ralph/ workflow. Use `ralphinho init` to create a new workflow.\n",
-      );
-    } else {
-      console.error(
-        "Error: No workflow initialized. Run `ralphinho init` first.",
-      );
-    }
     process.exit(1);
   }
 
@@ -72,52 +57,11 @@ export async function runWorkflow(opts: {
       ? Math.max(1, Number(flags["max-concurrency"]) || config.maxConcurrency)
       : config.maxConcurrency;
 
-  // ── Route to mode ───────────────────────────────────────────────────
-  if (config.mode === "scheduled-work") {
-    return runScheduledWork({
-      config,
-      repoRoot,
-      ralphDir,
-      smithersCliPath,
-      maxConcurrency,
-      resumeRunId,
-      flags,
-    });
-  }
-
-  if (config.mode === "super-ralph") {
-    return runSuperRalph({
-      config,
-      repoRoot,
-      ralphDir,
-      smithersCliPath,
-      maxConcurrency,
-      resumeRunId,
-      flags,
-    });
-  }
-
-  console.error(`Unknown mode: ${config.mode}`);
-  process.exit(1);
-}
-
-// ── Scheduled Work Execution ──────────────────────────────────────────
-
-async function runScheduledWork(opts: {
-  config: RalphinhoConfig;
-  repoRoot: string;
-  ralphDir: string;
-  smithersCliPath: string;
-  maxConcurrency: number;
-  resumeRunId: string | null;
-  flags: ParsedArgs["flags"];
-}): Promise<void> {
-  const { config, repoRoot, ralphDir, smithersCliPath, maxConcurrency, resumeRunId, flags } = opts;
-
+  // ── Execute scheduled work ──────────────────────────────────────────
   const planPath = join(ralphDir, "work-plan.json");
   if (!existsSync(planPath)) {
     console.error(
-      "Error: No work plan found. Run `ralphinho plan` or `ralphinho init scheduled-work` first.",
+      "Error: No work plan found. Run `ralphinho plan` or `ralphinho init` first.",
     );
     process.exit(1);
   }
@@ -238,88 +182,6 @@ async function runScheduledWork(opts: {
     maxConcurrency,
     smithersCliPath,
     label: "Scheduled Work",
-  });
-}
-
-// ── Super Ralph Execution ─────────────────────────────────────────────
-
-async function runSuperRalph(opts: {
-  config: RalphinhoConfig;
-  repoRoot: string;
-  ralphDir: string;
-  smithersCliPath: string;
-  maxConcurrency: number;
-  resumeRunId: string | null;
-  flags: ParsedArgs["flags"];
-}): Promise<void> {
-  const { repoRoot, ralphDir, smithersCliPath, maxConcurrency, resumeRunId } = opts;
-
-  const workflowPath = join(ralphDir, "generated", "workflow.tsx");
-  const dbPath = join(ralphDir, "workflow.db");
-
-  if (!existsSync(workflowPath)) {
-    console.error(
-      "Error: No workflow file found. Run `ralphinho init super-ralph` first.",
-    );
-    process.exit(1);
-  }
-
-  if (resumeRunId) {
-    if (!existsSync(dbPath)) {
-      console.error("Error: No database found. Cannot resume.");
-      process.exit(1);
-    }
-
-    // Launch monitor alongside Smithers for resume
-    const cliDir = import.meta.dir;
-    const monitorScript = join(cliDir, "monitor-standalone.ts");
-    const monitorProc = Bun.spawn(
-      [
-        "bun",
-        monitorScript,
-        dbPath,
-        resumeRunId,
-        basename(repoRoot),
-        "",
-      ],
-      {
-        cwd: repoRoot,
-        stdout: "inherit",
-        stderr: "inherit",
-        stdin: "inherit",
-      },
-    );
-
-    process.env.SUPER_RALPH_SKIP_MONITOR = "1";
-
-    const exitCode = await launchSmithers({
-      mode: "resume",
-      workflowPath,
-      repoRoot,
-      runId: resumeRunId,
-      maxConcurrency,
-      smithersCliPath,
-    });
-
-    try {
-      monitorProc.kill();
-    } catch {}
-
-    reportExit(exitCode, "Super Ralph (resume)");
-    return;
-  }
-
-  // Fresh run
-  const runId = `sr-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
-
-  return launchAndReport({
-    mode: "run",
-    workflowPath,
-    repoRoot,
-    runId,
-    maxConcurrency,
-    smithersCliPath,
-    label: "Super Ralph",
   });
 }
 

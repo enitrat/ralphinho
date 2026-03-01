@@ -1,0 +1,36 @@
+FINAL REVIEW GATE — Unit: {props.unitId}
+
+Title: {props.unitName}
+Pass: {props.pass} of {props.maxPasses}
+
+## Description
+{props.description}
+
+## Acceptance Criteria
+{props.acceptanceCriteria && props.acceptanceCriteria.length > 0
+  ? props.acceptanceCriteria.map((a, i) => `${i + 1}. ${a}`).join('\n')
+  : 'None specified'}
+
+## Implementation Summary
+{props.implSummary ?? 'Unknown'}
+Believes complete: {props.believesComplete ?? false}
+
+## Test Results
+Build: {props.buildPassed ?? 'unknown'}
+Tests: {props.testsPassCount ?? 0} passed, {props.testsFailCount ?? 0} failed
+{props.failingSummary ? `Failures: ${props.failingSummary}` : ''}
+
+## Review Results
+PRD: severity={props.prdSeverity ?? 'n/a'}, approved={props.prdApproved ?? 'n/a'}
+Code: severity={props.codeSeverity ?? 'n/a'}, approved={props.codeApproved ?? 'n/a'}
+Issues resolved: {props.issuesResolved ?? 'n/a'}
+
+## Decision Criteria
+
+Set `readyToMoveOn: true` ONLY if ALL of these are met:
+- All acceptance criteria are satisfied
+- Tests pass (build + test suites)
+- Review severity is none or minor
+- Implementation is functionally complete
+
+If `readyToMoveOn: false`, explain EXACTLY what must be fixed in `reasoning` — this feeds directly back to the implementer on the next pass.

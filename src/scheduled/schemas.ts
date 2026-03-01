@@ -1,12 +1,9 @@
 /**
- * Output schemas for Scheduled Work mode.
+ * Output schemas for the scheduled workflow.
  *
  * These are the Zod schemas used by createSmithers() to auto-generate
  * SQLite tables. Each key becomes a table name, and each schema defines
  * the structured output that the AI agent must return.
- *
- * Prefixed with "sw_" to avoid collisions with super-ralph schemas
- * if both modes share the same database in the future.
  */
 
 import { z } from "zod";
@@ -14,23 +11,23 @@ import { z } from "zod";
 const issueSchema = z.object({
   severity: z.enum(["critical", "major", "minor"]),
   description: z.string(),
-  file: z.string().nullable().optional(),
-  suggestion: z.string().nullable().optional(),
-  reference: z.string().nullable().optional(),
+  file: z.string().nullable(),
+  suggestion: z.string().nullable(),
+  reference: z.string().nullable(),
 });
 
 export const scheduledOutputSchemas = {
   // ── Research ──────────────────────────────────────────────────────
-  sw_research: z.object({
+  research: z.object({
     contextFilePath: z.string(),
     findings: z.array(z.string()),
     referencesRead: z.array(z.string()),
     openQuestions: z.array(z.string()),
-    notes: z.string().nullable().optional(),
+    notes: z.string().nullable(),
   }),
 
   // ── Plan ──────────────────────────────────────────────────────────
-  sw_plan: z.object({
+  plan: z.object({
     planFilePath: z.string(),
     implementationSteps: z.array(z.string()),
     filesToCreate: z.array(z.string()),
@@ -39,7 +36,7 @@ export const scheduledOutputSchemas = {
   }),
 
   // ── Implement ─────────────────────────────────────────────────────
-  sw_implement: z.object({
+  implement: z.object({
     summary: z.string(),
     filesCreated: z.array(z.string()).nullable(),
     filesModified: z.array(z.string()).nullable(),
@@ -49,7 +46,7 @@ export const scheduledOutputSchemas = {
   }),
 
   // ── Test ──────────────────────────────────────────────────────────
-  sw_test: z.object({
+  test: z.object({
     buildPassed: z.boolean(),
     testsPassed: z.boolean(),
     testsPassCount: z.number(),
@@ -59,7 +56,7 @@ export const scheduledOutputSchemas = {
   }),
 
   // ── PRD Review ────────────────────────────────────────────────────
-  sw_prd_review: z.object({
+  prd_review: z.object({
     severity: z.enum(["critical", "major", "minor", "none"]),
     approved: z.boolean(),
     feedback: z.string(),
@@ -67,7 +64,7 @@ export const scheduledOutputSchemas = {
   }),
 
   // ── Code Review ───────────────────────────────────────────────────
-  sw_code_review: z.object({
+  code_review: z.object({
     severity: z.enum(["critical", "major", "minor", "none"]),
     approved: z.boolean(),
     feedback: z.string(),
@@ -75,7 +72,7 @@ export const scheduledOutputSchemas = {
   }),
 
   // ── Review Fix ────────────────────────────────────────────────────
-  sw_review_fix: z.object({
+  review_fix: z.object({
     summary: z.string(),
     fixesMade: z.array(
       z.object({
@@ -96,7 +93,7 @@ export const scheduledOutputSchemas = {
   }),
 
   // ── Final Review (the gate) ───────────────────────────────────────
-  sw_final_review: z.object({
+  final_review: z.object({
     readyToMoveOn: z.boolean(),
     reasoning: z.string(),
     approved: z.boolean(),
@@ -106,14 +103,14 @@ export const scheduledOutputSchemas = {
         z.object({
           severity: z.enum(["critical", "major", "minor"]),
           description: z.string(),
-          file: z.string().nullable().optional(),
+          file: z.string().nullable(),
         }),
       )
       .nullable(),
   }),
 
   // ── Pass Tracker ──────────────────────────────────────────────────
-  sw_pass_tracker: z.object({
+  pass_tracker: z.object({
     totalIterations: z.number(),
     unitsRun: z.array(z.string()),
     unitsComplete: z.array(z.string()),
@@ -121,9 +118,7 @@ export const scheduledOutputSchemas = {
   }),
 
   // ── Completion Report ────────────────────────────────────────────
-  // Generated after the Ralph loop ends, summarizing what landed,
-  // what failed, and suggested next steps.
-  sw_completion_report: z.object({
+  completion_report: z.object({
     totalUnits: z.number(),
     unitsLanded: z.array(z.string()),
     unitsFailed: z.array(
@@ -139,11 +134,9 @@ export const scheduledOutputSchemas = {
   }),
 
   // ── Merge Queue Result (per-layer batch) ──────────────────────────
-  // Output of the merge queue agent that runs after each layer's
-  // quality pipelines complete. One record per layer per Ralph iteration.
-  // Land status is read directly from this output — no separate sw_land
-  // records needed. unitLanded()/unitEvicted() scan ticketsLanded/ticketsEvicted.
-  sw_merge_queue: z.object({
+  // Land status is read directly from this output.
+  // unitLanded()/unitEvicted() scan ticketsLanded/ticketsEvicted.
+  merge_queue: z.object({
     ticketsLanded: z.array(z.object({
       ticketId: z.string(),
       mergeCommit: z.string().nullable(),
@@ -152,7 +145,7 @@ export const scheduledOutputSchemas = {
     ticketsEvicted: z.array(z.object({
       ticketId: z.string(),
       reason: z.string(),
-      details: z.string(), // conflict details — shown to implementer on next pass
+      details: z.string(),
     })),
     ticketsSkipped: z.array(z.object({
       ticketId: z.string(),

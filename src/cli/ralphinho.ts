@@ -1,32 +1,24 @@
 #!/usr/bin/env bun
 /**
- * ralphinho — Multi-mode AI development workflow CLI
- *
- * Modes:
- *   super-ralph     — Intent-driven autonomous workflow (discover tickets, schedule, implement)
- *   scheduled-work  — RFC/PRD-driven pre-planned workflow (decompose → DAG → quality pipeline)
+ * ralphinho — RFC-driven AI development workflow CLI
  *
  * Commands:
- *   ralphinho init super-ralph "prompt"       Initialize intent-driven workflow
- *   ralphinho init super-ralph ./PROMPT.md
- *   ralphinho init scheduled-work ./rfc.md    Initialize RFC-driven workflow
- *   ralphinho plan                            (Re)generate work plan from RFC
- *   ralphinho run                             Execute the initialized workflow
- *   ralphinho run --resume <run-id>           Resume a previous run
- *   ralphinho monitor                         Attach TUI to running workflow
- *   ralphinho status                          Show current state
+ *   ralphinho init ./rfc.md            Initialize workflow from RFC
+ *   ralphinho plan                     (Re)generate work plan from RFC
+ *   ralphinho run                      Execute the initialized workflow
+ *   ralphinho run --resume <run-id>    Resume a previous run
+ *   ralphinho monitor                  Attach TUI to running workflow
+ *   ralphinho status                   Show current state
  */
 
 import { resolve } from "node:path";
 import { parseArgs } from "./shared";
 
 function printHelp() {
-  console.log(`ralphinho — Multi-mode AI development workflow CLI
+  console.log(`ralphinho — RFC-driven AI development workflow CLI
 
 Usage:
-  ralphinho init super-ralph "prompt text"
-  ralphinho init super-ralph ./PROMPT.md
-  ralphinho init scheduled-work ./rfc-003.md
+  ralphinho init ./rfc-003.md
 
   ralphinho plan                             (Re)generate work plan from RFC
   ralphinho run                              Execute the initialized workflow
@@ -39,21 +31,14 @@ Global Options:
   --max-concurrency <n>       Max parallel work units (default: 6)
   --help                      Show this help
 
-Init Options (super-ralph):
-  --skip-questions            Skip clarifying questions phase
-  --force-new                 Skip existing workflow detection
-  --dry-run                   Generate files but don't execute
-  --run-id <id>               Explicit Smithers run id
-
-Init Options (scheduled-work):
+Init Options:
   --dry-run                   Generate work plan but don't execute
 
 Examples:
-  ralphinho init super-ralph "Build a React todo app"
-  ralphinho init scheduled-work ./docs/rfc-003.md
+  ralphinho init ./docs/rfc-003.md
   ralphinho plan
   ralphinho run
-  ralphinho run --resume sr-m3abc12-deadbeef
+  ralphinho run --resume sw-m3abc12-deadbeef
 `);
 }
 
@@ -75,31 +60,12 @@ async function main() {
 
   switch (command) {
     case "init": {
-      const mode = parsed.positional[1];
-
-      if (mode === "super-ralph") {
-        const { initSuperRalph } = await import("./init-super-ralph");
-        return initSuperRalph({
-          positional: parsed.positional.slice(2),
-          flags: parsed.flags,
-          repoRoot,
-        });
-      }
-
-      if (mode === "scheduled-work") {
-        const { initScheduledWork } = await import("./init-scheduled");
-        return initScheduledWork({
-          positional: parsed.positional.slice(2),
-          flags: parsed.flags,
-          repoRoot,
-        });
-      }
-
-      console.error(
-        `Unknown init mode: "${mode}". Use "super-ralph" or "scheduled-work".`,
-      );
-      process.exit(1);
-      break;
+      const { initScheduledWork } = await import("./init-scheduled");
+      return initScheduledWork({
+        positional: parsed.positional.slice(1),
+        flags: parsed.flags,
+        repoRoot,
+      });
     }
 
     case "plan": {
@@ -124,7 +90,6 @@ async function main() {
 
     default: {
       if (!command) {
-        // No command — check for existing workflow
         const { runWorkflow } = await import("./run");
         return runWorkflow({ flags: parsed.flags, repoRoot });
       }

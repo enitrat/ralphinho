@@ -2,7 +2,6 @@ import React from "react";
 import { Task } from "smithers-orchestrator";
 import { z } from "zod";
 import { dirname, join } from "node:path";
-import type { ClarificationSession } from "../cli/clarifications";
 import { runMonitorUI } from "../advanced-monitor-ui";
 
 export const monitorOutputSchema = z.object({
@@ -16,7 +15,6 @@ export type MonitorProps = {
   dbPath: string;
   runId: string;
   config: any;
-  clarificationSession: ClarificationSession | null;
   prompt: string;
   repoRoot: string;
 };
@@ -29,15 +27,13 @@ export type MonitorProps = {
  * - Real-time task list with color-coded stage progress
  * - Event log tracking phase transitions and key milestones
  * - Captured stdout/stderr logs panel (prevents TUI corruption)
- * - Navigate tickets with arrow keys, drill into details
+ * - Navigate units with arrow keys, drill into details
  *
  * The monitor TUI is started in a fire-and-forget manner so it does not
  * block the Smithers engine loop.  Without this, a `<Parallel>` sibling
- * like `<SuperRalph>` can never advance its Ralph iteration because the
+ * workflow component can never advance its Ralph iteration because the
  * engine's `Promise.all` waits for every runnable task — including this
  * never-finishing polling loop — before re-rendering.
- *
- * See: https://github.com/evmts/super-ralph/issues/6
  */
 export function Monitor({
   dbPath,
