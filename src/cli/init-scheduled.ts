@@ -36,7 +36,7 @@ export async function initScheduledWork(opts: {
   const rfcArg = positional[0];
   if (!rfcArg) {
     console.error("Error: RFC file path is required.");
-    console.error("Usage: ralphinho init scheduled-work ./path/to/rfc.md");
+    console.error("Usage: ralphinho init ./path/to/rfc.md");
     process.exit(1);
   }
 

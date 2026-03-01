@@ -23,7 +23,7 @@ export async function runPlan(opts: {
 
   if (!existsSync(configPath)) {
     console.error(
-      "Error: No ralphinho config found. Run `ralphinho init scheduled-work ./rfc.md` first.",
+      "Error: No ralphinho config found. Run `ralphinho init ./rfc.md` first.",
     );
     process.exit(1);
   }
