@@ -117,10 +117,16 @@ const agents = {
 
 // ── Smithers setup ────────────────────────────────────────────────────
 
-const { smithers, outputs, Workflow } = createSmithers(
+const { smithers, outputs, Workflow, db } = createSmithers(
   scheduledOutputSchemas,
   { dbPath: DB_PATH }
 );
+
+// Workaround for macOS SQLITE_IOERR_VNODE (6922): Apple's SQLite monitors
+// WAL files via GCD vnode sources. Disabling mmap prevents the invalidation
+// that rapid concurrent writes trigger.
+(db as any).$client.exec("PRAGMA mmap_size = 0");
+(db as any).$client.exec("PRAGMA synchronous = NORMAL");
 
 // ── Workflow ──────────────────────────────────────────────────────────
 
