@@ -11,14 +11,8 @@ import { ralphSourceRoot, runningFromSource } from "./shared";
 
 export function renderScheduledWorkflow(params: {
   repoRoot: string;
-  dbPath: string;
-  planPath: string;
-  detectedAgents: { claude: boolean; codex: boolean; gh: boolean };
-  maxConcurrency: number;
-  baseBranch: string;
 }): string {
-  const { repoRoot, dbPath, planPath, detectedAgents, maxConcurrency, baseBranch } =
-    params;
+  const { repoRoot } = params;
 
   // Determine import prefix — where to import library components from
   const isLibRepo =
@@ -36,20 +30,26 @@ export function renderScheduledWorkflow(params: {
 
   return `import React from "react";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { createSmithers, ClaudeCodeAgent, CodexAgent } from "smithers-orchestrator";
 import { scheduledOutputSchemas } from "${importPrefix}/scheduled/schemas";
 import { ScheduledWorkflow } from "${importPrefix}/components";
 
+// ── Load config ────────────────────────────────────────────────────────
+
+const _ralphDir = join(import.meta.dir, "..");
+const _config = JSON.parse(readFileSync(join(_ralphDir, "config.json"), "utf8"));
+
 // ── Constants ─────────────────────────────────────────────────────────
 
-const REPO_ROOT = ${JSON.stringify(repoRoot)};
-const DB_PATH = ${JSON.stringify(dbPath)};
-const PLAN_PATH = ${JSON.stringify(planPath)};
-const HAS_CLAUDE = ${detectedAgents.claude};
-const HAS_CODEX = ${detectedAgents.codex};
-const MAX_CONCURRENCY = ${maxConcurrency};
+const REPO_ROOT = _config.repoRoot as string;
+const DB_PATH = join(_ralphDir, "workflow.db");
+const PLAN_PATH = join(_ralphDir, "work-plan.json");
+const HAS_CLAUDE = _config.agents.claude as boolean;
+const HAS_CODEX = _config.agents.codex as boolean;
+const MAX_CONCURRENCY = _config.maxConcurrency as number;
 const MAX_PASSES = 9;
-const BASE_BRANCH = ${JSON.stringify(baseBranch)};
+const BASE_BRANCH = _config.baseBranch as string;
 
 // ── Load work plan ────────────────────────────────────────────────────
 
@@ -119,14 +119,34 @@ const agents = {
 
 const { smithers, outputs, Workflow, db } = createSmithers(
   scheduledOutputSchemas,
-  { dbPath: DB_PATH }
+  { dbPath: DB_PATH, journalMode: "DELETE" }
 );
 
-// Workaround for macOS SQLITE_IOERR_VNODE (6922): Apple's SQLite monitors
-// WAL files via GCD vnode sources. Disabling mmap prevents the invalidation
-// that rapid concurrent writes trigger.
-(db as any).$client.exec("PRAGMA mmap_size = 0");
-(db as any).$client.exec("PRAGMA synchronous = NORMAL");
+// Workaround for macOS SQLITE_IOERR_VNODE (6922): WAL mode triggers GCD vnode
+// monitoring which revokes the connection under concurrent writes. Switching to
+// rollback journal eliminates the WAL file entirely, removing the root cause.
+// synchronous=FULL ensures each commit is fsynced before returning, so a crash
+// cannot corrupt previously-committed output rows (prevents state reversion on
+// resume that occurs when uncheckpointed WAL frames are lost on crash).
+const _sqlite = (db as any).$client;
+_sqlite.exec("PRAGMA journal_mode = DELETE");
+_sqlite.exec("PRAGMA synchronous = FULL");
+_sqlite.exec("PRAGMA mmap_size = 0");
+
+const _journalMode = String(
+  _sqlite.query("PRAGMA journal_mode").get()?.journal_mode ?? "",
+).toLowerCase();
+const _syncValue = Number(
+  _sqlite.query("PRAGMA synchronous").get()?.synchronous ?? -1,
+);
+if (_journalMode !== "delete" || _syncValue !== 2) {
+  throw new Error(
+    "SQLite safety PRAGMAs not applied: journal_mode=" +
+      _journalMode +
+      ", synchronous=" +
+      _syncValue,
+  );
+}
 
 // ── Workflow ──────────────────────────────────────────────────────────
 

@@ -127,17 +127,9 @@ export async function initScheduledWork(opts: {
   const generatedDir = join(ralphDir, "generated");
   await mkdir(generatedDir, { recursive: true });
 
-  const dbPath = join(ralphDir, "workflow.db");
   const workflowPath = join(generatedDir, "workflow.tsx");
 
-  const workflowSource = renderScheduledWorkflow({
-    repoRoot,
-    dbPath,
-    planPath,
-    detectedAgents: agents,
-    maxConcurrency,
-    baseBranch,
-  });
+  const workflowSource = renderScheduledWorkflow({ repoRoot });
   await writeFile(workflowPath, workflowSource, "utf8");
 
   // Ensure node_modules symlink so the generated file can resolve imports
