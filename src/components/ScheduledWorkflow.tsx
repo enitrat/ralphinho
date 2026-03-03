@@ -55,7 +55,14 @@ function tierComplete(
 
   // All tiers require tests to pass
   const test = ctx.latest("test", `${unitId}:test`);
-  if (!test?.testsPassed || !test?.buildPassed) return false;
+  if (!test?.testsPassed) return false;
+
+  // buildPassed is required unless a final_review explicitly overrides it
+  // (handles pre-existing failures in unrelated packages)
+  if (!test?.buildPassed) {
+    const fr = ctx.latest("final_review", `${unitId}:final-review`);
+    if (!fr?.readyToMoveOn) return false;
+  }
 
   switch (tier) {
     case "trivial":
@@ -200,7 +207,13 @@ export function ScheduledWorkflow({
             nodeId: `${u.id}:test`,
             iteration: ctx.iteration,
           });
-          return freshTest?.testsPassed === true && freshTest?.buildPassed === true;
+          if (!freshTest?.testsPassed) return false;
+          // buildPassed required unless final_review overrides (pre-existing failures)
+          if (!freshTest?.buildPassed) {
+            const fr = ctx.latest("final_review", `${u.id}:final-review`);
+            return fr?.readyToMoveOn === true;
+          }
+          return true;
         }
         return true;
       })
