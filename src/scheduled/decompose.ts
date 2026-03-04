@@ -29,10 +29,8 @@ Your job is to:
 
 ## Complexity Tiers
 
-- **trivial**: Config changes, metadata updates, file deletions, re-exports. No logic changes.
-- **small**: Single-file changes with clear scope. Adding exports, simple refactors, thin wrappers.
-- **medium**: Multi-file features, API changes, refactors touching 3-5 files. Needs research and review.
-- **large**: Architectural changes, new subsystems, security-sensitive work. Needs full pipeline.
+- **small**: Single-file or few-file changes with clear scope. Config tweaks, simple refactors, thin wrappers, adding exports.
+- **large**: Multi-file features, API changes, architectural work, security-sensitive changes. Needs full pipeline with research and planning.
 
 ## Output Format
 
@@ -226,7 +224,7 @@ export function printPlanSummary(
   plan: WorkPlan,
   layers: WorkUnit[][],
 ): void {
-  const tierCounts = { trivial: 0, small: 0, medium: 0, large: 0 };
+  const tierCounts = { small: 0, large: 0 };
   for (const u of plan.units) {
     tierCounts[u.tier]++;
   }

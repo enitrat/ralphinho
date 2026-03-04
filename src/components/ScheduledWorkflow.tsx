@@ -65,18 +65,9 @@ function tierComplete(
   }
 
   switch (tier) {
-    case "trivial":
-      return true;
     case "small": {
-      const cr = ctx.latest("code_review", `${unitId}:code-review`);
-      return cr?.approved ?? false;
-    }
-    case "medium": {
-      const prd = ctx.latest("prd_review", `${unitId}:prd-review`);
-      const cr = ctx.latest("code_review", `${unitId}:code-review`);
-      if ((prd?.approved ?? false) && (cr?.approved ?? false)) return true;
-      const rf = ctx.latest("review_fix", `${unitId}:review-fix`);
-      return rf?.allIssuesResolved ?? false;
+      const fr = ctx.latest("final_review", `${unitId}:final-review`);
+      return fr?.readyToMoveOn ?? false;
     }
     case "large":
     default: {

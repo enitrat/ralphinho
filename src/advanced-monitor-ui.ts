@@ -29,14 +29,12 @@ const DISPLAY_STAGES = [
 ] as const;
 
 const TIER_STAGES: Record<string, readonly string[]> = {
-  trivial: ["implement", "test"],
-  small:   ["implement", "test", "code-review"],
-  medium:  ["research", "plan", "implement", "test", "prd-review", "code-review", "review-fix"],
+  small:   ["implement", "test", "code-review", "review-fix", "final-review"],
   large:   ["research", "plan", "implement", "test", "prd-review", "code-review", "review-fix", "final-review"],
 };
 
 const PRIORITY_ABBR: Record<string, string> = { critical: "!!", high: "hi", medium: "md", low: "lo" };
-const TIER_ABBR: Record<string, string> = { trivial: "trv", small: "sml", medium: "med", large: "lrg" };
+const TIER_ABBR: Record<string, string> = { small: "sml", large: "lrg" };
 const JOB_ABBR: Record<string, string> = {
   "discovery": "discover", "progress-update": "progress",
   "ticket:research": "research", "ticket:plan": "plan", "ticket:implement": "impl",
@@ -505,7 +503,7 @@ const root = new BoxRenderable(renderer, {
       const ticket = data.tickets.find(t => t.id === ticketId);
       if (!ticket) { db.close(); return; }
 
-      const tierStages = TIER_STAGES[ticket.tier] || TIER_STAGES.medium;
+      const tierStages = TIER_STAGES[ticket.tier] || TIER_STAGES.large;
       const stages: TicketDetail["stages"] = [];
 
       for (const sd of DISPLAY_STAGES) {
@@ -597,7 +595,7 @@ const root = new BoxRenderable(renderer, {
             ticketMap.set(unit.id, {
               id: unit.id,
               title: unit.name || unit.id,
-              tier: unit.tier || "medium",
+              tier: unit.tier || "large",
               priority: unit.priority || "medium",
             });
           }
@@ -709,7 +707,7 @@ const root = new BoxRenderable(renderer, {
       // Build ticket views
       const tickets: TicketView[] = [];
       ticketMap.forEach((t) => {
-        const tierStages = TIER_STAGES[t.tier] || TIER_STAGES.medium;
+        const tierStages = TIER_STAGES[t.tier] || TIER_STAGES.large;
         const stages: StageView[] = [];
 
         for (const sd of DISPLAY_STAGES) {

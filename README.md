@@ -87,10 +87,8 @@ Each work unit runs through a tier-based quality pipeline inside an isolated jj 
 
 | Tier | Stages | When to use |
 |------|--------|-------------|
-| **trivial** | implement → test | Config tweaks, dead code removal |
-| **small** | implement → test → code-review | Single-file behavioral changes |
-| **medium** | research → plan → implement → test → prd-review + code-review → review-fix | Multi-file features |
-| **large** | research → plan → implement → test → prd-review + code-review → review-fix → final-review | Architectural changes |
+| **small** | implement → test → code-review → review-fix → final-review | Single-file changes, config tweaks, simple refactors |
+| **large** | research → plan → implement → test → prd-review + code-review → review-fix → final-review | Multi-file features, architectural changes |
 
 The tier is assigned during RFC decomposition based on complexity assessment.
 

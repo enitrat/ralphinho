@@ -55,11 +55,9 @@ This convention is rigid and used throughout all pipeline stages and selectors.
 Tickets are assigned a tier at discovery time. The tier determines which stages run:
 
 ```typescript
-const COMPLEXITY_TIERS = {
-  trivial: ["implement", "build-verify"],
-  small:   ["implement", "test", "build-verify"],
-  medium:  ["research", "plan", "implement", "test", "build-verify", "code-review"],
-  large:   ["research", "plan", "implement", "test", "build-verify", "spec-review", "code-review", "review-fix", "report"],
+const SCHEDULED_TIERS = {
+  small:   ["implement", "test", "code-review", "review-fix", "final-review"],
+  large:   ["research", "plan", "implement", "test", "prd-review", "code-review", "review-fix", "final-review"],
 };
 ```
 

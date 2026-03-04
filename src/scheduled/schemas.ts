@@ -32,7 +32,7 @@ export const scheduledOutputSchemas = {
     implementationSteps: z.array(z.string()),
     filesToCreate: z.array(z.string()),
     filesToModify: z.array(z.string()),
-    complexity: z.enum(["trivial", "small", "medium", "large"]),
+    complexity: z.enum(["small", "large"]),
   }),
 
   // ── Implement ─────────────────────────────────────────────────────

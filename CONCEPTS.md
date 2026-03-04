@@ -227,14 +227,12 @@ rm -rf {worktreePath}
 
 ## 6. Complexity Tiers
 
-Every work unit is assigned a complexity tier that determines which quality pipeline stages it goes through. Both workflows use the same four tier names with different stage compositions:
+Every work unit is assigned a complexity tier that determines which quality pipeline stages it goes through:
 
 | Tier | Description |
 |------|-------------|
-| `trivial` | Single-file change, no tests needed (SuperRalph) or basic test only (ScheduledWork) |
-| `small` | Few files, needs tests + basic review |
-| `medium` | Multi-file, full pipeline with research/plan/review |
-| `large` | Complex, full pipeline with all quality gates |
+| `small` | Few files, needs tests + review with final gate |
+| `large` | Multi-file or architectural, full pipeline with research/plan/review |
 
 See each workflow's documentation for the exact stage lists per tier.
 

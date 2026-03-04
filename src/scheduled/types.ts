@@ -23,7 +23,7 @@ export const workUnitSchema = z.object({
   /** Concrete acceptance criteria — what must be true when this unit is done */
   acceptance: z.array(z.string()),
   /** Complexity tier — determines quality pipeline depth */
-  tier: z.enum(["trivial", "small", "medium", "large"]),
+  tier: z.enum(["small", "large"]),
 });
 
 export type WorkUnit = z.infer<typeof workUnitSchema>;
@@ -80,20 +80,12 @@ export type RalphinhoConfig = z.infer<typeof ralphinhoConfigSchema>;
  * driven by a spec (the RFC).
  */
 export const SCHEDULED_TIERS = {
-  trivial: ["implement", "test"] as const,
   small: [
     "implement",
     "test",
     "code-review",
-  ] as const,
-  medium: [
-    "research",
-    "plan",
-    "implement",
-    "test",
-    "prd-review",
-    "code-review",
     "review-fix",
+    "final-review",
   ] as const,
   large: [
     "research",

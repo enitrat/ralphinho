@@ -217,6 +217,64 @@ import ResearchPrompt from "../prompts/Research.mdx";
 Inside MDX: `{props.ticketId}`, `{props.files.map(f => `- ${f}`).join('\n')}`.
 Keep JSX expressions on single lines in MDX (multi-line ternaries can break parsing).
 
+## Querying the SQLite DB
+
+The DB is at `<project-root>/.ralphinho/workflow.db` (path baked into the generated workflow file as `DB_PATH`). It's in the **project being processed**, not in super-ralph-lite itself.
+
+**Always run `.schema <table>` before querying** — column names differ from what you'd guess.
+
+### Common gotchas
+
+| Assumption | Reality |
+|------------|---------|
+| `created_at` | `created_at_ms` (INTEGER epoch ms) — use `datetime(col/1000,'unixepoch')` |
+| `_smithers_nodes.status` | `_smithers_nodes.state` |
+| `test.passed` | `test.build_passed` and `test.tests_passed` (separate columns) |
+| `prd_review.quality_score` | Only exists on `final_review`, not `prd_review` |
+| `input` has ticket fields | `input` is `(run_id PK, payload TEXT)` — one JSON blob per run |
+
+### Key table schemas (quick ref)
+
+```sql
+-- Run overview
+SELECT run_id, workflow_name, status,
+       datetime(created_at_ms/1000,'unixepoch') as created_at
+FROM _smithers_runs ORDER BY created_at_ms DESC;
+
+-- Per-node state (state = pending|in-progress|finished|failed|skipped)
+SELECT node_id, iteration, state FROM _smithers_nodes ORDER BY node_id, iteration;
+
+-- Ralph loop progress
+SELECT ralph_id, iteration, done FROM _smithers_ralph;
+
+-- Task attempts (in-progress, finished, failed)
+SELECT node_id, iteration, attempt, state,
+       datetime(started_at_ms/1000,'unixepoch') as started
+FROM _smithers_attempts ORDER BY node_id, iteration, attempt;
+```
+
+### Output table columns to remember
+
+```sql
+-- final_review
+-- (run_id, node_id, iteration, ready_to_move_on, reasoning, approved, quality_score, remaining_issues)
+
+-- prd_review / code_review
+-- (run_id, node_id, iteration, severity, approved, feedback, issues)
+
+-- test
+-- (run_id, node_id, iteration, build_passed, tests_passed, tests_pass_count, tests_fail_count, failing_summary, test_output)
+
+-- implement
+-- (run_id, node_id, iteration, summary, files_created, files_modified, what_was_done, next_steps, believes_complete)
+
+-- review_fix
+-- (run_id, node_id, iteration, summary, fixes_made, false_positives, all_issues_resolved, build_passed, tests_passed)
+
+-- pass_tracker
+-- (run_id, node_id, iteration, total_iterations, units_run, units_complete, summary)
+```
+
 ## References
 
 For detailed documentation, read these reference files:
