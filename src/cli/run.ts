@@ -29,6 +29,7 @@ export async function runWorkflow(opts: {
 
   const resumeRunId =
     typeof flags.resume === "string" ? flags.resume : null;
+  const force = flags.force === true;
 
   // ── Load config ─────────────────────────────────────────────────────
   if (!existsSync(configPath)) {
@@ -91,12 +92,27 @@ export async function runWorkflow(opts: {
       maxConcurrency,
       smithersCliPath,
       label: "Scheduled Work (resume)",
+      force,
     });
   }
 
   // ── Check for existing run ──────────────────────────────────────────
   if (existsSync(workflowPath) && existsSync(dbPath)) {
     const latestRunId = getLatestRunId(dbPath);
+
+    // --force: auto-resume latest run without prompting
+    if (force && latestRunId) {
+      return launchAndReport({
+        mode: "resume",
+        workflowPath,
+        repoRoot,
+        runId: latestRunId,
+        maxConcurrency,
+        smithersCliPath,
+        label: "Scheduled Work (resume --force)",
+        force,
+      });
+    }
 
     console.log("Found an existing scheduled-work run.\n");
     const options = [
@@ -158,6 +174,7 @@ export async function runWorkflow(opts: {
     maxConcurrency,
     smithersCliPath,
     label: "Scheduled Work",
+    force,
   });
 }
 
@@ -171,6 +188,7 @@ async function launchAndReport(opts: {
   maxConcurrency: number;
   smithersCliPath: string;
   label: string;
+  force?: boolean;
 }): Promise<void> {
   const { label, ...launchOpts } = opts;
 

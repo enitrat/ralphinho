@@ -370,6 +370,7 @@ export async function launchSmithers(opts: {
   runId: string;
   maxConcurrency: number;
   smithersCliPath: string;
+  force?: boolean;
 }): Promise<number> {
   const {
     mode,
@@ -378,6 +379,7 @@ export async function launchSmithers(opts: {
     runId,
     maxConcurrency,
     smithersCliPath,
+    force,
   } = opts;
 
   let execCwd: string;
@@ -409,6 +411,7 @@ export async function launchSmithers(opts: {
     runId,
     "--max-concurrency",
     String(maxConcurrency),
+    ...(force ? ["--force"] : []),
   ];
 
   const env = {
