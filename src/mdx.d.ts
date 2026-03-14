@@ -77,6 +77,7 @@ declare module "*/prompts/Plan.mdx" {
     commitPrefix?: any;
     contextFilePath: any;
     evictionContext?: any;
+    inputSignature: any;
     planFilePath: any;
     researchSummary?: any;
     tddPatterns?: any;
@@ -110,6 +111,7 @@ declare module "*/prompts/Research.mdx" {
     branchPrefix?: any;
     contextFilePath: any;
     evictionContext?: any;
+    inputSignature: any;
     referenceFiles?: any;
     referencePaths?: any;
     relevantFiles?: any;

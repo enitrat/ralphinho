@@ -1,7 +1,7 @@
 import React from "react";
 import { Task, Sequence, Parallel, Worktree } from "smithers-orchestrator";
 import type { SmithersCtx, AgentLike } from "smithers-orchestrator";
-import { SCHEDULED_TIERS, type WorkUnit, type WorkPlan } from "../scheduled/types";
+import type { WorkUnit, WorkPlan } from "../scheduled/types";
 import { scheduledOutputSchemas } from "../scheduled/schemas";
 
 import ResearchPrompt from "../prompts/Research.mdx";
@@ -12,6 +12,27 @@ import PrdReviewPrompt from "../prompts/PrdReview.mdx";
 import CodeReviewPrompt from "../prompts/CodeReview.mdx";
 import ReviewFixPrompt from "../prompts/ReviewFix.mdx";
 import FinalReviewPrompt from "../prompts/FinalReview.mdx";
+import { buildUnitWorktreePath } from "./runtimeNames";
+import {
+  buildPlanInputSignature,
+  buildResearchInputSignature,
+  FINAL_REVIEW_RETRIES,
+  FINAL_REVIEW_RETRY_POLICY,
+  IMPLEMENT_RETRIES,
+  IMPLEMENT_RETRY_POLICY,
+  PLAN_RETRIES,
+  PLAN_RETRY_POLICY,
+  RESEARCH_RETRIES,
+  RESEARCH_RETRY_POLICY,
+  REVIEW_FIX_RETRIES,
+  REVIEW_FIX_RETRY_POLICY,
+  REVIEW_RETRIES,
+  REVIEW_RETRY_POLICY,
+  stageNodeId,
+  TEST_RETRIES,
+  TEST_RETRY_POLICY,
+  TIER_STAGES,
+} from "../workflow/contracts";
 
 export type ScheduledOutputs = typeof scheduledOutputSchemas;
 
@@ -33,25 +54,31 @@ export type QualityPipelineAgents = {
   finalReviewer: AgentLike | AgentLike[];
 };
 
+/** Single fallback agents per role (used with Task's fallbackAgent prop). */
+export type QualityPipelineFallbacks = Partial<{
+  [K in keyof QualityPipelineAgents]: AgentLike;
+}>;
+
 export type QualityPipelineProps = {
   unit: WorkUnit;
   ctx: SmithersCtx<ScheduledOutputs>;
   outputs: ScheduledOutputs;
   agents: QualityPipelineAgents;
+  fallbacks?: QualityPipelineFallbacks;
   workPlan: WorkPlan;
   depSummaries: DepSummary[];
   evictionContext: string | null;
   pass?: number;
   maxPasses?: number;
-  retries?: number;
   branchPrefix?: string;
+  worktreePath?: string;
 };
 
 function tierHasStep(tier: string, step: string): boolean {
-  const stages = SCHEDULED_TIERS[tier as keyof typeof SCHEDULED_TIERS];
+  const stages = TIER_STAGES[tier as keyof typeof TIER_STAGES];
   return stages
     ? (stages as readonly string[]).includes(step)
-    : (SCHEDULED_TIERS.large as readonly string[]).includes(step);
+    : (TIER_STAGES.large as readonly string[]).includes(step);
 }
 
 function buildReviewFeedback(parts: Array<string | null | undefined>): string | undefined {
@@ -95,26 +122,27 @@ export function QualityPipeline({
   ctx,
   outputs,
   agents,
+  fallbacks,
   workPlan,
   depSummaries,
   evictionContext,
   pass = 0,
   maxPasses = 3,
-  retries = 1,
   branchPrefix = "unit/",
+  worktreePath,
 }: QualityPipelineProps) {
   const uid = unit.id;
   const tier = unit.tier;
 
   // In Ralph loops, cross-stage reads must use latest() to see prior iterations.
-  const research = ctx.latest("research", `${uid}:research`);
-  const plan = ctx.latest("plan", `${uid}:plan`);
-  const impl = ctx.latest("implement", `${uid}:implement`);
-  const test = ctx.latest("test", `${uid}:test`);
-  const prdReview = ctx.latest("prd_review", `${uid}:prd-review`);
-  const codeReview = ctx.latest("code_review", `${uid}:code-review`);
-  const reviewFix = ctx.latest("review_fix", `${uid}:review-fix`);
-  const finalReview = ctx.latest("final_review", `${uid}:final-review`);
+  const research = ctx.latest("research", stageNodeId(uid, "research"));
+  const plan = ctx.latest("plan", stageNodeId(uid, "plan"));
+  const impl = ctx.latest("implement", stageNodeId(uid, "implement"));
+  const test = ctx.latest("test", stageNodeId(uid, "test"));
+  const prdReview = ctx.latest("prd_review", stageNodeId(uid, "prd-review"));
+  const codeReview = ctx.latest("code_review", stageNodeId(uid, "code-review"));
+  const reviewFix = ctx.latest("review_fix", stageNodeId(uid, "review-fix"));
+  const finalReview = ctx.latest("final_review", stageNodeId(uid, "final-review"));
 
   const combinedReviewFeedback = buildReviewFeedback([
     finalReview?.reasoning ? `Final review feedback:\n${finalReview.reasoning}` : null,
@@ -126,6 +154,31 @@ export function QualityPipeline({
     ...Object.values(workPlan.repo.buildCmds),
     ...Object.values(workPlan.repo.testCmds),
   ];
+  const researchInputSignature = buildResearchInputSignature({
+    unitId: uid,
+    unitName: unit.name,
+    unitDescription: unit.description,
+    unitCategory: tier,
+    rfcSource: workPlan.source,
+    rfcSections: unit.rfcSections,
+    referencePaths: [workPlan.source],
+    evictionContext,
+  });
+  const researchSummary = research?.findings && research.findings.length > 0
+    ? research.findings.join("\n")
+    : undefined;
+  const expectedContextFilePath = `docs/research/${uid}.md`;
+  const planInputSignature = buildPlanInputSignature({
+    unitId: uid,
+    unitName: unit.name,
+    unitDescription: unit.description,
+    unitCategory: tier,
+    acceptanceCriteria: unit.acceptance,
+    contextFilePath: research?.contextFilePath ?? expectedContextFilePath,
+    researchSummary,
+    evictionContext,
+  });
+  const implementDependsOn = tierHasStep(tier, "plan") ? [stageNodeId(uid, "plan")] : [];
 
   const testSuites = buildTestSuites(workPlan);
 
@@ -133,16 +186,21 @@ export function QualityPipeline({
     (prdReview?.approved ?? !tierHasStep(tier, "prd-review")) &&
     (codeReview?.approved ?? false);
 
+  const effectiveWorktreePath = worktreePath ?? buildUnitWorktreePath(ctx.runId, uid);
+
   return (
-    <Worktree path={`/tmp/workflow-wt-${uid}`} branch={`${branchPrefix}${uid}`}>
+    <Worktree path={effectiveWorktreePath} branch={`${branchPrefix}${uid}`}>
       <Sequence>
         {tierHasStep(tier, "research") && (
           <Task
-            id={`${uid}:research`}
+            id={stageNodeId(uid, "research")}
             output={outputs.research}
             agent={agents.researcher}
-            retries={retries}
-            skipIf={!!research}
+            fallbackAgent={fallbacks?.researcher}
+            retries={RESEARCH_RETRIES}
+            meta={{ retryPolicy: RESEARCH_RETRY_POLICY }}
+            // Cache semantics: reuse only when the prior output matches current inputs.
+            skipIf={research?.inputSignature === researchInputSignature}
           >
             <ResearchPrompt
               unitId={uid}
@@ -155,7 +213,8 @@ export function QualityPipeline({
               referencePaths={[workPlan.source]}
               referenceFiles={[]}
               relevantFiles={[]}
-              contextFilePath={research?.contextFilePath ?? `docs/research/${uid}.md`}
+              contextFilePath={research?.contextFilePath ?? expectedContextFilePath}
+              inputSignature={researchInputSignature}
               branchPrefix={branchPrefix}
             />
           </Task>
@@ -163,11 +222,17 @@ export function QualityPipeline({
 
         {tierHasStep(tier, "plan") && (
           <Task
-            id={`${uid}:plan`}
+            id={stageNodeId(uid, "plan")}
             output={outputs.plan}
             agent={agents.planner}
-            retries={retries}
-            skipIf={!!plan}
+            fallbackAgent={fallbacks?.planner}
+            retries={PLAN_RETRIES}
+            meta={{
+              dependsOn: [stageNodeId(uid, "research")],
+              retryPolicy: PLAN_RETRY_POLICY,
+            }}
+            // Cache semantics: reuse only when the prior output matches current inputs.
+            skipIf={plan?.inputSignature === planInputSignature}
           >
             <PlanPrompt
               unitId={uid}
@@ -175,11 +240,12 @@ export function QualityPipeline({
               unitDescription={unit.description}
               unitCategory={tier}
               acceptanceCriteria={unit.acceptance}
-              contextFilePath={research?.contextFilePath ?? `docs/research/${uid}.md`}
-              researchSummary={research?.findings?.join?.("\n") ?? null}
+              contextFilePath={research?.contextFilePath ?? expectedContextFilePath}
+              researchSummary={researchSummary ?? null}
               evictionContext={evictionContext}
               tddPatterns={[]}
               planFilePath={plan?.planFilePath ?? `docs/plans/${uid}.md`}
+              inputSignature={planInputSignature}
               commitPrefix="📝"
               branchPrefix={branchPrefix}
             />
@@ -187,17 +253,20 @@ export function QualityPipeline({
         )}
 
         <Task
-          id={`${uid}:implement`}
+          id={stageNodeId(uid, "implement")}
           output={outputs.implement}
           agent={agents.implementer}
-          retries={retries}
+          fallbackAgent={fallbacks?.implementer}
+          retries={IMPLEMENT_RETRIES}
+          meta={{ dependsOn: implementDependsOn, retryPolicy: IMPLEMENT_RETRY_POLICY }}
+          // No cache: implementation must re-run against latest review context.
         >
           <ImplementPrompt
             unitId={uid}
             unitName={unit.name}
             unitCategory={tier}
             planFilePath={plan?.planFilePath ?? `docs/plans/${uid}.md`}
-            contextFilePath={research?.contextFilePath ?? `docs/research/${uid}.md`}
+            contextFilePath={research?.contextFilePath ?? expectedContextFilePath}
             implementationSteps={plan?.implementationSteps ?? []}
             previousImplementation={impl ?? null}
             evictionContext={evictionContext}
@@ -217,10 +286,16 @@ export function QualityPipeline({
         </Task>
 
         <Task
-          id={`${uid}:test`}
+          id={stageNodeId(uid, "test")}
           output={outputs.test}
           agent={agents.tester}
-          retries={retries}
+          fallbackAgent={fallbacks?.tester}
+          retries={TEST_RETRIES}
+          meta={{
+            dependsOn: [stageNodeId(uid, "implement")],
+            retryPolicy: TEST_RETRY_POLICY,
+          }}
+          // No cache: tests must run against the current implementation state.
         >
           <TestPrompt
             unitId={uid}
@@ -238,10 +313,16 @@ export function QualityPipeline({
         <Parallel>
           {tierHasStep(tier, "prd-review") && (
             <Task
-              id={`${uid}:prd-review`}
+              id={stageNodeId(uid, "prd-review")}
               output={outputs.prd_review}
               agent={agents.prdReviewer}
-              retries={retries}
+              fallbackAgent={fallbacks?.prdReviewer}
+              retries={REVIEW_RETRIES}
+              meta={{
+                dependsOn: [stageNodeId(uid, "implement")],
+                retryPolicy: REVIEW_RETRY_POLICY,
+              }}
+              // No cache: review should evaluate latest implementation/test context.
               continueOnFail
             >
               <PrdReviewPrompt
@@ -267,10 +348,16 @@ export function QualityPipeline({
           )}
           {tierHasStep(tier, "code-review") && (
             <Task
-              id={`${uid}:code-review`}
+              id={stageNodeId(uid, "code-review")}
               output={outputs.code_review}
               agent={agents.codeReviewer}
-              retries={retries}
+              fallbackAgent={fallbacks?.codeReviewer}
+              retries={REVIEW_RETRIES}
+              meta={{
+                dependsOn: [stageNodeId(uid, "implement")],
+                retryPolicy: REVIEW_RETRY_POLICY,
+              }}
+              // No cache: review should evaluate latest implementation/test context.
               continueOnFail
             >
               <CodeReviewPrompt
@@ -297,10 +384,19 @@ export function QualityPipeline({
 
         {tierHasStep(tier, "review-fix") && (
           <Task
-            id={`${uid}:review-fix`}
+            id={stageNodeId(uid, "review-fix")}
             output={outputs.review_fix}
             agent={agents.reviewFixer}
-            retries={retries}
+            fallbackAgent={fallbacks?.reviewFixer}
+            retries={REVIEW_FIX_RETRIES}
+            meta={{
+              dependsOn: [
+                stageNodeId(uid, "prd-review"),
+                stageNodeId(uid, "code-review"),
+              ],
+              retryPolicy: REVIEW_FIX_RETRY_POLICY,
+            }}
+            // No cache: fix output is stateful and tied to current review findings.
             skipIf={bothApproved}
           >
             <ReviewFixPrompt
@@ -323,10 +419,16 @@ export function QualityPipeline({
 
         {tierHasStep(tier, "final-review") && (
           <Task
-            id={`${uid}:final-review`}
+            id={stageNodeId(uid, "final-review")}
             output={outputs.final_review}
             agent={agents.finalReviewer}
-            retries={retries}
+            fallbackAgent={fallbacks?.finalReviewer}
+            retries={FINAL_REVIEW_RETRIES}
+            meta={{
+              dependsOn: [stageNodeId(uid, "review-fix")],
+              retryPolicy: FINAL_REVIEW_RETRY_POLICY,
+            }}
+            // No cache: final gate should always evaluate latest stage artifacts.
           >
             <FinalReviewPrompt
               unitId={uid}

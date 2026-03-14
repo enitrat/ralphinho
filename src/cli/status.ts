@@ -44,33 +44,39 @@ export async function runStatus(opts: { repoRoot: string }): Promise<void> {
   }
 
   const dbPath = join(ralphDir, "workflow.db");
+  const workflowPath = join(ralphDir, "generated", "workflow.tsx");
   if (existsSync(dbPath)) {
-    const latestRunId = getLatestRunId(dbPath);
-    if (latestRunId) {
-      console.log(`  Latest run: ${latestRunId}`);
+    console.log("  Database: exists");
+    try {
+      const { Database } = await import("bun:sqlite");
+      const db = new Database(dbPath, { readonly: true });
+      const row = db.query(
+        "SELECT total_units, units_landed, units_semantically_complete, summary FROM completion_report ORDER BY iteration DESC LIMIT 1",
+      ).get() as {
+        total_units?: number;
+        units_landed?: string | null;
+        units_semantically_complete?: string | null;
+        summary?: string | null;
+      } | undefined;
+      db.close();
+
+      if (row) {
+        const landed = typeof row.units_landed === "string" ? JSON.parse(row.units_landed) as string[] : [];
+        const semanticallyComplete = typeof row.units_semantically_complete === "string"
+          ? JSON.parse(row.units_semantically_complete) as string[]
+          : [];
+        console.log(`  Landed: ${landed.length}/${row.total_units ?? landed.length}`);
+        console.log(`  Semantically complete: ${semanticallyComplete.length}/${row.total_units ?? semanticallyComplete.length}`);
+        if (row.summary) console.log(`  Summary: ${row.summary}`);
+      }
+    } catch {
+      // Status should still render even when completion_report is absent.
     }
   }
 
-  const workflowPath = join(ralphDir, "generated", "workflow.tsx");
   console.log(
     `  Workflow generated: ${existsSync(workflowPath) ? "yes" : "no"}`,
   );
 
   console.log();
-}
-
-function getLatestRunId(dbPath: string): string | null {
-  try {
-    const { Database } = require("bun:sqlite");
-    const db = new Database(dbPath, { readonly: true });
-    const row = db
-      .prepare(
-        `SELECT run_id FROM _smithers_runs ORDER BY rowid DESC LIMIT 1`,
-      )
-      .get() as { run_id: string } | null;
-    db.close();
-    return row?.run_id ?? null;
-  } catch {
-    return null;
-  }
 }

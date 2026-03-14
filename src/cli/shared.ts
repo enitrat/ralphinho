@@ -201,13 +201,11 @@ export async function ensureJjColocated(repoRoot: string) {
 
 // ── Config building ───────────────────────────────────────────────────
 
-export function buildFallbackConfig(
+function detectBuildAndTestCmds(
   repoRoot: string,
-  promptSpecPath: string,
+  runner: "bun" | "pnpm" | "yarn" | "npm",
   packageScripts: Record<string, string>,
-) {
-  const runner = detectScriptRunner(repoRoot);
-
+): { buildCmds: Record<string, string>; testCmds: Record<string, string> } {
   const buildCmds: Record<string, string> = {};
   const testCmds: Record<string, string> = {};
 
@@ -232,6 +230,17 @@ export function buildFallbackConfig(
     buildCmds.clippy = buildCmds.clippy ?? "cargo clippy -- -D warnings";
     testCmds.rust = testCmds.rust ?? "cargo test";
   }
+
+  return { buildCmds, testCmds };
+}
+
+export function buildFallbackConfig(
+  repoRoot: string,
+  promptSpecPath: string,
+  packageScripts: Record<string, string>,
+) {
+  const runner = detectScriptRunner(repoRoot);
+  const { buildCmds, testCmds } = detectBuildAndTestCmds(repoRoot, runner, packageScripts);
 
   if (Object.keys(buildCmds).length === 0) {
     buildCmds.verify =
@@ -306,29 +315,7 @@ export interface RepoConfig {
 export async function scanRepo(repoRoot: string): Promise<RepoConfig> {
   const packageScripts = await loadPackageScripts(repoRoot);
   const runner = detectScriptRunner(repoRoot);
-
-  const buildCmds: Record<string, string> = {};
-  const testCmds: Record<string, string> = {};
-
-  if (packageScripts.typecheck)
-    buildCmds.typecheck = scriptCommand(runner, "typecheck");
-  if (packageScripts.build)
-    buildCmds.build = scriptCommand(runner, "build");
-  if (packageScripts.lint)
-    buildCmds.lint = scriptCommand(runner, "lint");
-  if (packageScripts.test)
-    testCmds.test = scriptCommand(runner, "test");
-
-  if (existsSync(join(repoRoot, "go.mod"))) {
-    buildCmds.go = buildCmds.go ?? "go build ./...";
-    buildCmds.govet = buildCmds.govet ?? "go vet ./...";
-    testCmds.go = testCmds.go ?? "go test ./...";
-  }
-  if (existsSync(join(repoRoot, "Cargo.toml"))) {
-    buildCmds.rust = buildCmds.rust ?? "cargo build";
-    buildCmds.clippy = buildCmds.clippy ?? "cargo clippy -- -D warnings";
-    testCmds.rust = testCmds.rust ?? "cargo test";
-  }
+  const { buildCmds, testCmds } = detectBuildAndTestCmds(repoRoot, runner, packageScripts);
 
   return {
     projectName: basename(repoRoot),
@@ -337,99 +324,6 @@ export async function scanRepo(repoRoot: string): Promise<RepoConfig> {
     testCmds,
     packageScripts,
   };
-}
-
-// ── Smithers CLI ──────────────────────────────────────────────────────
-
-export function findSmithersCliPath(repoRoot: string): string | null {
-  const candidates = [
-    join(
-      repoRoot,
-      "node_modules/smithers-orchestrator/src/cli/index.ts",
-    ),
-    resolve(
-      dirname(import.meta.path),
-      "../../node_modules/smithers-orchestrator/src/cli/index.ts",
-    ),
-    join(
-      process.env.HOME || "",
-      "smithers/src/cli/index.ts",
-    ),
-  ];
-
-  for (const candidate of candidates) {
-    if (candidate && existsSync(candidate)) return candidate;
-  }
-  return null;
-}
-
-export async function launchSmithers(opts: {
-  mode: "run" | "resume";
-  workflowPath: string;
-  repoRoot: string;
-  runId: string;
-  maxConcurrency: number;
-  smithersCliPath: string;
-  force?: boolean;
-}): Promise<number> {
-  const {
-    mode,
-    workflowPath,
-    repoRoot,
-    runId,
-    maxConcurrency,
-    smithersCliPath,
-    force,
-  } = opts;
-
-  let execCwd: string;
-  if (runningFromSource) {
-    execCwd = ralphSourceRoot;
-  } else {
-    const smithersDir = dirname(dirname(smithersCliPath));
-    execCwd = existsSync(join(smithersDir, "node_modules"))
-      ? smithersDir
-      : repoRoot;
-  }
-
-  const superRalphPreload = join(ralphSourceRoot, "preload.ts");
-  const useSharedPreload = existsSync(superRalphPreload);
-  const preloadPath = join(dirname(workflowPath), "preload.ts");
-  const effectivePreload = useSharedPreload
-    ? superRalphPreload
-    : preloadPath;
-
-  const args = [
-    "-r",
-    effectivePreload,
-    smithersCliPath,
-    mode,
-    workflowPath,
-    "--root",
-    repoRoot,
-    "--run-id",
-    runId,
-    "--max-concurrency",
-    String(maxConcurrency),
-    ...(force ? ["--force"] : []),
-  ];
-
-  const env = {
-    ...process.env,
-    USE_CLI_AGENTS: "1",
-    SMITHERS_DEBUG: "1",
-  };
-  delete (env as any).CLAUDECODE;
-
-  const proc = Bun.spawn(["bun", "--no-install", ...args], {
-    cwd: execCwd,
-    env: env as any,
-    stdout: "inherit",
-    stderr: "inherit",
-    stdin: "inherit",
-  });
-
-  return proc.exited;
 }
 
 // ── Interactive prompt ────────────────────────────────────────────────

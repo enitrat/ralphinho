@@ -19,6 +19,7 @@ const issueSchema = z.object({
 export const scheduledOutputSchemas = {
   // ── Research ──────────────────────────────────────────────────────
   research: z.object({
+    inputSignature: z.string(),
     contextFilePath: z.string(),
     findings: z.array(z.string()),
     referencesRead: z.array(z.string()),
@@ -28,6 +29,7 @@ export const scheduledOutputSchemas = {
 
   // ── Plan ──────────────────────────────────────────────────────────
   plan: z.object({
+    inputSignature: z.string(),
     planFilePath: z.string(),
     implementationSteps: z.array(z.string()),
     filesToCreate: z.array(z.string()),
@@ -114,6 +116,8 @@ export const scheduledOutputSchemas = {
     totalIterations: z.number(),
     unitsRun: z.array(z.string()),
     unitsComplete: z.array(z.string()),
+    unitsLanded: z.array(z.string()),
+    unitsSemanticallyComplete: z.array(z.string()),
     summary: z.string(),
   }),
 
@@ -121,6 +125,7 @@ export const scheduledOutputSchemas = {
   completion_report: z.object({
     totalUnits: z.number(),
     unitsLanded: z.array(z.string()),
+    unitsSemanticallyComplete: z.array(z.string()),
     unitsFailed: z.array(
       z.object({
         unitId: z.string(),
@@ -141,6 +146,9 @@ export const scheduledOutputSchemas = {
       ticketId: z.string(),
       mergeCommit: z.string().nullable(),
       summary: z.string(),
+      decisionIteration: z.number().nullable(),
+      testIteration: z.number().nullable(),
+      approvalSupersededRejection: z.boolean(),
     })),
     ticketsEvicted: z.array(z.object({
       ticketId: z.string(),

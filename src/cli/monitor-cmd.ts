@@ -32,21 +32,16 @@ export async function runMonitor(opts: {
     process.exit(1);
   }
 
-  // Find latest run ID
-  let runId: string;
-  try {
-    const { Database } = require("bun:sqlite");
-    const db = new Database(dbPath, { readonly: true });
-    const row = db
-      .prepare(`SELECT run_id FROM _smithers_runs ORDER BY rowid DESC LIMIT 1`)
-      .get() as { run_id: string } | null;
-    db.close();
-    if (!row?.run_id) throw new Error("No runs found");
-    runId = row.run_id;
-  } catch (e: any) {
-    console.error(`Error: Could not find a run in the database: ${e.message}`);
+  const runId =
+    typeof opts.flags["run-id"] === "string"
+      ? opts.flags["run-id"]
+      : typeof opts.flags.resume === "string"
+        ? opts.flags.resume
+        : null;
+
+  if (!runId) {
+    console.error("Error: Missing run ID. Use `ralphinho monitor --run-id <run-id>`.");
     process.exit(1);
-    return; // unreachable, but TypeScript needs it
   }
 
   const projectName = basename(repoRoot);

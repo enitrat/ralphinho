@@ -39,12 +39,14 @@ Usage:
   ralphinho plan                       (Re)generate work plan from RFC
   ralphinho run                        Execute the workflow
   ralphinho run --resume <run-id>      Resume a previous run
+  ralphinho run --force                Resume latest compatible run or start fresh
   ralphinho monitor                    Attach TUI to running workflow
   ralphinho status                     Show current state
 
 Options:
   --cwd <path>                Repo root (default: cwd)
   --max-concurrency <n>       Max parallel work units (default: 6)
+  --force                     Skip prompts; only resumes if Smithers metadata still matches
   --dry-run                   Generate plan without executing
   --help                      Show help
 ```
@@ -78,6 +80,7 @@ ralphinho run --resume sw-m3abc12-deadbeef
 ```
 
 Picks up from exactly where a previous run stopped — partial implementations, in-progress reviews, everything is persisted in SQLite.
+Smithers `v0.10.0` also validates the generated workflow file and VCS revision on resume, so `ralphinho` now preflights that compatibility before attempting a resume.
 
 ## How It Works
 
@@ -179,7 +182,7 @@ export default smithers((ctx) => (
 
 ### Agent Configuration
 
-Agents are role-based. Each role accepts a single agent or an array for fallback (Smithers v0.8+):
+Agents are role-based. Each role accepts a single agent, an array fallback chain, or a primary agent plus `fallbackAgent` (Smithers v0.10+):
 
 ```tsx
 agents={{

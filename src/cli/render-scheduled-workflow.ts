@@ -5,8 +5,6 @@
  * from the library, configures agents, and renders.
  */
 
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { ralphSourceRoot, runningFromSource } from "./shared";
 
 export function renderScheduledWorkflow(params: {
@@ -14,15 +12,8 @@ export function renderScheduledWorkflow(params: {
 }): string {
   const { repoRoot } = params;
 
-  // Determine import prefix — where to import library components from
-  const isLibRepo =
-    existsSync(join(repoRoot, "src/components/ScheduledWorkflow.tsx")) &&
-    existsSync(join(repoRoot, "src/scheduled/schemas.ts"));
-
   let importPrefix: string;
-  if (isLibRepo) {
-    importPrefix = "../../src";
-  } else if (runningFromSource) {
+  if (runningFromSource) {
     importPrefix = ralphSourceRoot + "/src";
   } else {
     importPrefix = "super-ralph";
@@ -49,7 +40,7 @@ const HAS_CLAUDE = _config.agents.claude as boolean;
 const HAS_CODEX = _config.agents.codex as boolean;
 const MAX_CONCURRENCY = _config.maxConcurrency as number;
 const MAX_PASSES = 9;
-const BASE_BRANCH = _config.baseBranch as string;
+const CONFIG_BASE_BRANCH = _config.baseBranch as string;
 
 // ── Load work plan ────────────────────────────────────────────────────
 
@@ -63,16 +54,14 @@ Uncommitted changes in the worktree are expected and normal.
 Do NOT refuse to work because of dirty git state. Proceed with implementation regardless.
 \`;
 
-const JSON_OUTPUT = \`
-## CRITICAL: Output Rules
-1. ALWAYS wait for ALL tasks and sub-agents to fully complete before producing final output.
-2. Your FINAL message MUST end with a JSON object wrapped in a code fence.
-3. Background tasks: if you used run_in_background: true, you MUST call TaskOutput to retrieve
-   every background task's result before writing your final JSON.
+const EXECUTION_POLICY = \`
+## EXECUTION POLICY
+Complete the assigned task fully before concluding.
+Rely on the task prompt's schema/output instructions; do not invent alternate output wrappers or code-fenced JSON unless the task explicitly asks for them.
 \`;
 
 function buildSystemPrompt(role: string): string {
-  return ["# Role: " + role, WORKSPACE_POLICY, JSON_OUTPUT].join("\\n\\n");
+  return ["# Role: " + role, WORKSPACE_POLICY, EXECUTION_POLICY].join("\\n\\n");
 }
 
 function createClaude(role: string, model: string = "claude-sonnet-4-6") {
@@ -82,6 +71,7 @@ function createClaude(role: string, model: string = "claude-sonnet-4-6") {
     cwd: REPO_ROOT,
     dangerouslySkipPermissions: true,
     timeoutMs: 60 * 60 * 1000,
+    idleTimeoutMs: 5 * 60 * 1000,
   });
 }
 
@@ -92,18 +82,28 @@ function createCodex(role: string) {
     cwd: REPO_ROOT,
     yolo: true,
     timeoutMs: 60 * 60 * 1000,
+    idleTimeoutMs: 5 * 60 * 1000,
   });
 }
 
-function chooseAgent(primary: "claude" | "codex" | "opus", role: string) {
-  if (primary === "opus" && HAS_CLAUDE) return createClaude(role, "claude-opus-4-6");
-  if (primary === "claude" && HAS_CLAUDE) return createClaude(role);
-  if (primary === "codex" && HAS_CODEX) return createCodex(role);
-  if (HAS_CLAUDE) return createClaude(role);
-  return createCodex(role);
+function chooseAgent(primary: "claude" | "codex" | "opus", role: string): { agent: any; fallback: any | undefined } {
+  const claude = (model?: string) => createClaude(role, model ?? "claude-sonnet-4-6");
+  const codex = () => createCodex(role);
+
+  if (primary === "opus" && HAS_CLAUDE) {
+    return { agent: claude("claude-opus-4-6"), fallback: HAS_CODEX ? codex() : undefined };
+  }
+  if (primary === "claude" && HAS_CLAUDE) {
+    return { agent: claude(), fallback: HAS_CODEX ? codex() : undefined };
+  }
+  if (primary === "codex" && HAS_CODEX) {
+    return { agent: codex(), fallback: HAS_CLAUDE ? claude() : undefined };
+  }
+  if (HAS_CLAUDE) return { agent: claude(), fallback: undefined };
+  return { agent: codex(), fallback: undefined };
 }
 
-const agents = {
+const _roles = {
   researcher:    chooseAgent("claude", "Researcher — Gather context from codebase for implementation"),
   planner:       chooseAgent("opus",   "Planner — Create implementation plan from RFC section and context"),
   implementer:   chooseAgent("codex",  "Implementer — Write code following the plan"),
@@ -112,41 +112,25 @@ const agents = {
   codeReviewer:  chooseAgent("opus",   "Code Reviewer — Check code quality, conventions, security"),
   reviewFixer:   chooseAgent("codex",  "ReviewFixer — Fix issues found in code review"),
   finalReviewer: chooseAgent("opus",   "Final Reviewer — Decide if unit is complete"),
-  mergeQueue:    chooseAgent("opus",   "MergeQueue Coordinator — Rebase and land unit branches onto main"),
+  mergeQueue:    chooseAgent("opus",   "MergeQueue Coordinator — Rebase and land unit branches onto the configured target branch"),
 };
+
+const agents = Object.fromEntries(
+  Object.entries(_roles).map(([k, v]) => [k, v.agent]),
+) as Record<keyof typeof _roles, any>;
+
+const fallbacks = Object.fromEntries(
+  Object.entries(_roles).filter(([, v]) => v.fallback).map(([k, v]) => [k, v.fallback]),
+) as Partial<Record<keyof typeof _roles, any>>;
 
 // ── Smithers setup ────────────────────────────────────────────────────
 
-const { smithers, outputs, Workflow, db } = createSmithers(
+// journalMode: "DELETE" avoids macOS SQLITE_IOERR_VNODE (6922) caused by WAL.
+// Smithers v0.10.0 handles write retries with exponential backoff internally.
+const { smithers, outputs, Workflow } = createSmithers(
   scheduledOutputSchemas,
   { dbPath: DB_PATH, journalMode: "DELETE" }
 );
-
-// Workaround for macOS SQLITE_IOERR_VNODE (6922): WAL mode triggers GCD vnode
-// monitoring which revokes the connection under concurrent writes. Switching to
-// rollback journal eliminates the WAL file entirely, removing the root cause.
-// synchronous=FULL ensures each commit is fsynced before returning, so a crash
-// cannot corrupt previously-committed output rows (prevents state reversion on
-// resume that occurs when uncheckpointed WAL frames are lost on crash).
-const _sqlite = (db as any).$client;
-_sqlite.exec("PRAGMA journal_mode = DELETE");
-_sqlite.exec("PRAGMA synchronous = FULL");
-_sqlite.exec("PRAGMA mmap_size = 0");
-
-const _journalMode = String(
-  _sqlite.query("PRAGMA journal_mode").get()?.journal_mode ?? "",
-).toLowerCase();
-const _syncValue = Number(
-  _sqlite.query("PRAGMA synchronous").get()?.synchronous ?? -1,
-);
-if (_journalMode !== "delete" || _syncValue !== 2) {
-  throw new Error(
-    "SQLite safety PRAGMAs not applied: journal_mode=" +
-      _journalMode +
-      ", synchronous=" +
-      _syncValue,
-  );
-}
 
 // ── Workflow ──────────────────────────────────────────────────────────
 
@@ -159,8 +143,9 @@ export default smithers((ctx) => (
       repoRoot={REPO_ROOT}
       maxConcurrency={MAX_CONCURRENCY}
       maxPasses={MAX_PASSES}
-      mainBranch={BASE_BRANCH}
+      baseBranch={CONFIG_BASE_BRANCH}
       agents={agents}
+      fallbacks={fallbacks}
     />
   </Workflow>
 ));

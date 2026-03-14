@@ -21,6 +21,7 @@ Your job is to gather all reference materials needed to implement this unit.
 2. **Read reference materials** — Browse reference documentation for patterns and examples
 3. **Read existing implementation** — Read any files listed in the ticket's relevantFiles
 4. **Write context file** — Write {props.contextFilePath} with all paths and summaries
+5. **Preserve cache signature** — Set `inputSignature` in your structured output to exactly `{props.inputSignature}`
 
 {props.referenceFiles && props.referenceFiles.length > 0 ? `\nHinted reference files:\n${props.referenceFiles.map(f => `- ${f}`).join('\n')}` : ''}
 

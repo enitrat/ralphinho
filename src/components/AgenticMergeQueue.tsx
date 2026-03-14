@@ -2,12 +2,16 @@ import React from "react";
 import { Task } from "smithers-orchestrator";
 import type { SmithersCtx } from "smithers-orchestrator";
 import { z } from "zod";
+import { MERGE_QUEUE_RETRIES, MERGE_QUEUE_RETRY_POLICY } from "../workflow/contracts";
 
 export const mergeQueueResultSchema = z.object({
   ticketsLanded: z.array(z.object({
     ticketId: z.string(),
     mergeCommit: z.string().nullable(),
     summary: z.string(),
+    decisionIteration: z.number().nullable(),
+    testIteration: z.number().nullable(),
+    approvalSupersededRejection: z.boolean(),
   })),
   ticketsEvicted: z.array(z.object({
     ticketId: z.string(),
@@ -34,6 +38,11 @@ export type AgenticMergeQueueTicket = {
   filesModified: string[];
   filesCreated: string[];
   worktreePath: string;
+  eligibilityProof: {
+    decisionIteration: number | null;
+    testIteration: number | null;
+    approvalSupersededRejection: boolean;
+  };
 };
 
 export type AgenticMergeQueueProps = {
@@ -41,10 +50,11 @@ export type AgenticMergeQueueProps = {
   outputs: any;
   tickets: AgenticMergeQueueTicket[];
   agent: any;
+  fallbackAgent?: any;
   postLandChecks: string[];
   preLandChecks: string[];
   repoRoot: string;
-  mainBranch?: string;
+  baseBranch?: string;
   maxSpeculativeDepth?: number;
   output: any;
   /** Override the Task node ID (default: "agentic-merge-queue") */
@@ -98,7 +108,7 @@ function buildFileOverlapAnalysis(tickets: AgenticMergeQueueTicket[]): string {
 function buildMergeQueuePrompt(
   tickets: AgenticMergeQueueTicket[],
   repoRoot: string,
-  mainBranch: string,
+  baseBranch: string,
   preLandChecks: string[],
   postLandChecks: string[],
   maxSpeculativeDepth: number,
@@ -116,18 +126,30 @@ function buildMergeQueuePrompt(
     : "  - (none configured)";
 
   const overlapAnalysis = buildFileOverlapAnalysis(readyTickets);
+  const readyTicketIds = readyTickets.map((ticket) => ticket.ticketId).join(", ") || "(none)";
+  const worktreeList = readyTickets
+    .map((ticket) => {
+      const proof = ticket.eligibilityProof;
+      const proofBits = [
+        `decisionIteration=${proof.decisionIteration ?? "unknown"}`,
+        `testIteration=${proof.testIteration ?? "unknown"}`,
+        `supersededRejection=${proof.approvalSupersededRejection}`,
+      ];
+      return `- \`${ticket.ticketId}\`: \`${ticket.worktreePath}\` (${proofBits.join(", ")})`;
+    })
+    .join("\n");
 
   return `# Merge Queue Coordinator
 
-You are the **merge queue coordinator**. You run on the \`${mainBranch}\` branch directly (not in a worktree).
-Your job is to land completed tickets onto \`${mainBranch}\` in priority order.
+You are the **merge queue coordinator**. You operate against the target branch \`${baseBranch}\`.
+Your job is to land completed tickets onto \`${baseBranch}\` in priority order.
 
 ## Current Time
 ${new Date().toISOString()}
 
 ## Repository
 - Root: \`${repoRoot}\`
-- Main branch: \`${mainBranch}\`
+- Base branch: \`${baseBranch}\`
 - Max speculative depth: ${maxSpeculativeDepth}
 
 ## Queue Status (${readyTickets.length} ticket(s) ready to land)
@@ -138,7 +160,11 @@ ${queueTable}
 
 ${overlapAnalysis}
 
-**IMPORTANT:** When file overlaps exist, land non-overlapping tickets first (they can be speculative). Then land overlapping tickets one-by-one sequentially, rebasing each onto the updated ${mainBranch} before attempting the next. This prevents the systematic rebase conflicts seen when all tickets diverge from the same base.
+## Worktrees
+
+${worktreeList || "- (none)"}
+
+**IMPORTANT:** When file overlaps exist, land non-overlapping tickets first (they can be speculative). Then land overlapping tickets one-by-one sequentially, rebasing each onto the updated ${baseBranch} before attempting the next. This prevents the systematic rebase conflicts seen when all tickets diverge from the same base.
 
 ## Instructions
 
@@ -147,29 +173,31 @@ Process tickets in **priority order** (critical > high > medium > low). For each
 1. **Pre-land checks** — Run these in the ticket's worktree to verify it's still healthy:
 ${preLandCmds}
 
-2. **Rebase onto ${mainBranch}** — Rebase the ticket branch onto the current tip of ${mainBranch}:
+2. **Rebase onto ${baseBranch}** — Rebase the ticket branch onto the current tip of ${baseBranch}:
    \`\`\`
-   jj rebase -b bookmark("${branchPrefix}{ticketId}") -d ${mainBranch}
+   jj rebase -b bookmark("${branchPrefix}{ticketId}") -d ${baseBranch}
    \`\`\`
    If conflicts occur, attempt to understand the conflict. If it's trivially resolvable (e.g. lockfile, generated code), resolve it. Otherwise evict the ticket with detailed context about what conflicted and why.
 
 3. **Post-land checks** — Run CI checks after rebase to verify the merged result:
 ${postLandCmds}
 
-4. **Fast-forward ${mainBranch}** — If all checks pass:
+4. **Advance ${baseBranch}** — If all checks pass:
    \`\`\`
-   jj bookmark set ${mainBranch} -r bookmark("${branchPrefix}{ticketId}")
-   \`\`\`
-
-5. **Push** — Push the updated ${mainBranch}:
-   \`\`\`
-   jj git push --bookmark ${mainBranch}
+   jj bookmark set ${baseBranch} -r bookmark("${branchPrefix}{ticketId}")
    \`\`\`
 
-6. **Cleanup** — Delete the ticket bookmark and close the worktree:
+5. **Push** — Push the updated \`${baseBranch}\` bookmark if this repository expects remote landing from the merge queue:
+   \`\`\`
+   jj git push --bookmark ${baseBranch}
+   \`\`\`
+   Do not substitute \`main\` here unless \`${baseBranch}\` is literally named \`main\`.
+
+6. **Cleanup** — Delete the ticket bookmark. If you close worktrees, use the actual worktree path recorded for the ticket above rather than an invented workspace name.
+   Example:
    \`\`\`
    jj bookmark delete ${branchPrefix}{ticketId}
-   jj workspace close {worktreeName}
+   # then close/remove the matching worktree path for that ticket if appropriate
    \`\`\`
 
 ## Handling Failures
@@ -177,26 +205,26 @@ ${postLandCmds}
 - **Merge conflicts**: Inspect the conflict markers. If trivially resolvable, resolve and continue. If complex, evict the ticket with:
   - Which files conflicted
   - What the conflicting changes are
-  - What landed on ${mainBranch} since the ticket branched that caused the conflict
+  - What landed on ${baseBranch} since the ticket branched that caused the conflict
 - **CI failures**: Check if the failure is flaky (retry once). If it fails again, evict with the full CI output.
-- **Push failures**: This usually means ${mainBranch} moved. Fetch, re-rebase, and retry. If it fails 3 times, evict.
+- **Push failures**: This usually means \`${baseBranch}\` moved. Fetch, re-rebase, and retry. If it fails 3 times, evict.
 
 ## Available jj Operations
 
 All operations use \`jj\` (NOT git). Key commands:
-- \`jj rebase -b bookmark("${branchPrefix}{ticketId}") -d ${mainBranch}\` — Rebase ticket onto main
-- \`jj bookmark set ${mainBranch} -r bookmark("${branchPrefix}{ticketId}")\` — Fast-forward main
-- \`jj git push --bookmark ${mainBranch}\` — Push main to remote
+- \`jj rebase -b bookmark("${branchPrefix}{ticketId}") -d ${baseBranch}\` — Rebase ticket onto \`${baseBranch}\`
+- \`jj bookmark set ${baseBranch} -r bookmark("${branchPrefix}{ticketId}")\` — Advance \`${baseBranch}\`
+- \`jj git push --bookmark ${baseBranch}\` — Push \`${baseBranch}\` to remote when remote landing is intended
 - \`jj git fetch\` — Fetch latest from remote
-- \`jj log -r "main..bookmark(\\"${branchPrefix}{ticketId}\\")" --reversed\` — Show ticket commits
-- \`jj diff -r "roots(main..bookmark(\\"${branchPrefix}{ticketId}\\"))" --summary\` — Show changed files
+- \`jj log -r "${baseBranch}..bookmark(\\"${branchPrefix}{ticketId}\\")" --reversed\` — Show ticket commits
+- \`jj diff -r "roots(${baseBranch}..bookmark(\\"${branchPrefix}{ticketId}\\"))" --summary\` — Show changed files
 - \`jj bookmark delete ${branchPrefix}{ticketId}\` — Remove ticket bookmark
-- \`jj workspace close {name}\` — Close a worktree
+- Ready tickets in this run: ${readyTicketIds}
 
 ## Output Format
 
 Return a JSON object matching this schema:
-- \`ticketsLanded\`: Array of tickets you successfully landed, with their merge commit hash and a short summary
+- \`ticketsLanded\`: Array of tickets you successfully landed, with their merge commit hash, a short summary, and the exact eligibility proof copied from the ready ticket metadata
 - \`ticketsEvicted\`: Array of tickets you evicted, with the reason and detailed context
 - \`ticketsSkipped\`: Array of tickets you skipped (not ready, already landed, etc.) with reason
 - \`summary\`: One paragraph summarizing what happened this merge queue run
@@ -206,10 +234,11 @@ Return a JSON object matching this schema:
 export function AgenticMergeQueue({
   tickets,
   agent,
+  fallbackAgent,
   postLandChecks,
   preLandChecks,
   repoRoot,
-  mainBranch = "main",
+  baseBranch = "main",
   maxSpeculativeDepth = 4,
   output,
   nodeId = "agentic-merge-queue",
@@ -234,7 +263,7 @@ export function AgenticMergeQueue({
   const prompt = buildMergeQueuePrompt(
     tickets,
     repoRoot,
-    mainBranch,
+    baseBranch,
     preLandChecks,
     postLandChecks,
     maxSpeculativeDepth,
@@ -246,7 +275,9 @@ export function AgenticMergeQueue({
       id={nodeId}
       output={output}
       agent={agent}
-      retries={2}
+      fallbackAgent={fallbackAgent}
+      retries={MERGE_QUEUE_RETRIES}
+      meta={{ retryPolicy: MERGE_QUEUE_RETRY_POLICY }}
     >
       {prompt}
     </Task>

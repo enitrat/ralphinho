@@ -7,7 +7,8 @@
  *   ralphinho plan                     (Re)generate work plan from RFC
  *   ralphinho run                      Execute the initialized workflow
  *   ralphinho run --resume <run-id>    Resume a previous run
- *   ralphinho monitor                  Attach TUI to running workflow
+ *   ralphinho run --force              Attempt resume without prompts
+ *   ralphinho monitor --run-id <id>    Attach TUI to a workflow run
  *   ralphinho status                   Show current state
  */
 
@@ -23,12 +24,14 @@ Usage:
   ralphinho plan                             (Re)generate work plan from RFC
   ralphinho run                              Execute the initialized workflow
   ralphinho run --resume <run-id>            Resume a previous run
-  ralphinho monitor                          Attach TUI to running workflow
+  ralphinho run --force                      Attempt resume without prompts
+  ralphinho monitor --run-id <run-id>        Attach TUI to a workflow run
   ralphinho status                           Show current state
 
 Global Options:
   --cwd <path>                Repo root (default: current directory)
   --max-concurrency <n>       Max parallel work units (default: 6)
+  --force                     Skip prompts and attempt resume
   --help                      Show this help
 
 Init Options:
@@ -38,6 +41,7 @@ Examples:
   ralphinho init ./docs/rfc-003.md
   ralphinho plan
   ralphinho run
+  ralphinho run --force
   ralphinho run --resume sw-m3abc12-deadbeef
 `);
 }

@@ -54,6 +54,7 @@ export function Monitor({
 
   // Log file lives next to the Smithers DB
   const logFile = join(dirname(dbPath), "monitor.log");
+  const eventLogPath = join(dirname(dbPath), "events.ndjson");
 
   return (
     <Task
@@ -71,6 +72,7 @@ export function Monitor({
           projectName: config.projectName || "Workflow",
           prompt,
           logFile,
+          eventLogPath,
         }).catch((err) => {
           // Use origStdoutWrite if available, otherwise best-effort
           const msg = `[Monitor] TUI crashed: ${err instanceof Error ? err.message : String(err)}\n`;

@@ -11,12 +11,14 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
 import {
-  findSmithersCliPath,
   getRalphDir,
-  launchSmithers,
   promptChoice,
   type ParsedArgs,
 } from "./shared";
+import {
+  launchSmithers,
+  resolveSmithersCliPath,
+} from "../runtime/smithers-launch";
 import { ralphinhoConfigSchema, type RalphinhoConfig } from "../scheduled/types";
 
 export async function runWorkflow(opts: {
@@ -44,7 +46,7 @@ export async function runWorkflow(opts: {
   );
 
   // ── Find Smithers ───────────────────────────────────────────────────
-  const smithersCliPath = findSmithersCliPath(repoRoot);
+  const smithersCliPath = resolveSmithersCliPath(join(repoRoot, "package.json"));
   if (!smithersCliPath) {
     console.error(
       "Error: Could not find smithers CLI. Install smithers-orchestrator:\n  bun add smithers-orchestrator",
@@ -83,6 +85,7 @@ export async function runWorkflow(opts: {
       console.error("Error: No database found. Cannot resume.");
       process.exit(1);
     }
+    console.log(`Attempting to resume run ${resumeRunId}...\n`);
 
     return launchAndReport({
       mode: "resume",
@@ -98,15 +101,13 @@ export async function runWorkflow(opts: {
 
   // ── Check for existing run ──────────────────────────────────────────
   if (existsSync(workflowPath) && existsSync(dbPath)) {
-    const latestRunId = getLatestRunId(dbPath);
-
     // --force: auto-resume latest run without prompting
-    if (force && latestRunId) {
+    if (force) {
+      console.log("Attempting to resume previous run (--force)...\n");
       return launchAndReport({
         mode: "resume",
         workflowPath,
         repoRoot,
-        runId: latestRunId,
         maxConcurrency,
         smithersCliPath,
         label: "Scheduled Work (resume --force)",
@@ -115,31 +116,22 @@ export async function runWorkflow(opts: {
     }
 
     console.log("Found an existing scheduled-work run.\n");
-    const options = [
-      "Start fresh (new run ID)",
-    ];
-    if (latestRunId) {
-      options.push(`Resume previous run (${latestRunId})`);
-    }
-    options.push("Cancel");
+    const options = ["Start fresh (new run ID)", "Resume previous run", "Cancel"];
 
     const choice = await promptChoice("What would you like to do?", options);
 
-    if (choice === 1 && latestRunId) {
+    if (choice === 1) {
+      console.log("Attempting to resume previous run...\n");
       return launchAndReport({
         mode: "resume",
         workflowPath,
         repoRoot,
-        runId: latestRunId,
         maxConcurrency,
         smithersCliPath,
         label: "Scheduled Work (resume)",
       });
     }
-    if (
-      (choice === 2 && latestRunId) ||
-      (choice === 1 && !latestRunId)
-    ) {
+    if (choice === 2) {
       process.exit(0);
     }
     // choice 0: fall through to fresh run
@@ -155,13 +147,15 @@ export async function runWorkflow(opts: {
   console.log(`  Max concurrency: ${maxConcurrency}`);
   console.log(`  Agents: claude=${config.agents.claude} codex=${config.agents.codex}\n`);
 
-  const confirmChoice = await promptChoice(
-    `Execute ${unitCount} work units?`,
-    ["Yes, start", "No, cancel"],
-  );
-  if (confirmChoice !== 0) {
-    console.log("Cancelled.\n");
-    process.exit(0);
+  if (!force) {
+    const confirmChoice = await promptChoice(
+      `Execute ${unitCount} work units?`,
+      ["Yes, start", "No, cancel"],
+    );
+    if (confirmChoice !== 0) {
+      console.log("Cancelled.\n");
+      process.exit(0);
+    }
   }
 
   const runId = `sw-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
@@ -184,7 +178,7 @@ async function launchAndReport(opts: {
   mode: "run" | "resume";
   workflowPath: string;
   repoRoot: string;
-  runId: string;
+  runId?: string;
   maxConcurrency: number;
   smithersCliPath: string;
   label: string;
@@ -193,7 +187,10 @@ async function launchAndReport(opts: {
   const { label, ...launchOpts } = opts;
 
   console.log(`🎬 ${label} — Starting execution...`);
-  console.log(`  Run ID: ${launchOpts.runId}\n`);
+  if (launchOpts.runId) {
+    console.log(`  Run ID: ${launchOpts.runId}`);
+  }
+  console.log();
 
   const exitCode = await launchSmithers(launchOpts);
   reportExit(exitCode, label);
@@ -205,21 +202,5 @@ function reportExit(exitCode: number, label: string): void {
   } else {
     console.error(`\n❌ ${label} exited with code ${exitCode}\n`);
     process.exit(exitCode);
-  }
-}
-
-function getLatestRunId(dbPath: string): string | null {
-  try {
-    const { Database } = require("bun:sqlite");
-    const db = new Database(dbPath, { readonly: true });
-    const row = db
-      .prepare(
-        `SELECT run_id FROM _smithers_runs ORDER BY rowid DESC LIMIT 1`,
-      )
-      .get() as { run_id: string } | null;
-    db.close();
-    return row?.run_id ?? null;
-  } catch {
-    return null;
   }
 }

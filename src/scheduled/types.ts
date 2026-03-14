@@ -55,7 +55,7 @@ export const ralphinhoConfigSchema = z.object({
   /** Absolute path to repo root */
   repoRoot: z.string(),
   /** For scheduled-work: path to the source RFC file */
-  rfcPath: z.string().optional(),
+  rfcPath: z.string(),
   /** Detected agents */
   agents: z.object({
     claude: z.boolean(),
