@@ -12,6 +12,7 @@ export type LaunchOptions = {
   repoRoot: string;
   maxConcurrency: number;
   smithersCliPath: string;
+  envOverrides?: Record<string, string>;
   force?: boolean;
   runId?: string;
 };
@@ -99,6 +100,7 @@ export function buildLaunchConfig(
 
   const launchEnv: Record<string, string> = {
     ...normalizeEnv(env),
+    ...opts.envOverrides,
     USE_CLI_AGENTS: "1",
   };
   delete launchEnv.CLAUDECODE;

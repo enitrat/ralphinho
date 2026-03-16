@@ -15,6 +15,10 @@ export const runningFromSource = existsSync(
   join(ralphSourceRoot, "src/components/ScheduledWorkflow.tsx"),
 );
 
+export function getRalphinhoPresetPath(): string {
+  return join(ralphSourceRoot, "src", "preset.tsx");
+}
+
 // ── Arg parsing ───────────────────────────────────────────────────────
 
 export type ParsedArgs = {

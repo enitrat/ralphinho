@@ -6,7 +6,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { getRalphDir } from "./shared";
+import { getRalphDir, getRalphinhoPresetPath } from "./shared";
 import { ralphinhoConfigSchema } from "../scheduled/types";
 
 export async function runStatus(opts: { repoRoot: string }): Promise<void> {
@@ -44,7 +44,7 @@ export async function runStatus(opts: { repoRoot: string }): Promise<void> {
   }
 
   const dbPath = join(ralphDir, "workflow.db");
-  const workflowPath = join(ralphDir, "generated", "workflow.tsx");
+  const workflowPath = getRalphinhoPresetPath();
   if (existsSync(dbPath)) {
     console.log("  Database: exists");
     try {
@@ -75,7 +75,7 @@ export async function runStatus(opts: { repoRoot: string }): Promise<void> {
   }
 
   console.log(
-    `  Workflow generated: ${existsSync(workflowPath) ? "yes" : "no"}`,
+    `  Workflow preset: ${existsSync(workflowPath) ? "yes" : "no"}`,
   );
 
   console.log();

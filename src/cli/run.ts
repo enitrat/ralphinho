@@ -1,8 +1,8 @@
 /**
  * ralphinho run — Execute or resume a scheduled workflow.
  *
- * Reads .ralphinho/config.json and the generated workflow file,
- * then launches execution.
+ * Reads .ralphinho/config.json and launches the built-in preset
+ * against the target repo's config/work-plan/database files.
  */
 
 import { existsSync } from "node:fs";
@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
 import {
+  getRalphinhoPresetPath,
   getRalphDir,
   promptChoice,
   type ParsedArgs,
@@ -69,12 +70,12 @@ export async function runWorkflow(opts: {
   }
 
   const dbPath = join(ralphDir, "workflow.db");
-  const generatedDir = join(ralphDir, "generated");
-  const workflowPath = join(generatedDir, "workflow.tsx");
+  const workflowPath = getRalphinhoPresetPath();
+  const envOverrides = buildPresetEnv(ralphDir, dbPath);
 
   if (!existsSync(workflowPath)) {
     console.error(
-      "Error: No workflow file found. Run `ralphinho init` first.",
+      `Error: Built-in preset not found at ${workflowPath}. Reinstall super-ralph and try again.`,
     );
     process.exit(1);
   }
@@ -94,13 +95,14 @@ export async function runWorkflow(opts: {
       runId: resumeRunId,
       maxConcurrency,
       smithersCliPath,
+      envOverrides,
       label: "Scheduled Work (resume)",
       force,
     });
   }
 
   // ── Check for existing run ──────────────────────────────────────────
-  if (existsSync(workflowPath) && existsSync(dbPath)) {
+  if (existsSync(dbPath)) {
     // --force: auto-resume latest run without prompting
     if (force) {
       console.log("Attempting to resume previous run (--force)...\n");
@@ -110,6 +112,7 @@ export async function runWorkflow(opts: {
         repoRoot,
         maxConcurrency,
         smithersCliPath,
+        envOverrides,
         label: "Scheduled Work (resume --force)",
         force,
       });
@@ -128,6 +131,7 @@ export async function runWorkflow(opts: {
         repoRoot,
         maxConcurrency,
         smithersCliPath,
+        envOverrides,
         label: "Scheduled Work (resume)",
       });
     }
@@ -167,6 +171,7 @@ export async function runWorkflow(opts: {
     runId,
     maxConcurrency,
     smithersCliPath,
+    envOverrides,
     label: "Scheduled Work",
     force,
   });
@@ -181,6 +186,7 @@ async function launchAndReport(opts: {
   runId?: string;
   maxConcurrency: number;
   smithersCliPath: string;
+  envOverrides?: Record<string, string>;
   label: string;
   force?: boolean;
 }): Promise<void> {
@@ -203,4 +209,16 @@ function reportExit(exitCode: number, label: string): void {
     console.error(`\n❌ ${label} exited with code ${exitCode}\n`);
     process.exit(exitCode);
   }
+}
+
+function buildPresetEnv(
+  ralphDir: string,
+  dbPath: string,
+): Record<string, string> {
+  return {
+    RALPHINHO_DIR: ralphDir,
+    RALPHINHO_CONFIG_PATH: join(ralphDir, "config.json"),
+    RALPHINHO_PLAN_PATH: join(ralphDir, "work-plan.json"),
+    RALPHINHO_DB_PATH: dbPath,
+  };
 }

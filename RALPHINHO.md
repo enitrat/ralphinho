@@ -41,10 +41,10 @@ For infrastructure details (Smithers engine, jj VCS, agent system), see [CONCEPT
                 ┌─────────▼─────────┐
                 │  ralphinho run    │
                 │                   │
-                │  Generates a      │
-                │  Smithers .tsx    │
-                │  workflow from    │
-                │  the work plan    │
+                │  Launches the     │
+                │  built-in Smithers│
+                │  preset against   │
+                │  .ralphinho state │
                 └───────────────────┘
 ```
 

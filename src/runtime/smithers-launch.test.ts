@@ -67,11 +67,15 @@ describe("buildLaunchConfig", () => {
     const config = buildLaunchConfig(
       {
         mode: "run",
-        workflowPath: "/repo/.ralphinho/generated/workflow.tsx",
+        workflowPath: "/super-ralph/src/preset.tsx",
         repoRoot: "/repo",
         runId: "run-123",
         maxConcurrency: 7,
         smithersCliPath: "/repo/node_modules/smithers-orchestrator/dist/cli.js",
+        envOverrides: {
+          RALPHINHO_DIR: "/repo/.ralphinho",
+          RALPHINHO_CONFIG_PATH: "/repo/.ralphinho/config.json",
+        },
       },
       {
         runningFromSource: false,
@@ -92,7 +96,7 @@ describe("buildLaunchConfig", () => {
       "/super-ralph/preload.ts",
       "/repo/node_modules/smithers-orchestrator/dist/cli.js",
       "run",
-      "/repo/.ralphinho/generated/workflow.tsx",
+      "/super-ralph/src/preset.tsx",
       "--root",
       "/repo",
       "--run-id",
@@ -103,18 +107,23 @@ describe("buildLaunchConfig", () => {
     expect(config.cwd).toBe("/repo");
     expect(config.env.USE_CLI_AGENTS).toBe("1");
     expect(config.env.CLAUDECODE).toBeUndefined();
+    expect(config.env.RALPHINHO_DIR).toBe("/repo/.ralphinho");
+    expect(config.env.RALPHINHO_CONFIG_PATH).toBe("/repo/.ralphinho/config.json");
   });
 
   test("builds resume command with --force and source-mode cwd", () => {
     const config = buildLaunchConfig(
       {
         mode: "resume",
-        workflowPath: "/repo/.ralphinho/generated/workflow.tsx",
+        workflowPath: "/super-ralph/src/preset.tsx",
         repoRoot: "/repo",
         runId: "run-456",
         maxConcurrency: 3,
         smithersCliPath: "/repo/node_modules/smithers-orchestrator/dist/cli.js",
         force: true,
+        envOverrides: {
+          RALPHINHO_DIR: "/repo/.ralphinho",
+        },
       },
       {
         runningFromSource: true,
@@ -134,7 +143,7 @@ describe("buildLaunchConfig", () => {
       "/super-ralph/preload.ts",
       "/repo/node_modules/smithers-orchestrator/dist/cli.js",
       "resume",
-      "/repo/.ralphinho/generated/workflow.tsx",
+      "/super-ralph/src/preset.tsx",
       "--root",
       "/repo",
       "--run-id",

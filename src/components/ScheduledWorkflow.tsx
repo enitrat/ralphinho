@@ -182,7 +182,6 @@ export function ScheduledWorkflow({
 
               return (
                 <QualityPipeline
-                  key={unit.id}
                   unit={unit}
                   ctx={ctx}
                   outputs={outputs}

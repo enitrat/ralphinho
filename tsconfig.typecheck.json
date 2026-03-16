@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "smithers-orchestrator": ["src/types/smithers-orchestrator.d.ts"],
+      "smithers-orchestrator/jsx-runtime": [
+        "src/types/smithers-orchestrator-jsx-runtime.d.ts"
+      ]
+    }
+  }
+}

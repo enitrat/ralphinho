@@ -42,7 +42,7 @@
   ],
   "scripts": {
     "gen:mdx-types": "bun scripts/gen-mdx-types.ts",
-    "typecheck": "bun scripts/gen-mdx-types.ts && tsc --noEmit",
+    "typecheck": "bun scripts/gen-mdx-types.ts && tsc -p tsconfig.typecheck.json --noEmit",
     "cli": "bun run src/cli/ralphinho.ts"
   },
   "peerDependencies": {
