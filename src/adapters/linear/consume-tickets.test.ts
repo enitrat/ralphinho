@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { LinearIssue } from "./types";
+import type { LinearIssue } from "smithers-orchestrator/linear";
 
 /**
  * We test the pure logic (issueToRfc, priority sorting) by extracting
@@ -22,6 +22,8 @@ function buildIssue(overrides: Partial<LinearIssue> = {}): LinearIssue {
     assignee: null,
     labels: [{ id: "l1", name: "bug" }],
     project: null,
+    createdAt: "2026-03-16T00:00:00.000Z",
+    updatedAt: "2026-03-16T00:00:00.000Z",
     url: "https://linear.app/team/issue/ENG-42",
     ...overrides,
   };

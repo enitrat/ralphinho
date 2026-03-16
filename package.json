@@ -46,7 +46,7 @@
     "cli": "bun run src/cli/ralphinho.ts"
   },
   "peerDependencies": {
-    "smithers-orchestrator": "^0.10.0"
+    "smithers-orchestrator": "github:jjhub-ai/smithers#41bdde95c22b6b7239efa6e69dcbea11176f2253"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
@@ -63,9 +63,7 @@
     "registry": "https://registry.npmjs.org/"
   },
   "dependencies": {
-    "@linear/sdk": "^77.0.0",
     "@opentui/core": "^0.1.81",
-    "better-sqlite3": "^11.0.0",
-    "effect": "3.19.19"
+    "better-sqlite3": "^11.0.0"
   }
 }

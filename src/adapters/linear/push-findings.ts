@@ -11,8 +11,8 @@ import {
   resolveLatestReviewRunId,
   type MergedReviewFinding,
 } from "../../workflows/improvinho/projection";
-import { useLinear } from "./useLinear";
-import type { PushFindingsResult, LinearLabel } from "./types";
+import { getLinearClient, useLinear } from "smithers-orchestrator/linear";
+import type { PushFindingsResult } from "./types";
 
 const PRIORITY_MAP: Record<string, number> = {
   critical: 1, // Urgent
@@ -74,9 +74,8 @@ function findingToDescription(finding: MergedReviewFinding): string {
   return lines.join("\n");
 }
 
-async function resolveOrCreateLabel(
-  linear: ReturnType<typeof useLinear>,
-  existingLabels: LinearLabel[],
+async function resolveLabel(
+  existingLabels: { id: string; name: string }[],
   name: string,
 ): Promise<string | undefined> {
   const existing = existingLabels.find(
@@ -114,8 +113,13 @@ export async function pushFindingsToLinear(opts: {
       return { created: [], skipped: 0 };
     }
 
+    // Use raw SDK client — smithers' useLinear facade lacks createIssue and listLabels
+    const client = getLinearClient();
     const linear = useLinear();
-    const labels = await linear.listLabels();
+
+    const labelsResult = await client.issueLabels({ first: 100 });
+    const labels = labelsResult.nodes.map((l: any) => ({ id: l.id, name: l.name }));
+
     const created: PushFindingsResult["created"] = [];
     let skipped = 0;
 
@@ -125,17 +129,27 @@ export async function pushFindingsToLinear(opts: {
       const description = findingToDescription(finding);
 
       // Try to find matching labels for the finding kind
-      const kindLabelId = await resolveOrCreateLabel(linear, labels, finding.kind);
+      const kindLabelId = await resolveLabel(labels, finding.kind);
       const labelIds = kindLabelId ? [kindLabelId] : [];
 
       try {
-        const issue = await linear.createIssue({
+        const result = await client.createIssue({
           teamId,
           title,
           description,
           priority: PRIORITY_MAP[finding.priority],
           labelIds,
         });
+
+        const issueRef = result.issue;
+        if (!issueRef) {
+          console.error(`  Failed to create issue for finding ${i + 1}: no issue returned`);
+          skipped++;
+          continue;
+        }
+        // Resolve the lazy SDK reference, then re-fetch via useLinear for serializable type
+        const resolved = await issueRef;
+        const issue = await linear.getIssue(resolved.id);
 
         created.push({
           findingDisplayId: `IMP-${String(i + 1).padStart(4, "0")}`,

@@ -6,8 +6,9 @@
  * and provides helpers to update the ticket after completion.
  */
 
-import { useLinear } from "./useLinear";
-import type { ConsumedTicket, LinearIssue } from "./types";
+import { useLinear } from "smithers-orchestrator/linear";
+import type { LinearIssue } from "smithers-orchestrator/linear";
+import type { ConsumedTicket } from "./types";
 
 function issueToRfc(issue: LinearIssue): string {
   const lines: string[] = [];
@@ -92,6 +93,7 @@ export async function consumeTicket(opts: {
 
 /**
  * Mark a ticket as in-progress in Linear.
+ * Finds the "In Progress" state for the team and transitions the issue.
  */
 export async function markTicketInProgress(opts: {
   issueId: string;
@@ -99,9 +101,13 @@ export async function markTicketInProgress(opts: {
 }): Promise<void> {
   const linear = useLinear();
 
-  // Find the "In Progress" or "started" state for this team
-  // Linear API doesn't have a direct "list states" on the client,
-  // so we update with a comment for now
+  const statuses = await linear.listIssueStatuses(opts.teamId);
+  const inProgressState = statuses.find((s) => s.type === "started");
+
+  if (inProgressState) {
+    await linear.updateIssueState(opts.issueId, inProgressState.id);
+  }
+
   await linear.addComment(
     opts.issueId,
     "Ralphinho is working on this ticket.",
@@ -110,13 +116,23 @@ export async function markTicketInProgress(opts: {
 
 /**
  * Mark a ticket as done in Linear with implementation details.
+ * Finds the "Done" state for the team and transitions the issue.
  */
 export async function markTicketDone(opts: {
   issueId: string;
+  teamId?: string;
   summary: string;
   prUrl?: string;
 }): Promise<void> {
   const linear = useLinear();
+
+  if (opts.teamId) {
+    const statuses = await linear.listIssueStatuses(opts.teamId);
+    const doneState = statuses.find((s) => s.type === "completed");
+    if (doneState) {
+      await linear.updateIssueState(opts.issueId, doneState.id);
+    }
+  }
 
   const lines = ["## Implementation Complete"];
   lines.push("");

@@ -1,12 +1,4 @@
-export { getLinearClient, resetLinearClient } from "./client";
-export { useLinear } from "./useLinear";
-export type { ListIssuesParams } from "./useLinear";
+// Local adapters (the only reason this directory exists)
 export { pushFindingsToLinear } from "./push-findings";
 export { consumeTicket, markTicketInProgress, markTicketDone } from "./consume-tickets";
-export type {
-  LinearIssue,
-  LinearTeam,
-  LinearLabel,
-  PushFindingsResult,
-  ConsumedTicket,
-} from "./types";
+export type { PushFindingsResult, ConsumedTicket } from "./types";

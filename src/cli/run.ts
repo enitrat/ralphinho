@@ -225,7 +225,12 @@ export async function runWorkflow(opts: {
     console.log(`  Review slices: ${reviewPlan.slices?.length ?? 0}`);
   }
   console.log(`  Max concurrency: ${maxConcurrency}`);
-  console.log(`  Agents: claude=${config.agents.claude} codex=${config.agents.codex}\n`);
+  const agentOverride = config.mode === "review-discovery" ? config.reviewAgentOverride : null;
+  if (agentOverride) {
+    console.log(`  Agent: ${agentOverride}`);
+  } else {
+    console.log(`  Agents: claude=${config.agents.claude} codex=${config.agents.codex}`);
+  }
   if (linearOpts) {
     console.log(`  Linear: team=${linearOpts.teamId} label=${linearOpts.label}\n`);
   }
@@ -313,6 +318,7 @@ async function launchAndReport(opts: {
     console.log("\n📤 Updating Linear ticket...\n");
     await markTicketDone({
       issueId: linear.issueId,
+      teamId: linear.teamId,
       summary: `Completed by ralphinho run ${launchOpts.runId ?? "unknown"}.`,
     });
     console.log("  Linear ticket marked as done.");
