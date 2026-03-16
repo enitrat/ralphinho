@@ -21,7 +21,7 @@ import {
   scanRepo,
   type ParsedArgs,
 } from "./shared";
-import { decomposeRFC, printPlanSummary } from "../scheduled/decompose";
+import { decomposeRFC, printPlanSummary } from "../workflows/ralphinho/decompose";
 import type { ScheduledWorkConfig } from "../config/types";
 
 export async function initScheduledWork(opts: {

@@ -1,4 +1,4 @@
-import type { WorkUnit } from "../scheduled/types";
+import type { WorkUnit } from "../types";
 import type { DepSummary } from "../components/QualityPipeline";
 import type { AgenticMergeQueueTicket } from "../components/AgenticMergeQueue";
 import { buildUnitWorktreePath } from "../components/runtimeNames";

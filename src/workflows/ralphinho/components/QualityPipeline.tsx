@@ -1,8 +1,8 @@
 import React from "react";
 import { Task, Sequence, Parallel, Worktree } from "smithers-orchestrator";
 import type { SmithersCtx, AgentLike } from "smithers-orchestrator";
-import type { WorkUnit, WorkPlan } from "../scheduled/types";
-import { scheduledOutputSchemas } from "../scheduled/schemas";
+import type { WorkUnit, WorkPlan } from "../types";
+import { scheduledOutputSchemas } from "../schemas";
 
 import ResearchPrompt from "../prompts/Research.mdx";
 import PlanPrompt from "../prompts/Plan.mdx";

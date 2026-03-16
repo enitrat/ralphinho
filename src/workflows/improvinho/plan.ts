@@ -3,7 +3,7 @@ import { lstat, readFile } from "node:fs/promises";
 import { basename, relative, resolve, sep } from "node:path";
 import { createHash } from "node:crypto";
 
-import type { RepoConfig } from "../cli/shared";
+import type { RepoConfig } from "../../cli/shared";
 import type { ReviewPlan, ReviewSlice } from "./types";
 
 type BuildReviewPlanOptions = {
@@ -84,15 +84,15 @@ async function inferRisk(repoRoot: string, repoRelativePath: string): Promise<Re
   return "low";
 }
 
-function buildSliceId(repoRelativePath: string): string {
-  const hash = createHash("sha1").update(repoRelativePath).digest("hex").slice(0, 8);
-  const stem = repoRelativePath
+function buildSliceId(prefix: string, seed: string): string {
+  const hash = createHash("sha1").update(seed).digest("hex").slice(0, 8);
+  const stem = seed
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
-    .slice(0, 48) || "slice";
+    .slice(0, 40) || prefix;
 
-  return `${stem}-${hash}`;
+  return `${prefix}-${stem}-${hash}`;
 }
 
 async function buildSlice(
@@ -110,13 +110,46 @@ async function buildSlice(
       : `Review the focused file ${basename(repoRelativePath)} as a single bounded slice.`;
 
   return {
-    id: buildSliceId(repoRelativePath),
+    id: buildSliceId("slice", repoRelativePath),
+    mode: "slice",
     path: repoRelativePath,
     entryType,
     focusAreas,
     rationale,
     risk,
     inferredPaths: [],
+  };
+}
+
+function pickCrossCuttingFocusAreas(focusAreas: string[]): string[] {
+  const crossCutting = focusAreas.filter((entry) => (
+    entry === "architecture"
+    || entry === "simplification"
+    || entry === "test-gaps"
+  ));
+  return crossCutting.length > 0 ? crossCutting : ["architecture", "simplification"];
+}
+
+async function buildCrossCuttingSlice(
+  repoRoot: string,
+  paths: string[],
+  focusAreas: string[],
+): Promise<ReviewSlice> {
+  const risks = await Promise.all(paths.map((path) => inferRisk(repoRoot, path)));
+  const risk = risks.includes("high")
+    ? "high"
+    : (risks.includes("medium") ? "medium" : "low");
+
+  return {
+    id: buildSliceId("cross", paths.join("|")),
+    mode: "cross-cutting",
+    path: paths[0] ?? "cross-cutting-scope",
+    entryType: "virtual",
+    focusAreas: pickCrossCuttingFocusAreas(focusAreas),
+    rationale:
+      "Review the selected scope for duplication, inconsistent abstractions, and boundary failures that span multiple local slices.",
+    risk,
+    inferredPaths: paths.slice(1),
   };
 }
 
@@ -133,9 +166,14 @@ export async function buildReviewPlan(
     explicitPaths.map((entry) => normalizeRelativePath(repoRoot, entry)),
   );
   const focusAreas = collectFocusAreas(instruction);
-  const slices = await Promise.all(
+  const localSlices = await Promise.all(
     normalizedPaths.map((repoRelativePath) => buildSlice(repoRoot, repoRelativePath, focusAreas)),
   );
+
+  const slices = [...localSlices];
+  if (normalizedPaths.length > 1) {
+    slices.push(await buildCrossCuttingSlice(repoRoot, normalizedPaths, focusAreas));
+  }
 
   return {
     source: promptSourcePath,

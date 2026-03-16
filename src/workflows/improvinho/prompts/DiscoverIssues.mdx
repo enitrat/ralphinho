@@ -1,0 +1,104 @@
+DISCOVERY PHASE — Review Scope: {props.sliceId}
+
+Instruction: {props.instruction}
+Lens: {props.lensTitle} ({props.lens})
+Mode: {props.mode}
+Primary path: {props.slicePath}
+Entry type: {props.entryType}
+Risk: {props.risk}
+
+## Scope
+
+Review only this bounded scope:
+- {props.slicePath}
+
+{props.inferredPaths && props.inferredPaths.length > 0
+  ? `Additional in-scope paths:\n${props.inferredPaths.map((entry) => `- ${entry}`).join('\n')}`
+  : ''}
+
+## Focus Areas
+
+{props.focusAreas && props.focusAreas.length > 0
+  ? props.focusAreas.map((entry) => `- ${entry}`).join('\n')
+  : '- bugs\n- simplification\n- architecture'}
+
+## Scope Rationale
+
+{props.rationale}
+
+## Lens Mission
+
+{props.lensMission}
+
+## Lens Checklist
+
+{props.lensChecklist && props.lensChecklist.length > 0
+  ? props.lensChecklist.map((entry) => `- ${entry}`).join('\n')
+  : '- No additional checklist provided.'}
+
+## Shared Discovery Standard
+
+- High signal only. Report objective issues with concrete evidence, not style preferences or vague suggestions.
+- Read the in-scope files before concluding. Do not infer architecture from one snippet if the surrounding module answers the question.
+- Ask: how does this codebase already solve similar problems? Reuse existing patterns when they are healthy.
+- Search for existing utilities, helpers, selectors, mappers, guards, and shared logic before recommending a new helper or abstraction.
+- Treat unnecessary complexity as a first-class defect.
+- Prefer deleting code, collapsing layers, or reusing existing utilities over introducing new abstractions.
+- Trust the type system and validated boundaries; do not reward code for defending against impossible states.
+- Keep framework-specific assumptions out of your reasoning unless the code in scope clearly requires them.
+
+## Shared Review Checklist
+
+- Reuse and duplication:
+  - Flag duplicated helpers, repeated inline transformations, and local inventions that should use an existing shared pattern.
+- Simplicity and design:
+  - Flag unnecessary indirection, over-engineering, dead options, dead files, and abstractions with only one trivial consumer.
+- Correctness and efficiency:
+  - Flag unnecessary work, repeated reads/computation, missed concurrency, hot-path bloat, and TOCTOU-style pre-checks that should operate directly and handle failure.
+- Tests:
+  - If tests are in scope, flag tests that only prove types, exports, naming, or file organization.
+  - Prefer tests that validate observable behavior and real public contracts.
+- Architecture:
+  - Flag leaky abstractions, poor ownership boundaries, and logic that lives in the wrong layer.
+
+## Task
+
+Produce findings directly for this lens. Do not produce candidates and do not ask for a second audit pass.
+
+Return a top-level object with:
+- `sliceId`
+- `mode`
+- `lens`
+- `inputSignature`
+- `discoverySummary`
+- `findings`
+
+Each finding must include:
+- `kind`
+- `priority`
+- `confidence`
+- `summary`
+- `evidence`
+- `primaryFile`
+- `lineRefs`
+- `symbol`
+- `pattern`
+- `suggestedDiff`
+- `acceptIf`
+- `dismissIf`
+
+If `acceptIf` or `dismissIf` does not apply, return `null`.
+If `suggestedDiff` does not apply, return `null`.
+
+## Quality Bar
+
+- Every finding needs one concrete proof. Use a code snippet, trace, or direct logical argument.
+- Use repo-relative paths in `primaryFile` and `lineRefs`.
+- Prefer symbol-based anchors for `symbol`. Use `null` only when the issue is module-level.
+- Keep `pattern` short and stable, for example `redundant-parse`, `null-session`, or `direct-db-access`.
+- Prefer one strong finding over many weak findings.
+- Return an empty `findings` array if nothing survives the evidence bar.
+- Set `sliceId` to exactly `{props.sliceId}`.
+- Set `mode` to exactly `{props.mode}`.
+- Set `lens` to exactly `{props.lens}`.
+- Set `inputSignature` to exactly `"{props.inputSignature}"`.

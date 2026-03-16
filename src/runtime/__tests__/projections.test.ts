@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import type { StageName } from "../../workflow/contracts";
+import type { StageName } from "../../workflows/ralphinho/workflow/contracts";
 import { renderMonitorSnapshot } from "../../advanced-monitor-ui";
 import type { SmithersEvent } from "../events";
 import { projectEvents } from "../projections";

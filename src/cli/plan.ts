@@ -16,8 +16,8 @@ import {
   type ParsedArgs,
 } from "./shared";
 import { ralphinhoConfigSchema } from "../config/types";
-import { decomposeRFC, printPlanSummary } from "../scheduled/decompose";
-import { buildReviewPlan } from "../review/plan";
+import { decomposeRFC, printPlanSummary } from "../workflows/ralphinho/decompose";
+import { buildReviewPlan } from "../workflows/improvinho/plan";
 
 export async function runPlan(opts: {
   flags: ParsedArgs["flags"];

@@ -7,9 +7,9 @@ import {
   type AgentLike,
 } from "smithers-orchestrator";
 
-import { ScheduledWorkflow, type ScheduledWorkflowAgents } from "./components";
-import { loadScheduledPreset } from "./preset-runtime";
-import { scheduledOutputSchemas } from "./scheduled/schemas";
+import { ScheduledWorkflow, type ScheduledWorkflowAgents } from "./components/ScheduledWorkflow";
+import { loadScheduledPreset } from "../../preset-runtime";
+import { scheduledOutputSchemas } from "./schemas";
 
 const { paths, config, workPlan } = loadScheduledPreset();
 

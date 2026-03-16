@@ -21,7 +21,8 @@ export function getRalphinhoPresetPath(
   return join(
     ralphSourceRoot,
     "src",
-    mode === "review-discovery" ? "review-preset.tsx" : "preset.tsx",
+    "workflows",
+    mode === "review-discovery" ? "improvinho/preset.tsx" : "ralphinho/preset.tsx",
   );
 }
 

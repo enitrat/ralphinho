@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { WorkUnit } from "../../scheduled/types";
+import type { WorkUnit } from "../../types";
 import {
   buildDepSummaries,
   buildMergeTickets,

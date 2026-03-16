@@ -18,7 +18,7 @@ import React from "react";
 import { Ralph, Sequence, Parallel, Task } from "smithers-orchestrator";
 import type { SmithersCtx } from "smithers-orchestrator";
 import type { AgentLike } from "smithers-orchestrator";
-import type { WorkPlan } from "../scheduled/types";
+import type { WorkPlan } from "../types";
 import { QualityPipeline, type QualityPipelineAgents, type QualityPipelineFallbacks, type ScheduledOutputs } from "./QualityPipeline";
 import { AgenticMergeQueue, type AgenticMergeQueueTicket } from "./AgenticMergeQueue";
 import { buildUnitBranchPrefix, buildUnitWorktreePath } from "./runtimeNames";

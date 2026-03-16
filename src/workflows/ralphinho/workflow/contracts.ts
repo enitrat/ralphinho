@@ -1,4 +1,4 @@
-import type { ScheduledTier } from "../scheduled/types";
+import type { ScheduledTier } from "../types";
 
 export type StageName =
   | "research"

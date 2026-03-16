@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import {
   workPlanSchema,
   type WorkPlan,
-} from "./scheduled/types";
+} from "./workflows/ralphinho/types";
 import {
   ralphinhoConfigSchema,
   reviewDiscoveryConfigSchema,
@@ -13,7 +13,7 @@ import {
   type ReviewDiscoveryConfig,
   type ScheduledWorkConfig,
 } from "./config/types";
-import { reviewPlanSchema, type ReviewPlan } from "./review/types";
+import { reviewPlanSchema, type ReviewPlan } from "./workflows/improvinho/types";
 
 export type ScheduledPresetPaths = {
   ralphDir: string;

@@ -8,8 +8,12 @@ import {
   scanRepo,
   type ParsedArgs,
 } from "./shared";
-import type { ReviewDiscoveryConfig } from "../config/types";
-import { buildReviewPlan } from "../review/plan";
+import {
+  reviewAgentOverrideSchema,
+  type ReviewDiscoveryConfig,
+  type ReviewAgentOverride,
+} from "../config/types";
+import { buildReviewPlan } from "../workflows/improvinho/plan";
 
 function collectReviewPaths(
   positional: string[],
@@ -20,6 +24,22 @@ function collectReviewPaths(
     : [];
 
   return [...fromFlag, ...positional].filter(Boolean);
+}
+
+function parseReviewAgentOverride(
+  flags: ParsedArgs["flags"],
+): ReviewAgentOverride | null {
+  if (typeof flags.agent !== "string") return null;
+
+  const parsed = reviewAgentOverrideSchema.safeParse(flags.agent.trim().toLowerCase());
+  if (!parsed.success) {
+    console.error(
+      'Error: Invalid --agent value for review mode. Use one of: "sonnet", "opus", "codex".',
+    );
+    process.exit(1);
+  }
+
+  return parsed.data;
 }
 
 export async function initReviewDiscovery(opts: {
@@ -47,6 +67,7 @@ export async function initReviewDiscovery(opts: {
   const { promptText, promptSourcePath } = await readPromptInput(rawInstruction, repoRoot);
   const repoConfig = await scanRepo(repoRoot);
   const agents = await detectAgents(repoRoot);
+  const reviewAgentOverride = parseReviewAgentOverride(flags);
 
   if (!agents.claude && !agents.codex) {
     console.error(
@@ -74,6 +95,7 @@ export async function initReviewDiscovery(opts: {
     reviewInstruction: promptText,
     reviewInstructionSource: promptSourcePath,
     reviewPaths: reviewPlan.slices.map((slice) => slice.path),
+    reviewAgentOverride,
     agents,
     maxConcurrency,
     createdAt: new Date().toISOString(),
@@ -93,6 +115,9 @@ export async function initReviewDiscovery(opts: {
   console.log(`  Review paths: ${reviewPlan.slices.map((slice) => slice.path).join(", ")}`);
   console.log(`  Slices: ${reviewPlan.slices.length}`);
   console.log(`  Agents: claude=${agents.claude} codex=${agents.codex}`);
+  if (reviewAgentOverride) {
+    console.log(`  Agent override: ${reviewAgentOverride}`);
+  }
   console.log("  Written:");
   console.log(`    ${configPath}`);
   console.log(`    ${planPath}`);

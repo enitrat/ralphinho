@@ -6,8 +6,8 @@
  */
 
 import { z } from "zod";
-export { ralphinhoConfigSchema } from "../config/types";
-export type { RalphinhoConfig } from "../config/types";
+export { ralphinhoConfigSchema } from "../../config/types";
+export type { RalphinhoConfig } from "../../config/types";
 
 // ── Work Unit ─────────────────────────────────────────────────────────
 

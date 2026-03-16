@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 
-import { DISPLAY_STAGES, type StageName } from "../workflow/contracts";
-import type { DecisionStatus } from "../workflow/decisions";
+import { DISPLAY_STAGES, type StageName } from "../workflows/ralphinho/workflow/contracts";
+import type { DecisionStatus } from "../workflows/ralphinho/workflow/decisions";
 
 export type SmithersEvent =
   | NodeStartedEvent

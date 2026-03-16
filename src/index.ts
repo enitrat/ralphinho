@@ -1,24 +1,31 @@
 /**
- * Scheduled-work workflow toolkit — RFC-driven AI development engine.
+ * Workflow toolkit — RFC-driven AI development engine + review discovery.
  *
  * Provides:
  * - QualityPipeline: per-unit quality pipeline (research → implement → test → review)
  * - ScheduledWorkflow: orchestrator composing pipelines + merge queue
  * - AgenticMergeQueue: lands completed units onto main
+ * - ReviewDiscoveryWorkflow: multi-lens code review discovery
  * - Monitor: TUI for observing workflow progress
  * - Scheduled work types and schemas
+ * - Review discovery types and schemas
  */
 
-// Components
+// ── Ralphinho (scheduled work) ──────────────────────────────────────
+
 export {
   QualityPipeline,
   ScheduledWorkflow,
-  ReviewDiscoveryWorkflow,
   AgenticMergeQueue,
   mergeQueueResultSchema,
-  Monitor,
-  monitorOutputSchema,
-} from "./components";
+  scheduledOutputSchemas,
+  computeLayers,
+  validateDAG,
+  SCHEDULED_TIERS,
+  workPlanSchema,
+  workUnitSchema,
+  ralphinhoConfigSchema,
+} from "./workflows/ralphinho";
 
 export type {
   QualityPipelineProps,
@@ -26,55 +33,48 @@ export type {
   DepSummary,
   ScheduledWorkflowProps,
   ScheduledWorkflowAgents,
-  ReviewDiscoveryWorkflowProps,
   AgenticMergeQueueProps,
   AgenticMergeQueueTicket,
   MergeQueueResult,
-  MonitorOutput,
-  MonitorProps,
-} from "./components";
-
-// Scheduled work types
-export {
-  computeLayers,
-  validateDAG,
-  SCHEDULED_TIERS,
-  workPlanSchema,
-  workUnitSchema,
-  ralphinhoConfigSchema,
-} from "./scheduled/types";
-
-export type {
   WorkPlan,
   WorkUnit,
   RalphinhoConfig,
   ScheduledTier,
-} from "./scheduled/types";
+} from "./workflows/ralphinho";
 
-// Schemas
-export { scheduledOutputSchemas } from "./scheduled/schemas";
+// ── Improvinho (review discovery) ───────────────────────────────────
 
-// Review discovery types and schemas
 export {
+  ReviewDiscoveryWorkflow,
   reviewPlanSchema,
   reviewSliceSchema,
   reviewKindSchema,
   reviewPrioritySchema,
   reviewConfidenceSchema,
-  candidateIssueSchema,
-  auditedIssueSchema,
-  reviewTicketSchema,
-} from "./review/types";
+  reviewFindingStatusSchema,
+  reviewModeSchema,
+  reviewLensSchema,
+  discoveredFindingSchema,
+  reviewFindingSchema,
+  reviewOutputSchemas,
+} from "./workflows/improvinho";
 
 export type {
+  ReviewDiscoveryWorkflowProps,
   ReviewPlan,
   ReviewSlice,
   ReviewKind,
   ReviewPriority,
   ReviewConfidence,
-  CandidateIssue,
-  AuditedIssue,
-  ReviewTicket,
-} from "./review/types";
+  ReviewFindingStatus,
+  ReviewMode,
+  ReviewLens,
+  DiscoveredFinding,
+  ReviewFinding,
+} from "./workflows/improvinho";
 
-export { reviewOutputSchemas } from "./review/schemas";
+// ── Shared ──────────────────────────────────────────────────────────
+
+export { Monitor, monitorOutputSchema } from "./components";
+
+export type { MonitorOutput, MonitorProps } from "./components";

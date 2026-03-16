@@ -22,9 +22,27 @@ import {
   resolveSmithersCliPath,
 } from "../runtime/smithers-launch";
 import {
-  projectReviewTicketsFromDb,
+  projectReviewSummaryFromDb,
   resolveLatestReviewRunId,
-} from "../review/projection";
+} from "../workflows/improvinho/projection";
+
+import { Database } from "bun:sqlite";
+
+function resolveLatestRunId(dbPath: string): string | null {
+  try {
+    const db = new Database(dbPath, { readonly: true });
+    try {
+      const row = db.prepare(
+        "SELECT run_id FROM _smithers_runs ORDER BY created_at_ms DESC LIMIT 1",
+      ).get() as { run_id?: string } | undefined;
+      return row?.run_id ?? null;
+    } finally {
+      db.close();
+    }
+  } catch {
+    return null;
+  }
+}
 
 export async function runWorkflow(opts: {
   flags: ParsedArgs["flags"];
@@ -113,10 +131,16 @@ export async function runWorkflow(opts: {
   if (existsSync(dbPath)) {
     // --force: auto-resume latest run without prompting
     if (force) {
-      console.log("Attempting to resume previous run (--force)...\n");
+      const latestRunId = resolveLatestRunId(dbPath);
+      if (!latestRunId) {
+        console.error("Error: Could not find a run ID to resume in the database.");
+        process.exit(1);
+      }
+      console.log(`Attempting to resume run ${latestRunId} (--force)...\n`);
       return launchAndReport({
         mode: "resume",
         workflowPath,
+        runId: latestRunId,
         maxConcurrency,
         smithersCliPath,
         envOverrides,
@@ -133,10 +157,16 @@ export async function runWorkflow(opts: {
     const choice = await promptChoice("What would you like to do?", options);
 
     if (choice === 1) {
-      console.log("Attempting to resume previous run...\n");
+      const latestRunId = resolveLatestRunId(dbPath);
+      if (!latestRunId) {
+        console.error("Error: Could not find a run ID to resume in the database.");
+        process.exit(1);
+      }
+      console.log(`Attempting to resume run ${latestRunId}...\n`);
       return launchAndReport({
         mode: "resume",
         workflowPath,
+        runId: latestRunId,
         maxConcurrency,
         smithersCliPath,
         envOverrides,
@@ -253,13 +283,12 @@ async function projectReviewArtifacts(repoRoot: string): Promise<void> {
   const dbPath = join(getRalphDir(repoRoot), "workflow.db");
   if (!existsSync(dbPath)) return;
 
-  const Database = (await import("better-sqlite3")).default;
   const db = new Database(dbPath, { readonly: true });
 
   try {
     const runId = resolveLatestReviewRunId(db);
     if (!runId) return;
-    await projectReviewTicketsFromDb({ repoRoot, db, runId });
+    await projectReviewSummaryFromDb({ repoRoot, db, runId });
   } finally {
     db.close();
   }

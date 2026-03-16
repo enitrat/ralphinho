@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import React from "react";
 import type { AgentLike, SmithersCtx } from "smithers-orchestrator";
-import { scheduledOutputSchemas } from "../../scheduled/schemas";
-import type { WorkPlan, WorkUnit } from "../../scheduled/types";
+import { scheduledOutputSchemas } from "../../schemas";
+import type { WorkPlan, WorkUnit } from "../../types";
 import {
   IMPLEMENT_RETRY_POLICY,
   PLAN_RETRY_POLICY,

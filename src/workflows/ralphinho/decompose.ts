@@ -5,7 +5,7 @@
  * to produce a structured WorkPlan with parallelizable work units.
  */
 
-import type { RepoConfig } from "../cli/shared";
+import type { RepoConfig } from "../../cli/shared";
 import { workPlanSchema, type WorkPlan, type WorkUnit, validateDAG, computeLayers } from "./types";
 
 const DECOMPOSE_SYSTEM_PROMPT = `You are a senior software architect decomposing an RFC/PRD into executable work units for an automated AI development pipeline.

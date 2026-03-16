@@ -14,7 +14,7 @@
 
 import { dirname, join } from "node:path";
 import { existsSync } from "node:fs";
-import { DISPLAY_STAGES, TIER_STAGES, stageNodeId } from "./workflow/contracts";
+import { DISPLAY_STAGES, TIER_STAGES, stageNodeId } from "./workflows/ralphinho/workflow/contracts";
 import { readEventLog } from "./runtime/events";
 import { pollEventsFromDb } from "./runtime/event-bridge";
 import {
