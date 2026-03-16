@@ -6,7 +6,7 @@
  */
 
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -25,7 +25,12 @@ import {
   projectReviewSummaryFromDb,
   resolveLatestReviewRunId,
 } from "../workflows/improvinho/projection";
-
+import { pushFindingsToLinear } from "../adapters/linear/push-findings";
+import {
+  consumeTicket,
+  markTicketInProgress,
+  markTicketDone,
+} from "../adapters/linear/consume-tickets";
 import { Database } from "bun:sqlite";
 
 function resolveLatestRunId(dbPath: string): string | null {
@@ -55,6 +60,28 @@ export async function runWorkflow(opts: {
   const resumeRunId =
     typeof flags.resume === "string" ? flags.resume : null;
   const force = flags.force === true;
+  const linearEnabled = flags.linear === true;
+  const linearTeamId = typeof flags.team === "string" ? flags.team : (process.env.LINEAR_TEAM_ID ?? null);
+  const linearLabel = typeof flags.label === "string" ? flags.label : (process.env.LINEAR_LABEL ?? "ralph-approved");
+  const linearMinPriority = typeof flags["min-priority"] === "string"
+    ? flags["min-priority"] as "critical" | "high" | "medium" | "low"
+    : undefined;
+
+  if (linearEnabled && !linearTeamId) {
+    console.error("Error: --linear requires --team <team-id> or LINEAR_TEAM_ID env var.");
+    process.exit(1);
+  }
+
+  // Build Linear options (undefined when --linear is not set)
+  const linearOpts = linearEnabled && linearTeamId
+    ? { teamId: linearTeamId, label: linearLabel, minPriority: linearMinPriority }
+    : undefined;
+
+  // ── Linear consume-ticket path (scheduled-work only) ──────────────
+  if (linearOpts && !existsSync(configPath)) {
+    // No config yet — attempt to consume a Linear ticket and auto-init
+    return runFromLinearTicket({ repoRoot, ralphDir, linearOpts, force, flags });
+  }
 
   // ── Load config ─────────────────────────────────────────────────────
   if (!existsSync(configPath)) {
@@ -124,6 +151,7 @@ export async function runWorkflow(opts: {
       force,
       repoRoot,
       configMode: config.mode,
+      linear: linearOpts,
     });
   }
 
@@ -148,6 +176,7 @@ export async function runWorkflow(opts: {
         force,
         repoRoot,
         configMode: config.mode,
+        linear: linearOpts,
       });
     }
 
@@ -173,6 +202,7 @@ export async function runWorkflow(opts: {
         label: config.mode === "review-discovery" ? "Review Discovery (resume)" : "Scheduled Work (resume)",
         repoRoot,
         configMode: config.mode,
+        linear: linearOpts,
       });
     }
     if (choice === 2) {
@@ -196,6 +226,9 @@ export async function runWorkflow(opts: {
   }
   console.log(`  Max concurrency: ${maxConcurrency}`);
   console.log(`  Agents: claude=${config.agents.claude} codex=${config.agents.codex}\n`);
+  if (linearOpts) {
+    console.log(`  Linear: team=${linearOpts.teamId} label=${linearOpts.label}\n`);
+  }
 
   if (!force) {
     const confirmChoice = await promptChoice(
@@ -223,6 +256,7 @@ export async function runWorkflow(opts: {
     force,
     repoRoot,
     configMode: config.mode,
+    linear: linearOpts,
   });
 }
 
@@ -239,8 +273,14 @@ async function launchAndReport(opts: {
   label: string;
   force?: boolean;
   configMode: "scheduled-work" | "review-discovery";
+  linear?: {
+    teamId: string;
+    label: string;
+    minPriority?: "critical" | "high" | "medium" | "low";
+    issueId?: string; // populated when consuming a ticket
+  };
 }): Promise<void> {
-  const { label, configMode: _configMode, ...launchOpts } = opts;
+  const { label, configMode: _configMode, linear, ...launchOpts } = opts;
 
   console.log(`🎬 ${label} — Starting execution...`);
   if (launchOpts.runId) {
@@ -252,6 +292,30 @@ async function launchAndReport(opts: {
 
   if (exitCode === 0 && opts.configMode === "review-discovery") {
     await projectReviewArtifacts(opts.repoRoot);
+
+    // Push findings to Linear if enabled
+    if (linear) {
+      console.log("\n📤 Pushing findings to Linear...\n");
+      const dbPath = join(getRalphDir(opts.repoRoot), "workflow.db");
+      const result = await pushFindingsToLinear({
+        dbPath,
+        teamId: linear.teamId,
+        minPriority: linear.minPriority,
+      });
+      console.log(
+        `\n  Linear: ${result.created.length} issues created, ${result.skipped} skipped.`,
+      );
+    }
+  }
+
+  // Mark Linear ticket done after successful scheduled-work
+  if (exitCode === 0 && opts.configMode === "scheduled-work" && linear?.issueId) {
+    console.log("\n📤 Updating Linear ticket...\n");
+    await markTicketDone({
+      issueId: linear.issueId,
+      summary: `Completed by ralphinho run ${launchOpts.runId ?? "unknown"}.`,
+    });
+    console.log("  Linear ticket marked as done.");
   }
 
   reportExit(exitCode, label);
@@ -277,6 +341,101 @@ function buildPresetEnv(
     RALPHINHO_PLAN_PATH: planPath,
     RALPHINHO_DB_PATH: dbPath,
   };
+}
+
+/**
+ * Consume a ticket from Linear, auto-init scheduled-work, and run.
+ * Used when `--linear` is passed but no config exists yet.
+ */
+async function runFromLinearTicket(opts: {
+  repoRoot: string;
+  ralphDir: string;
+  linearOpts: { teamId: string; label: string; minPriority?: "critical" | "high" | "medium" | "low" };
+  force: boolean;
+  flags: ParsedArgs["flags"];
+}): Promise<void> {
+  const { repoRoot, ralphDir, linearOpts, force, flags } = opts;
+
+  console.log("🔍 Fetching approved ticket from Linear...\n");
+
+  const ticket = await consumeTicket({
+    teamId: linearOpts.teamId,
+    label: linearOpts.label,
+  });
+
+  if (!ticket) {
+    console.log("  No approved tickets found in Linear. Nothing to do.\n");
+    return;
+  }
+
+  console.log(`  Found: ${ticket.issue.identifier} — ${ticket.issue.title}`);
+  console.log(`  Priority: ${ticket.issue.priorityLabel}\n`);
+
+  // Mark in-progress
+  await markTicketInProgress({
+    issueId: ticket.issue.id,
+    teamId: linearOpts.teamId,
+  });
+
+  // Write RFC content to a temp file and run init
+  await mkdir(ralphDir, { recursive: true });
+  const rfcPath = join(ralphDir, "linear-task.md");
+  await writeFile(rfcPath, ticket.rfcContent, "utf8");
+  console.log(`  Written RFC: ${rfcPath}`);
+
+  // Run init-scheduled programmatically
+  const { initScheduledWork } = await import("./init-scheduled");
+  await initScheduledWork({
+    positional: [rfcPath],
+    flags: { ...flags, "dry-run": true },
+    repoRoot,
+  });
+
+  // Now load the config and launch
+  const configPath = join(ralphDir, "config.json");
+  if (!existsSync(configPath)) {
+    console.error("Error: init-scheduled failed to create config.");
+    process.exit(1);
+  }
+
+  const config = ralphinhoConfigSchema.parse(
+    JSON.parse(await readFile(configPath, "utf8")),
+  );
+
+  const smithersCliPath = resolveSmithersCliPath(join(repoRoot, "package.json"));
+  if (!smithersCliPath) {
+    console.error("Error: Could not find smithers CLI.");
+    process.exit(1);
+  }
+
+  const maxConcurrency =
+    typeof flags["max-concurrency"] === "string"
+      ? Math.max(1, Number(flags["max-concurrency"]) || config.maxConcurrency)
+      : config.maxConcurrency;
+
+  const planPath = join(ralphDir, "work-plan.json");
+  const dbPath = join(ralphDir, "workflow.db");
+  const workflowPath = getRalphinhoPresetPath(config.mode);
+  const envOverrides = buildPresetEnv(ralphDir, dbPath, planPath);
+
+  const runId = `sw-lin-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+
+  return launchAndReport({
+    mode: "run",
+    workflowPath,
+    runId,
+    maxConcurrency,
+    smithersCliPath,
+    envOverrides,
+    label: `Scheduled Work (Linear: ${ticket.issue.identifier})`,
+    force,
+    repoRoot,
+    configMode: "scheduled-work",
+    linear: {
+      ...linearOpts,
+      issueId: ticket.issue.id,
+    },
+  });
 }
 
 async function projectReviewArtifacts(repoRoot: string): Promise<void> {

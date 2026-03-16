@@ -63,7 +63,9 @@
     "registry": "https://registry.npmjs.org/"
   },
   "dependencies": {
+    "@linear/sdk": "^77.0.0",
     "@opentui/core": "^0.1.81",
-    "better-sqlite3": "^11.0.0"
+    "better-sqlite3": "^11.0.0",
+    "effect": "3.19.19"
   }
 }

@@ -4,7 +4,7 @@
 
 | Layer | Files | What it does |
 |---|---|---|
-| JSX Components | `src/components/` | Declarative execution graph via custom host elements |
+| JSX Components | `src/workflows/*/components/` | Declarative execution graph via custom host elements |
 | React Renderer | `src/dom/renderer.ts`, `src/dom/extract.ts` | Custom reconciler -> HostElement tree -> TaskDescriptor[] + XML snapshot |
 | Engine | `src/engine/index.ts` | Core render->schedule->execute->persist loop |
 | Scheduler | `src/engine/scheduler.ts` | Builds plan tree from XML, evaluates runnable tasks |

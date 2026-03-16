@@ -54,6 +54,7 @@ describe("loadReviewPreset", () => {
         reviewInstruction: "Review src/api",
         reviewInstructionSource: null,
         reviewPaths: ["src/api"],
+        reviewAgentOverride: null,
         agents: { claude: true, codex: true, gh: false },
         maxConcurrency: 4,
         createdAt: "2026-03-16T00:00:00.000Z",
@@ -72,6 +73,7 @@ describe("loadReviewPreset", () => {
         },
         slices: [{
           id: "src-api-1234abcd",
+          mode: "slice",
           path: "src/api",
           entryType: "directory",
           focusAreas: ["bugs"],

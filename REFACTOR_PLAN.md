@@ -364,18 +364,21 @@ The key point: the workflow components are never aware of Linear. The CLI orches
 
 ## Execution Order
 
-### Phase 1: Restructure (file moves + import updates)
+### Phase 1: Restructure (file moves + import updates) — COMPLETE
 
-1. Create directory structure under `src/workflows/`
-2. Move improvinho files (components, types, schemas, plan, projection, lenses, prompts, preset)
-3. Update improvinho import paths
-4. Move ralphinho files (components, types, schemas, decompose, workflow/, prompts, preset)
-5. Update ralphinho import paths
-6. Move Monitor to `src/shared/monitor/`
-7. Update CLI import paths
-8. Update `src/index.ts` barrel to re-export from new locations
-9. Update `src/cli/shared.ts` `getRalphinhoPresetPath` to point to new preset locations
-10. Run existing tests to verify nothing broke
+Committed as `24cfd59`. All 53 tests passing.
+
+1. ~~Create directory structure under `src/workflows/`~~
+2. ~~Move improvinho files (components, types, schemas, plan, projection, lenses, prompts, preset)~~
+3. ~~Update improvinho import paths~~
+4. ~~Move ralphinho files (components, types, schemas, decompose, workflow/, prompts, preset)~~
+5. ~~Update ralphinho import paths~~
+6. Monitor stays in `src/components/` (shared between workflows)
+7. ~~Update CLI import paths~~
+8. ~~Update `src/index.ts` barrel to re-export from new locations~~
+9. ~~Update `src/cli/shared.ts` `getRalphinhoPresetPath` to point to new preset locations~~
+10. ~~Update `src/runtime/` imports (events, event-bridge, projections, advanced-monitor-ui)~~
+11. ~~Delete old files and verify tests pass~~
 
 ### Phase 2: Linear adapters (new code)
 

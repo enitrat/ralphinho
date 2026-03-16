@@ -252,6 +252,17 @@ function formatSummaryMarkdown(findings: ProjectedFinding[]): string {
   return `${lines.join("\n")}\n`;
 }
 
+/**
+ * Load merged findings from the workflow DB for a given run.
+ * Used by the Linear adapter to create issues from findings.
+ */
+export function loadMergedFindingsFromDb(
+  db: Database,
+  runId: string,
+): MergedReviewFinding[] {
+  return mergeReviewFindings(loadLatestFindingsById(db, runId));
+}
+
 export function resolveLatestReviewRunId(db: Database): string | null {
   const row = db.prepare(
     `

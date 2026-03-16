@@ -81,26 +81,26 @@ export async function runStatus(opts: { repoRoot: string }): Promise<void> {
         }
       } else {
         const row = db.query(
-          "SELECT total_slices, slices_complete, slices_remaining, total_confirmed_tickets, summary FROM completion_report ORDER BY iteration DESC LIMIT 1",
+          "SELECT total_slices, local_slices_complete, cross_cutting_slice_complete, confirmed_findings, merged_findings, summary FROM completion_report ORDER BY iteration DESC LIMIT 1",
         ).get() as {
           total_slices?: number;
-          slices_complete?: string | null;
-          slices_remaining?: string | null;
-          total_confirmed_tickets?: number;
+          local_slices_complete?: string | null;
+          cross_cutting_slice_complete?: number | boolean | null;
+          confirmed_findings?: number;
+          merged_findings?: number;
           summary?: string | null;
         } | undefined;
         db.close();
 
         if (row) {
-          const slicesComplete = typeof row.slices_complete === "string"
-            ? JSON.parse(row.slices_complete) as string[]
+          const localSlicesComplete = typeof row.local_slices_complete === "string"
+            ? JSON.parse(row.local_slices_complete) as string[]
             : [];
-          const slicesRemaining = typeof row.slices_remaining === "string"
-            ? JSON.parse(row.slices_remaining) as string[]
-            : [];
-          console.log(`  Slices complete: ${slicesComplete.length}/${row.total_slices ?? slicesComplete.length}`);
-          console.log(`  Slices remaining: ${slicesRemaining.length}`);
-          console.log(`  Confirmed tickets: ${row.total_confirmed_tickets ?? 0}`);
+          const crossCuttingComplete = Boolean(row.cross_cutting_slice_complete);
+          console.log(`  Local slices complete: ${localSlicesComplete.length}`);
+          console.log(`  Cross-cutting pass complete: ${crossCuttingComplete}`);
+          console.log(`  Confirmed findings: ${row.confirmed_findings ?? 0}`);
+          console.log(`  Merged findings: ${row.merged_findings ?? 0}`);
           if (row.summary) console.log(`  Summary: ${row.summary}`);
         }
       }

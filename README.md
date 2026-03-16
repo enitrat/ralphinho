@@ -1,26 +1,19 @@
 # ralphinho
 
-> Plan-driven AI development workflow — decompose specs into work units, implement them in parallel with quality gates, and land them onto main.
+> Multi-agent AI development workflows — code review with improvinho, spec-driven implementation with ralphinho, and optional Linear integration for human-in-the-loop triage.
 
-An opinionated [Smithers](https://smithers.sh) workflow. You provide a plan, ralphinho decomposes it into work units with a dependency DAG, runs each through a tier-based quality pipeline (research → plan → implement → test → review), and lands the results via a conflict-aware merge queue.
+Built on the [Smithers](https://smithers.sh) workflow engine. Two standalone workflow modes plus an optional Linear glue layer that connects them into a self-improving loop.
+
+## Workflows
+
+| Mode | CLI | Input | Output |
+|------|-----|-------|--------|
+| **Ralphinho** (scheduled-work) | `ralphinho init ./rfc.md` | RFC/spec document | Implemented code, landed on main |
+| **Improvinho** (review-discovery) | `ralphinho init review "prompt" --paths ...` | Review instruction + paths | Findings summary in `.tickets/summary.md` |
+
+Both workflows are fully independent and can be used standalone without Linear.
 
 ## Quick Start
-
-From any repo with an RFC file:
-
-```bash
-# Install (or use bunx to run directly)
-bun add github:enitrat/ralphinho smithers-orchestrator
-
-# Initialize — decomposes the RFC into work units
-bunx ralphinho init ./docs/rfc-003.md
-
-# Review the generated plan, edit if needed
-cat .ralphinho/work-plan.json
-
-# Execute the workflow
-bunx ralphinho run
-```
 
 ### Prerequisites
 
@@ -29,101 +22,165 @@ bunx ralphinho run
   - `ralphinho init` automatically runs `jj git init --colocate` if the repo is not yet colocated
 - At least one agent CLI: [`claude`](https://claude.ai/download) and/or [`codex`](https://openai.com/codex)
 
-## CLI
-
-```
-ralphinho — RFC-driven AI development workflow CLI
-
-Usage:
-  ralphinho init ./rfc.md              Decompose RFC into work units
-  ralphinho plan                       (Re)generate work plan from RFC
-  ralphinho run                        Execute the workflow
-  ralphinho run --resume <run-id>      Resume a previous run
-  ralphinho run --force                Resume latest compatible run or start fresh
-  ralphinho monitor                    Attach TUI to running workflow
-  ralphinho status                     Show current state
-
-Options:
-  --cwd <path>                Repo root (default: cwd)
-  --max-concurrency <n>       Max parallel work units (default: 6)
-  --force                     Skip prompts; only resumes if Smithers metadata still matches
-  --dry-run                   Generate plan without executing
-  --help                      Show help
-```
-
-### `init`
-
-Reads your RFC, scans the repo for build/test commands, detects available agent CLIs, then uses AI to decompose the RFC into work units with a dependency DAG. Outputs:
-
-- `.ralphinho/config.json` — workflow configuration
-- `.ralphinho/work-plan.json` — work units, dependencies, tiers, acceptance criteria
-
-You can edit the work plan before running.
-
-### `run`
-
-Generates a Smithers workflow file, creates agent instances, and executes. The workflow:
-
-1. Computes DAG layers (topological groups of independent units)
-2. For each layer, runs quality pipelines in parallel (one per unit, in isolated jj worktrees)
-3. Lands tier-complete units onto main via the merge queue
-4. Repeats until all units land or max passes reached
-
-### `plan`
-
-Re-runs the AI decomposition using the RFC from the existing config. Useful after editing the RFC.
-
-### `resume`
+### Install
 
 ```bash
-ralphinho run --resume sw-m3abc12-deadbeef
+bun add github:enitrat/ralphinho smithers-orchestrator
 ```
 
-Picks up from exactly where a previous run stopped — partial implementations, in-progress reviews, everything is persisted in SQLite.
-Smithers `v0.10.0` also validates the generated workflow file and VCS revision on resume, so `ralphinho` now preflights that compatibility before attempting a resume.
+### Ralphinho — Implement from spec
+
+```bash
+# Decompose an RFC into work units with a dependency DAG
+ralphinho init ./docs/rfc-003.md
+
+# Review and edit the generated plan
+cat .ralphinho/work-plan.json
+
+# Execute the workflow
+ralphinho run
+```
+
+### Improvinho — Review and discover issues
+
+```bash
+# Initialize a review of specific paths
+ralphinho init review "Review for bugs, security issues, and simplification opportunities" \
+  --paths src/api/auth src/lib/session.ts
+
+# Execute the review
+ralphinho run
+
+# Read the findings
+cat .tickets/summary.md
+```
+
+## CLI Reference
+
+```
+ralphinho — Multi-agent AI development workflow CLI
+
+Usage:
+  ralphinho init ./rfc.md                               Decompose RFC into work units
+  ralphinho init review "<prompt>" --paths <paths...>   Initialize review-discovery mode
+  ralphinho plan                                        (Re)generate work plan from RFC
+  ralphinho run                                         Execute the initialized workflow
+  ralphinho run --resume <run-id>                       Resume a previous run
+  ralphinho run --force                                 Resume without prompts
+  ralphinho monitor --run-id <run-id>                   Attach TUI to a workflow run
+  ralphinho status                                      Show current state
+
+Global Options:
+  --cwd <path>                Repo root (default: current directory)
+  --max-concurrency <n>       Max parallel work units (default: 6)
+  --force                     Skip prompts and attempt resume
+  --help                      Show this help
+
+Init Options:
+  --dry-run                   Generate work plan but don't execute
+  --agent <sonnet|opus|codex> Review mode only: override all review lens agents
+
+Linear Integration:
+  --linear                    Enable Linear integration (requires LINEAR_API_KEY)
+  --team <id>                 Linear team ID (required with --linear)
+  --label <name>              Linear label filter (default: "ralph-approved")
+  --min-priority <level>      Minimum priority to push (critical|high|medium|low)
+```
+
+## Linear Integration
+
+Linear serves as a human-in-the-loop buffer between improvinho (review) and ralphinho (implementation). This is entirely optional — both workflows work standalone without it.
+
+### The Loop
+
+```
+Improvinho scans repo → pushes findings to Linear as issues
+                              ↓
+                    Human triages in Linear (accept / reject / edit)
+                              ↓
+Ralphinho consumes approved tickets → implements → marks done
+```
+
+### Improvinho → Linear (push findings)
+
+After a successful review run, pass `--linear` to push findings as Linear issues:
+
+```bash
+# Run review and push findings to Linear
+ralphinho init review "Review auth layer" --paths src/auth
+ralphinho run --linear --team <team-id>
+
+# Only push high+ priority findings
+ralphinho run --linear --team <team-id> --min-priority high
+```
+
+Each finding becomes a Linear issue with:
+- Title: `[IMP-0001] <summary>`
+- Structured description with evidence, file refs, suggested diff
+- Priority mapped to Linear's priority levels (critical=1, high=2, medium=3, low=4)
+- Labels matching the finding kind (bug, security, etc.)
+
+### Linear → Ralphinho (consume tickets)
+
+When `--linear` is passed and no existing config is found, ralphinho automatically:
+
+1. Fetches the highest-priority ticket with the specified label (default: `ralph-approved`)
+2. Converts the ticket to RFC-like markdown
+3. Runs `init scheduled-work` with the generated RFC
+4. Executes the workflow
+5. Marks the ticket as done on success
+
+```bash
+# Consume one approved ticket and implement it
+ralphinho run --linear --team <team-id>
+
+# With a custom label filter
+ralphinho run --linear --team <team-id> --label ready-for-ai
+```
+
+### Environment
+
+```bash
+export ANTHROPIC_API_KEY=sk-...       # Required for AI decomposition
+export LINEAR_API_KEY=lin_api_...     # Required for --linear
+export LINEAR_TEAM_ID=<team-id>       # Optional — fallback for --team flag
+export LINEAR_LABEL=ralph-approved    # Optional — fallback for --label flag
+```
+
+With `LINEAR_TEAM_ID` set, you can skip `--team` on every invocation:
+
+```bash
+ralphinho run --linear    # uses LINEAR_TEAM_ID from env
+```
 
 ## How It Works
 
-### Quality Pipeline (per unit)
+### Ralphinho: Quality Pipeline (per work unit)
 
-Each work unit runs through a tier-based quality pipeline inside an isolated jj worktree:
+Each work unit runs through a tier-based pipeline inside an isolated jj worktree:
 
-| Tier | Stages | When to use |
-|------|--------|-------------|
-| **small** | implement → test → code-review → review-fix → final-review | Single-file changes, config tweaks, simple refactors |
-| **large** | research → plan → implement → test → prd-review + code-review → review-fix → final-review | Multi-file features, architectural changes |
+| Tier | Stages |
+|------|--------|
+| **small** | implement → test → code-review → review-fix → final-review |
+| **large** | research → plan → implement → test → prd-review + code-review → review-fix → final-review |
 
-The tier is assigned during RFC decomposition based on complexity assessment.
+After quality pipelines complete, the merge queue lands units onto main:
+1. Rebases onto main
+2. Runs CI checks
+3. Lands or evicts (eviction context feeds back into the next implementation pass)
 
-### Data Threading
+### Improvinho: Review Pipeline (per scope)
 
-Each stage reads prior outputs and feeds them forward:
+Each review scope runs through 3 parallel discovery lenses:
+- `refactor-hunter` — code smells, dead code, simplification
+- `type-system-purist` — type safety, contract violations
+- `app-logic-architecture` — architectural issues, cross-cutting concerns
 
-```
-research.contextFilePath → plan
-plan.implementationSteps → implement
-implement.{filesCreated, filesModified, whatWasDone} → test, reviews
-test.{buildPassed, failingSummary} → reviews, implement (next pass)
-reviews.{feedback, issues} → review-fix → implement (next pass)
-final-review.reasoning → implement (next pass)
-evictionContext → implement (after merge conflict)
-```
-
-### Merge Queue
-
-After quality pipelines complete for a layer, the merge queue:
-
-1. Detects file overlaps between units
-2. Lands non-overlapping units speculatively (parallel rebase)
-3. Lands overlapping units sequentially (rebase one at a time)
-4. Runs post-land CI after each rebase
-5. Evicts units with conflicts or test failures — detailed context is fed back to the implementer on the next pass
-
-All VCS operations use jj: `jj rebase`, `jj bookmark set`, `jj git push`.
+Findings are validated (pure code, no second LLM call), deduplicated across lenses and scopes, and projected into a single summary.
 
 ### DAG-Driven Parallelism
 
-Work units declare dependencies. `computeLayers()` produces topological groups:
+Work units declare dependencies. Topological sorting produces layers:
 
 ```
 Layer 0: [unit-a, unit-b]     ← no deps, run in parallel
@@ -131,97 +188,59 @@ Layer 1: [unit-c]             ← depends on unit-a
 Layer 2: [unit-d, unit-e]     ← depend on unit-c
 ```
 
-Layers execute sequentially; units within a layer execute in parallel (up to `maxConcurrency`).
-
-## Library Usage
-
-The components can be used directly in custom Smithers workflows:
-
-```tsx
-import { createSmithers } from "smithers-orchestrator";
-import { scheduledOutputSchemas } from "ralphinho/scheduled/schemas";
-import { ScheduledWorkflow } from "ralphinho/components";
-
-const { smithers, outputs, Workflow } = createSmithers(
-  scheduledOutputSchemas,
-  { dbPath: "./workflow.db" },
-);
-
-export default smithers((ctx) => (
-  <Workflow name="my-workflow" cache>
-    <ScheduledWorkflow
-      ctx={ctx}
-      outputs={outputs}
-      workPlan={workPlan}
-      repoRoot="/path/to/repo"
-      maxConcurrency={6}
-      agents={{
-        researcher:    claudeAgent,
-        planner:       opusAgent,
-        implementer:   codexAgent,
-        tester:        claudeAgent,
-        prdReviewer:   claudeAgent,
-        codeReviewer:  opusAgent,
-        reviewFixer:   codexAgent,
-        finalReviewer: opusAgent,
-        mergeQueue:    opusAgent,
-      }}
-    />
-  </Workflow>
-));
-```
-
-### Components
-
-| Component | Purpose |
-|-----------|---------|
-| `ScheduledWorkflow` | Main orchestrator — Ralph loop over DAG layers with pipelines + merge queue |
-| `QualityPipeline` | Per-unit pipeline in an isolated worktree (research → implement → test → review) |
-| `AgenticMergeQueue` | Lands completed units onto main, evicts on conflict |
-| `Monitor` | TUI for observing workflow progress |
-
-### Agent Configuration
-
-Agents are role-based. Each role accepts a single agent, an array fallback chain, or a primary agent plus `fallbackAgent` (Smithers v0.10+):
-
-```tsx
-agents={{
-  implementer: [primaryCodex, fallbackClaude],  // array = fallback chain
-  reviewer: claudeAgent,                         // single agent
-}}
-```
+Layers execute sequentially; units within a layer run in parallel (up to `maxConcurrency`).
 
 ## Project Structure
 
 ```
 src/
-├── cli/                        # ralphinho CLI
-│   ├── ralphinho.ts            # Entry point
-│   ├── init-scheduled.ts       # RFC decomposition + config
-│   ├── plan.ts                 # Re-generate work plan
-│   ├── run.ts                  # Execute workflow
-│   ├── render-scheduled-workflow.ts  # Generate workflow.tsx (~120 lines)
-│   ├── status.ts               # Show current state
-│   └── monitor-cmd.ts          # Attach TUI
-├── components/
-│   ├── ScheduledWorkflow.tsx    # Main orchestrator
-│   ├── QualityPipeline.tsx      # Per-unit quality pipeline
-│   ├── AgenticMergeQueue.tsx    # Conflict-aware merge queue
-│   └── Monitor.tsx              # TUI dashboard
-├── prompts/                     # MDX prompt templates
-│   ├── Research.mdx
-│   ├── Plan.mdx
-│   ├── Implement.mdx
-│   ├── Test.mdx
-│   ├── PrdReview.mdx
-│   ├── CodeReview.mdx
-│   ├── ReviewFix.mdx
-│   └── FinalReview.mdx
-└── scheduled/
-    ├── types.ts                 # WorkPlan, WorkUnit, SCHEDULED_TIERS, computeLayers
-    ├── schemas.ts               # Zod output schemas (12 tables)
-    └── decompose.ts             # AI RFC decomposition
+├── cli/                            # CLI entry points
+│   ├── ralphinho.ts                # Main entry point
+│   ├── init-scheduled.ts           # RFC decomposition + config
+│   ├── init-review.ts              # Review discovery init
+│   ├── plan.ts                     # Re-generate work plan
+│   ├── run.ts                      # Execute workflow (+ Linear wiring)
+│   ├── status.ts                   # Show current state
+│   ├── monitor-cmd.ts              # Attach TUI
+│   └── shared.ts                   # Arg parsing, env detection, utilities
+├── workflows/
+│   ├── ralphinho/                  # Scheduled-work workflow
+│   │   ├── components/             # ScheduledWorkflow, QualityPipeline, AgenticMergeQueue
+│   │   ├── workflow/               # contracts, decisions, state, snapshot
+│   │   ├── prompts/                # MDX templates (Research, Plan, Implement, etc.)
+│   │   ├── types.ts                # WorkPlan, WorkUnit, computeLayers
+│   │   ├── schemas.ts              # Zod output schemas
+│   │   ├── decompose.ts            # AI RFC decomposition
+│   │   └── preset.tsx              # Smithers preset entry point
+│   └── improvinho/                 # Review-discovery workflow
+│       ├── components/             # ReviewDiscoveryWorkflow, ReviewSlicePipeline
+│       ├── prompts/                # DiscoverIssues.mdx
+│       ├── types.ts                # ReviewFinding, ReviewPlan
+│       ├── schemas.ts              # Zod output schemas
+│       ├── projection.ts           # Merge + summary generation
+│       ├── lenses.ts               # Discovery lens definitions
+│       └── preset.tsx              # Smithers preset entry point
+├── adapters/
+│   └── linear/                     # Optional Linear integration
+│       ├── client.ts               # LinearClient singleton
+│       ├── useLinear.ts            # Core operations (Effect-based)
+│       ├── effect.ts               # Slim Effect interop layer
+│       ├── push-findings.ts        # Improvinho findings → Linear issues
+│       ├── consume-tickets.ts      # Linear tickets → RFC markdown
+│       ├── types.ts                # Serializable Linear types
+│       └── index.ts                # Barrel exports
+├── runtime/                        # Smithers launch, events, projections
+├── config/                         # Config schemas
+└── index.ts                        # Package exports
 ```
+
+## Further Documentation
+
+| Document | Scope |
+|----------|-------|
+| [CONCEPTS.md](CONCEPTS.md) | Infrastructure: Smithers engine, agent system, jj VCS, worktree isolation, tiers |
+| [IMPROVINHO.md](IMPROVINHO.md) | Improvinho review pipeline: scopes, lenses, finding model, projection |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Architecture index |
 
 ## License
 

@@ -22,6 +22,7 @@ function printHelp() {
 Usage:
   ralphinho init ./rfc-003.md
   ralphinho init review "Review src/api/auth for bugs and security issues" --paths src/api/auth
+  ralphinho init review "Review packages/app logic" --paths packages/app --agent sonnet
 
   ralphinho plan                             (Re)generate work plan from RFC
   ralphinho run                              Execute the initialized workflow
@@ -36,16 +37,28 @@ Global Options:
   --force                     Skip prompts and attempt resume
   --help                      Show this help
 
+Linear Integration:
+  --linear                    Enable Linear integration (requires LINEAR_API_KEY)
+  --team <id>                 Linear team ID (required with --linear)
+  --label <name>              Linear label filter (default: "ralph-approved")
+  --min-priority <level>      Minimum priority to push (critical|high|medium|low)
+
 Init Options:
   --dry-run                   Generate work plan but don't execute
+  --agent <sonnet|opus|codex> Review mode only: override all review lens agents
 
 Examples:
   ralphinho init ./docs/rfc-003.md
   ralphinho init review "Review the cache layer" --paths src/cache src/lib/cache.ts
+  ralphinho init review "Review packages/app logic" --paths packages/app --agent codex
   ralphinho plan
   ralphinho run
   ralphinho run --force
   ralphinho run --resume sw-m3abc12-deadbeef
+
+  # Linear integration
+  ralphinho run --linear --team <team-id>              # improvinho: push findings to Linear
+  ralphinho run --linear --team <team-id> --label approved   # ralphinho: consume from Linear
 `);
 }
 

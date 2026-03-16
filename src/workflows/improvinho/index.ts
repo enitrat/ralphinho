@@ -33,5 +33,5 @@ export { reviewOutputSchemas } from "./schemas";
 
 // Domain logic
 export { buildReviewPlan } from "./plan";
-export { mergeReviewFindings, projectReviewSummaryFromDb, resolveLatestReviewRunId } from "./projection";
+export { mergeReviewFindings, loadMergedFindingsFromDb, projectReviewSummaryFromDb, resolveLatestReviewRunId } from "./projection";
 export type { MergedReviewFinding } from "./projection";

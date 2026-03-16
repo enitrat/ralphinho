@@ -6,3 +6,7 @@ dist/
 *.db-shm
 *.db-wal
 .super-ralph/
+.ralphinho/
+.env
+.env.local
+.env.*.local

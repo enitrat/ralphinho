@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import { ralphSourceRoot, runningFromSource } from "../cli/shared";
 
@@ -39,11 +39,8 @@ function normalizeEnv(env: NodeJS.ProcessEnv): Record<string, string> {
   return normalized;
 }
 
-export function findSmithersEntrypoint(fromDir?: string): string | null {
-  const require = createRequire(fromDir ?? import.meta.url);
-
+function resolveSmithersBinFromPackage(pkgPath: string): string | null {
   try {
-    const pkgPath = require.resolve("smithers-orchestrator/package.json");
     const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as {
       bin?: string | Record<string, string>;
     };
@@ -53,6 +50,27 @@ export function findSmithersEntrypoint(fromDir?: string): string | null {
     if (!smithersBin) return null;
 
     return join(dirname(pkgPath), smithersBin);
+  } catch {
+    return null;
+  }
+}
+
+export function findSmithersEntrypoint(fromDir?: string): string | null {
+  // 1. Check SMITHERS_SOURCE_ROOT env var (local checkout, no install needed)
+  const sourceRoot = process.env.SMITHERS_SOURCE_ROOT;
+  if (sourceRoot) {
+    const pkgPath = join(resolve(sourceRoot), "package.json");
+    if (existsSync(pkgPath)) {
+      const result = resolveSmithersBinFromPackage(pkgPath);
+      if (result) return result;
+    }
+  }
+
+  // 2. Standard module resolution from the target repo
+  const require = createRequire(fromDir ?? import.meta.url);
+  try {
+    const pkgPath = require.resolve("smithers-orchestrator/package.json");
+    return resolveSmithersBinFromPackage(pkgPath);
   } catch {
     return null;
   }

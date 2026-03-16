@@ -6,6 +6,12 @@ const agentAvailabilitySchema = z.object({
   gh: z.boolean(),
 });
 
+export const reviewAgentOverrideSchema = z.enum([
+  "sonnet",
+  "opus",
+  "codex",
+]);
+
 const baseConfigSchema = z.object({
   repoRoot: z.string(),
   agents: agentAvailabilitySchema,
@@ -24,6 +30,7 @@ export const reviewDiscoveryConfigSchema = baseConfigSchema.extend({
   reviewInstruction: z.string(),
   reviewInstructionSource: z.string().nullable(),
   reviewPaths: z.array(z.string()),
+  reviewAgentOverride: reviewAgentOverrideSchema.nullable(),
 });
 
 export const ralphinhoConfigSchema = z.discriminatedUnion("mode", [
@@ -35,3 +42,4 @@ export type AgentAvailability = z.infer<typeof agentAvailabilitySchema>;
 export type ScheduledWorkConfig = z.infer<typeof scheduledWorkConfigSchema>;
 export type ReviewDiscoveryConfig = z.infer<typeof reviewDiscoveryConfigSchema>;
 export type RalphinhoConfig = z.infer<typeof ralphinhoConfigSchema>;
+export type ReviewAgentOverride = z.infer<typeof reviewAgentOverrideSchema>;
