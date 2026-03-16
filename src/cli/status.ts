@@ -7,7 +7,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { getRalphDir, getRalphinhoPresetPath } from "./shared";
-import { ralphinhoConfigSchema } from "../scheduled/types";
+import { ralphinhoConfigSchema } from "../config/types";
 
 export async function runStatus(opts: { repoRoot: string }): Promise<void> {
   const { repoRoot } = opts;
@@ -41,33 +41,68 @@ export async function runStatus(opts: { repoRoot: string }): Promise<void> {
     } else {
       console.log("  Work plan: not generated yet");
     }
+  } else {
+    const planPath = join(ralphDir, "review-plan.json");
+    if (existsSync(planPath)) {
+      const plan = JSON.parse(await readFile(planPath, "utf8"));
+      console.log(`  Instruction: ${config.reviewInstruction}`);
+      console.log(`  Review slices: ${plan.slices?.length ?? 0}`);
+    } else {
+      console.log("  Review plan: not generated yet");
+    }
   }
 
   const dbPath = join(ralphDir, "workflow.db");
-  const workflowPath = getRalphinhoPresetPath();
+  const workflowPath = getRalphinhoPresetPath(config.mode);
   if (existsSync(dbPath)) {
     console.log("  Database: exists");
     try {
       const { Database } = await import("bun:sqlite");
       const db = new Database(dbPath, { readonly: true });
-      const row = db.query(
-        "SELECT total_units, units_landed, units_semantically_complete, summary FROM completion_report ORDER BY iteration DESC LIMIT 1",
-      ).get() as {
-        total_units?: number;
-        units_landed?: string | null;
-        units_semantically_complete?: string | null;
-        summary?: string | null;
-      } | undefined;
-      db.close();
+      if (config.mode === "scheduled-work") {
+        const row = db.query(
+          "SELECT total_units, units_landed, units_semantically_complete, summary FROM completion_report ORDER BY iteration DESC LIMIT 1",
+        ).get() as {
+          total_units?: number;
+          units_landed?: string | null;
+          units_semantically_complete?: string | null;
+          summary?: string | null;
+        } | undefined;
+        db.close();
 
-      if (row) {
-        const landed = typeof row.units_landed === "string" ? JSON.parse(row.units_landed) as string[] : [];
-        const semanticallyComplete = typeof row.units_semantically_complete === "string"
-          ? JSON.parse(row.units_semantically_complete) as string[]
-          : [];
-        console.log(`  Landed: ${landed.length}/${row.total_units ?? landed.length}`);
-        console.log(`  Semantically complete: ${semanticallyComplete.length}/${row.total_units ?? semanticallyComplete.length}`);
-        if (row.summary) console.log(`  Summary: ${row.summary}`);
+        if (row) {
+          const landed = typeof row.units_landed === "string" ? JSON.parse(row.units_landed) as string[] : [];
+          const semanticallyComplete = typeof row.units_semantically_complete === "string"
+            ? JSON.parse(row.units_semantically_complete) as string[]
+            : [];
+          console.log(`  Landed: ${landed.length}/${row.total_units ?? landed.length}`);
+          console.log(`  Semantically complete: ${semanticallyComplete.length}/${row.total_units ?? semanticallyComplete.length}`);
+          if (row.summary) console.log(`  Summary: ${row.summary}`);
+        }
+      } else {
+        const row = db.query(
+          "SELECT total_slices, slices_complete, slices_remaining, total_confirmed_tickets, summary FROM completion_report ORDER BY iteration DESC LIMIT 1",
+        ).get() as {
+          total_slices?: number;
+          slices_complete?: string | null;
+          slices_remaining?: string | null;
+          total_confirmed_tickets?: number;
+          summary?: string | null;
+        } | undefined;
+        db.close();
+
+        if (row) {
+          const slicesComplete = typeof row.slices_complete === "string"
+            ? JSON.parse(row.slices_complete) as string[]
+            : [];
+          const slicesRemaining = typeof row.slices_remaining === "string"
+            ? JSON.parse(row.slices_remaining) as string[]
+            : [];
+          console.log(`  Slices complete: ${slicesComplete.length}/${row.total_slices ?? slicesComplete.length}`);
+          console.log(`  Slices remaining: ${slicesRemaining.length}`);
+          console.log(`  Confirmed tickets: ${row.total_confirmed_tickets ?? 0}`);
+          if (row.summary) console.log(`  Summary: ${row.summary}`);
+        }
       }
     } catch {
       // Status should still render even when completion_report is absent.

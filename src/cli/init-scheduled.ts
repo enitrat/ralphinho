@@ -22,7 +22,7 @@ import {
   type ParsedArgs,
 } from "./shared";
 import { decomposeRFC, printPlanSummary } from "../scheduled/decompose";
-import type { RalphinhoConfig } from "../scheduled/types";
+import type { ScheduledWorkConfig } from "../config/types";
 
 export async function initScheduledWork(opts: {
   positional: string[];
@@ -105,7 +105,7 @@ export async function initScheduledWork(opts: {
       : await detectCurrentBranch(repoRoot);
   console.log(`  Base branch: ${baseBranch}`);
 
-  const config: RalphinhoConfig = {
+  const config: ScheduledWorkConfig = {
     mode: "scheduled-work",
     repoRoot,
     rfcPath,

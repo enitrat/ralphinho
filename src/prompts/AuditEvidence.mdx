@@ -1,0 +1,65 @@
+EVIDENCE AUDIT — Review Slice: {props.sliceId}
+
+Instruction: {props.instruction}
+Slice path: {props.slicePath}
+Pass: {props.passNumber}
+
+## Focus Areas
+
+{props.focusAreas && props.focusAreas.length > 0
+  ? props.focusAreas.map((entry) => `- ${entry}`).join('\n')
+  : '- bugs\n- simplification\n- architecture'}
+
+{props.discoverySummary ? `## Discovery Summary\n\n${props.discoverySummary}\n` : ''}
+
+## Candidate Issues
+
+{props.candidates && props.candidates.length > 0
+  ? props.candidates.map((candidate, index) => [
+      `${index + 1}. ${candidate.summary}`,
+      `   - kind: ${candidate.kind}`,
+      `   - priority: ${candidate.priority}`,
+      `   - confidence: ${candidate.confidence}`,
+      `   - dedupeKey: ${candidate.dedupeKey}`,
+      `   - primaryFile: ${candidate.primaryFile}`,
+      `   - lineRefs: ${candidate.lineRefs.join(', ')}`,
+      `   - whyItMayMatter: ${candidate.whyItMayMatter}`,
+    ].join('\n')).join('\n')
+  : 'No discovery candidates were produced.'}
+
+## Task
+
+Audit every candidate and either confirm it or reject it.
+
+Required fields for each audited item:
+- `candidateId`
+- `dedupeKey`
+- `kind`
+- `priority`
+- `confidence`
+- `confirmed`
+- `summary`
+- `whyItMatters`
+- `evidence`
+- `lineRefs`
+- `reproOrTrace`
+- `alternatives`
+- `quickTriage`
+- `acceptIf`
+- `dismissIf`
+- `rejectionReason`
+- `primaryFile`
+
+## Evidence Contract
+
+- Bug: include preconditions, trigger path, expected vs actual behavior, and either a precise trace or a minimal repro.
+- Security: include threat, abuse path, attacker capability, and impact.
+- Simplification: explain why the current shape is costly and give at least two high-level alternatives.
+- Architecture: explain the boundary/coupling failure and give at least two alternatives with tradeoffs.
+- Test-gap: name the missing invariant and the smallest test shape that would catch it.
+
+## Output Rules
+
+- Reject low-signal or duplicate candidates explicitly with `confirmed: false` and a `rejectionReason`.
+- Use `null` instead of omitted fields when a field does not apply.
+- Keep `quickTriage`, `acceptIf`, and `dismissIf` optimized for fast human review.

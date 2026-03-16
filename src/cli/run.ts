@@ -16,11 +16,15 @@ import {
   promptChoice,
   type ParsedArgs,
 } from "./shared";
+import { ralphinhoConfigSchema } from "../config/types";
 import {
   launchSmithers,
   resolveSmithersCliPath,
 } from "../runtime/smithers-launch";
-import { ralphinhoConfigSchema, type RalphinhoConfig } from "../scheduled/types";
+import {
+  projectReviewTicketsFromDb,
+  resolveLatestReviewRunId,
+} from "../review/projection";
 
 export async function runWorkflow(opts: {
   flags: ParsedArgs["flags"];
@@ -42,7 +46,7 @@ export async function runWorkflow(opts: {
     process.exit(1);
   }
 
-  const config: RalphinhoConfig = ralphinhoConfigSchema.parse(
+  const config = ralphinhoConfigSchema.parse(
     JSON.parse(await readFile(configPath, "utf8")),
   );
 
@@ -61,17 +65,20 @@ export async function runWorkflow(opts: {
       : config.maxConcurrency;
 
   // ── Execute scheduled work ──────────────────────────────────────────
-  const planPath = join(ralphDir, "work-plan.json");
+  const planFileName = config.mode === "review-discovery"
+    ? "review-plan.json"
+    : "work-plan.json";
+  const planPath = join(ralphDir, planFileName);
   if (!existsSync(planPath)) {
     console.error(
-      "Error: No work plan found. Run `ralphinho plan` or `ralphinho init` first.",
+      `Error: No ${planFileName} found. Run \`ralphinho plan\` or \`ralphinho init\` first.`,
     );
     process.exit(1);
   }
 
   const dbPath = join(ralphDir, "workflow.db");
-  const workflowPath = getRalphinhoPresetPath();
-  const envOverrides = buildPresetEnv(ralphDir, dbPath);
+  const workflowPath = getRalphinhoPresetPath(config.mode);
+  const envOverrides = buildPresetEnv(ralphDir, dbPath, planPath);
 
   if (!existsSync(workflowPath)) {
     console.error(
@@ -91,13 +98,14 @@ export async function runWorkflow(opts: {
     return launchAndReport({
       mode: "resume",
       workflowPath,
-      repoRoot,
       runId: resumeRunId,
       maxConcurrency,
       smithersCliPath,
       envOverrides,
-      label: "Scheduled Work (resume)",
+      label: config.mode === "review-discovery" ? "Review Discovery (resume)" : "Scheduled Work (resume)",
       force,
+      repoRoot,
+      configMode: config.mode,
     });
   }
 
@@ -109,12 +117,13 @@ export async function runWorkflow(opts: {
       return launchAndReport({
         mode: "resume",
         workflowPath,
-        repoRoot,
         maxConcurrency,
         smithersCliPath,
         envOverrides,
-        label: "Scheduled Work (resume --force)",
+        label: config.mode === "review-discovery" ? "Review Discovery (resume --force)" : "Scheduled Work (resume --force)",
         force,
+        repoRoot,
+        configMode: config.mode,
       });
     }
 
@@ -128,11 +137,12 @@ export async function runWorkflow(opts: {
       return launchAndReport({
         mode: "resume",
         workflowPath,
-        repoRoot,
         maxConcurrency,
         smithersCliPath,
         envOverrides,
-        label: "Scheduled Work (resume)",
+        label: config.mode === "review-discovery" ? "Review Discovery (resume)" : "Scheduled Work (resume)",
+        repoRoot,
+        configMode: config.mode,
       });
     }
     if (choice === 2) {
@@ -145,15 +155,23 @@ export async function runWorkflow(opts: {
   const plan = JSON.parse(await readFile(planPath, "utf8"));
   const unitCount = plan.units?.length ?? 0;
 
-  console.log(`\n🚀 ralphinho — Scheduled Work\n`);
-  console.log(`  RFC: ${config.rfcPath}`);
-  console.log(`  Work units: ${unitCount}`);
+  console.log(`\n🚀 ralphinho — ${config.mode === "review-discovery" ? "Review Discovery" : "Scheduled Work"}\n`);
+  if (config.mode === "scheduled-work") {
+    console.log(`  RFC: ${config.rfcPath}`);
+    console.log(`  Work units: ${unitCount}`);
+  } else {
+    const reviewPlan = JSON.parse(await readFile(planPath, "utf8"));
+    console.log(`  Instruction: ${config.reviewInstruction}`);
+    console.log(`  Review slices: ${reviewPlan.slices?.length ?? 0}`);
+  }
   console.log(`  Max concurrency: ${maxConcurrency}`);
   console.log(`  Agents: claude=${config.agents.claude} codex=${config.agents.codex}\n`);
 
   if (!force) {
     const confirmChoice = await promptChoice(
-      `Execute ${unitCount} work units?`,
+      config.mode === "review-discovery"
+        ? "Execute review discovery workflow?"
+        : `Execute ${unitCount} work units?`,
       ["Yes, start", "No, cancel"],
     );
     if (confirmChoice !== 0) {
@@ -162,18 +180,19 @@ export async function runWorkflow(opts: {
     }
   }
 
-  const runId = `sw-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+  const runId = `${config.mode === "review-discovery" ? "rv" : "sw"}-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
 
   return launchAndReport({
     mode: "run",
     workflowPath,
-    repoRoot,
     runId,
     maxConcurrency,
     smithersCliPath,
     envOverrides,
-    label: "Scheduled Work",
+    label: config.mode === "review-discovery" ? "Review Discovery" : "Scheduled Work",
     force,
+    repoRoot,
+    configMode: config.mode,
   });
 }
 
@@ -189,8 +208,9 @@ async function launchAndReport(opts: {
   envOverrides?: Record<string, string>;
   label: string;
   force?: boolean;
+  configMode: "scheduled-work" | "review-discovery";
 }): Promise<void> {
-  const { label, ...launchOpts } = opts;
+  const { label, configMode: _configMode, ...launchOpts } = opts;
 
   console.log(`🎬 ${label} — Starting execution...`);
   if (launchOpts.runId) {
@@ -199,6 +219,11 @@ async function launchAndReport(opts: {
   console.log();
 
   const exitCode = await launchSmithers(launchOpts);
+
+  if (exitCode === 0 && opts.configMode === "review-discovery") {
+    await projectReviewArtifacts(opts.repoRoot);
+  }
+
   reportExit(exitCode, label);
 }
 
@@ -214,11 +239,28 @@ function reportExit(exitCode: number, label: string): void {
 function buildPresetEnv(
   ralphDir: string,
   dbPath: string,
+  planPath: string,
 ): Record<string, string> {
   return {
     RALPHINHO_DIR: ralphDir,
     RALPHINHO_CONFIG_PATH: join(ralphDir, "config.json"),
-    RALPHINHO_PLAN_PATH: join(ralphDir, "work-plan.json"),
+    RALPHINHO_PLAN_PATH: planPath,
     RALPHINHO_DB_PATH: dbPath,
   };
+}
+
+async function projectReviewArtifacts(repoRoot: string): Promise<void> {
+  const dbPath = join(getRalphDir(repoRoot), "workflow.db");
+  if (!existsSync(dbPath)) return;
+
+  const Database = (await import("better-sqlite3")).default;
+  const db = new Database(dbPath, { readonly: true });
+
+  try {
+    const runId = resolveLatestReviewRunId(db);
+    if (!runId) return;
+    await projectReviewTicketsFromDb({ repoRoot, db, runId });
+  } finally {
+    db.close();
+  }
 }

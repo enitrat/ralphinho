@@ -15,8 +15,14 @@ export const runningFromSource = existsSync(
   join(ralphSourceRoot, "src/components/ScheduledWorkflow.tsx"),
 );
 
-export function getRalphinhoPresetPath(): string {
-  return join(ralphSourceRoot, "src", "preset.tsx");
+export function getRalphinhoPresetPath(
+  mode: "scheduled-work" | "review-discovery" = "scheduled-work",
+): string {
+  return join(
+    ralphSourceRoot,
+    "src",
+    mode === "review-discovery" ? "review-preset.tsx" : "preset.tsx",
+  );
 }
 
 // ── Arg parsing ───────────────────────────────────────────────────────

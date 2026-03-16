@@ -6,6 +6,8 @@
  */
 
 import { z } from "zod";
+export { ralphinhoConfigSchema } from "../config/types";
+export type { RalphinhoConfig } from "../config/types";
 
 // ── Work Unit ─────────────────────────────────────────────────────────
 
@@ -46,31 +48,6 @@ export const workPlanSchema = z.object({
 });
 
 export type WorkPlan = z.infer<typeof workPlanSchema>;
-
-// ── Ralphinho Config ──────────────────────────────────────────────────
-
-export const ralphinhoConfigSchema = z.object({
-  /** Workflow mode */
-  mode: z.literal("scheduled-work"),
-  /** Absolute path to repo root */
-  repoRoot: z.string(),
-  /** For scheduled-work: path to the source RFC file */
-  rfcPath: z.string(),
-  /** Detected agents */
-  agents: z.object({
-    claude: z.boolean(),
-    codex: z.boolean(),
-    gh: z.boolean(),
-  }),
-  /** Max concurrency for parallel work units */
-  maxConcurrency: z.number(),
-  /** Branch that units land onto (default: "main") */
-  baseBranch: z.string().default("main"),
-  /** When this config was created */
-  createdAt: z.string(),
-});
-
-export type RalphinhoConfig = z.infer<typeof ralphinhoConfigSchema>;
 
 // ── Tier Pipeline Stages ──────────────────────────────────────────────
 

@@ -9,9 +9,15 @@ import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { getRalphDir, scanRepo, type ParsedArgs } from "./shared";
+import {
+  getRalphDir,
+  readPromptInput,
+  scanRepo,
+  type ParsedArgs,
+} from "./shared";
+import { ralphinhoConfigSchema } from "../config/types";
 import { decomposeRFC, printPlanSummary } from "../scheduled/decompose";
-import { ralphinhoConfigSchema, type RalphinhoConfig } from "../scheduled/types";
+import { buildReviewPlan } from "../review/plan";
 
 export async function runPlan(opts: {
   flags: ParsedArgs["flags"];
@@ -28,36 +34,53 @@ export async function runPlan(opts: {
     process.exit(1);
   }
 
-  const config: RalphinhoConfig = ralphinhoConfigSchema.parse(
+  const config = ralphinhoConfigSchema.parse(
     JSON.parse(await readFile(configPath, "utf8")),
   );
 
-  if (config.mode !== "scheduled-work") {
-    console.error(
-      "Error: `ralphinho plan` only works in scheduled-work mode.",
-    );
-    process.exit(1);
+  if (config.mode === "scheduled-work") {
+    if (!config.rfcPath || !existsSync(config.rfcPath)) {
+      console.error(`Error: RFC file not found: ${config.rfcPath}`);
+      process.exit(1);
+    }
+
+    console.log("🗂️  ralphinho plan — Regenerating work plan\n");
+    console.log(`  RFC: ${config.rfcPath}`);
+
+    const rfcContent = await readFile(config.rfcPath, "utf8");
+    const repoConfig = await scanRepo(repoRoot);
+
+    const { plan, layers } = await decomposeRFC(rfcContent, repoConfig);
+    plan.source = config.rfcPath;
+
+    printPlanSummary(plan, layers);
+
+    const planPath = join(ralphDir, "work-plan.json");
+    await writeFile(planPath, JSON.stringify(plan, null, 2) + "\n", "utf8");
+
+    console.log(`  Updated: ${planPath}`);
+    console.log();
+    return;
   }
 
-  if (!config.rfcPath || !existsSync(config.rfcPath)) {
-    console.error(`Error: RFC file not found: ${config.rfcPath}`);
-    process.exit(1);
-  }
-
-  console.log("🗂️  ralphinho plan — Regenerating work plan\n");
-  console.log(`  RFC: ${config.rfcPath}`);
-
-  const rfcContent = await readFile(config.rfcPath, "utf8");
+  console.log("🔎 ralphinho plan — Regenerating review plan\n");
+  const { promptText, promptSourcePath } = await readPromptInput(
+    config.reviewInstructionSource ?? config.reviewInstruction,
+    repoRoot,
+  );
   const repoConfig = await scanRepo(repoRoot);
+  const plan = await buildReviewPlan({
+    repoRoot,
+    instruction: promptText,
+    promptSourcePath,
+    explicitPaths: config.reviewPaths,
+    repoConfig,
+  });
 
-  const { plan, layers } = await decomposeRFC(rfcContent, repoConfig);
-  plan.source = config.rfcPath;
-
-  printPlanSummary(plan, layers);
-
-  const planPath = join(ralphDir, "work-plan.json");
+  const planPath = join(ralphDir, "review-plan.json");
   await writeFile(planPath, JSON.stringify(plan, null, 2) + "\n", "utf8");
 
   console.log(`  Updated: ${planPath}`);
+  console.log(`  Slices: ${plan.slices.length}`);
   console.log();
 }

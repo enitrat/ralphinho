@@ -13,6 +13,7 @@
 export {
   QualityPipeline,
   ScheduledWorkflow,
+  ReviewDiscoveryWorkflow,
   AgenticMergeQueue,
   mergeQueueResultSchema,
   Monitor,
@@ -25,6 +26,7 @@ export type {
   DepSummary,
   ScheduledWorkflowProps,
   ScheduledWorkflowAgents,
+  ReviewDiscoveryWorkflowProps,
   AgenticMergeQueueProps,
   AgenticMergeQueueTicket,
   MergeQueueResult,
@@ -51,3 +53,28 @@ export type {
 
 // Schemas
 export { scheduledOutputSchemas } from "./scheduled/schemas";
+
+// Review discovery types and schemas
+export {
+  reviewPlanSchema,
+  reviewSliceSchema,
+  reviewKindSchema,
+  reviewPrioritySchema,
+  reviewConfidenceSchema,
+  candidateIssueSchema,
+  auditedIssueSchema,
+  reviewTicketSchema,
+} from "./review/types";
+
+export type {
+  ReviewPlan,
+  ReviewSlice,
+  ReviewKind,
+  ReviewPriority,
+  ReviewConfidence,
+  CandidateIssue,
+  AuditedIssue,
+  ReviewTicket,
+} from "./review/types";
+
+export { reviewOutputSchemas } from "./review/schemas";

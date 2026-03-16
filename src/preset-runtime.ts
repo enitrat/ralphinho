@@ -2,11 +2,18 @@ import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import {
-  ralphinhoConfigSchema,
   workPlanSchema,
-  type RalphinhoConfig,
   type WorkPlan,
 } from "./scheduled/types";
+import {
+  ralphinhoConfigSchema,
+  reviewDiscoveryConfigSchema,
+  scheduledWorkConfigSchema,
+  type RalphinhoConfig,
+  type ReviewDiscoveryConfig,
+  type ScheduledWorkConfig,
+} from "./config/types";
+import { reviewPlanSchema, type ReviewPlan } from "./review/types";
 
 export type ScheduledPresetPaths = {
   ralphDir: string;
@@ -49,11 +56,11 @@ function loadJsonFile<T>(path: string, label: string): T {
 
 export function loadScheduledPreset(env: NodeJS.ProcessEnv = process.env): {
   paths: ScheduledPresetPaths;
-  config: RalphinhoConfig;
+  config: ScheduledWorkConfig;
   workPlan: WorkPlan;
 } {
   const paths = resolveScheduledPresetPaths(env);
-  const config = ralphinhoConfigSchema.parse(
+  const config = scheduledWorkConfigSchema.parse(
     loadJsonFile<RalphinhoConfig>(paths.configPath, "ralphinho config"),
   );
   const workPlan = workPlanSchema.parse(
@@ -64,5 +71,25 @@ export function loadScheduledPreset(env: NodeJS.ProcessEnv = process.env): {
     paths,
     config,
     workPlan,
+  };
+}
+
+export function loadReviewPreset(env: NodeJS.ProcessEnv = process.env): {
+  paths: ScheduledPresetPaths;
+  config: ReviewDiscoveryConfig;
+  reviewPlan: ReviewPlan;
+} {
+  const paths = resolveScheduledPresetPaths(env);
+  const config = reviewDiscoveryConfigSchema.parse(
+    loadJsonFile<RalphinhoConfig>(paths.configPath, "ralphinho config"),
+  );
+  const reviewPlan = reviewPlanSchema.parse(
+    loadJsonFile<ReviewPlan>(paths.planPath, "review plan"),
+  );
+
+  return {
+    paths,
+    config,
+    reviewPlan,
   };
 }

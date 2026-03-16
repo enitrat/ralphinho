@@ -4,6 +4,9 @@ export type { QualityPipelineProps, QualityPipelineAgents, QualityPipelineFallba
 export { ScheduledWorkflow } from "./ScheduledWorkflow";
 export type { ScheduledWorkflowProps, ScheduledWorkflowAgents } from "./ScheduledWorkflow";
 
+export { ReviewDiscoveryWorkflow } from "./ReviewDiscoveryWorkflow";
+export type { ReviewDiscoveryWorkflowProps } from "./ReviewDiscoveryWorkflow";
+
 export { AgenticMergeQueue, mergeQueueResultSchema } from "./AgenticMergeQueue";
 export type { AgenticMergeQueueProps, AgenticMergeQueueTicket, MergeQueueResult } from "./AgenticMergeQueue";
 

@@ -7,7 +7,7 @@ import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 
 import { getRalphDir, type ParsedArgs } from "./shared";
-import { ralphinhoConfigSchema } from "../scheduled/types";
+import { ralphinhoConfigSchema } from "../config/types";
 
 export async function runMonitor(opts: {
   flags: ParsedArgs["flags"];
@@ -45,6 +45,11 @@ export async function runMonitor(opts: {
   }
 
   const projectName = basename(repoRoot);
+  if (config.mode === "review-discovery") {
+    console.error("Error: review-discovery monitor UI is not implemented yet.");
+    process.exit(1);
+  }
+
   const prompt = config.rfcPath ?? "";
 
   console.log(`Launching monitor for run ${runId}...\n`);

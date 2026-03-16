@@ -3,7 +3,8 @@
  * ralphinho — RFC-driven AI development workflow CLI
  *
  * Commands:
- *   ralphinho init ./rfc.md            Initialize workflow from RFC
+ *   ralphinho init ./rfc.md            Initialize scheduled-work from RFC
+ *   ralphinho init review "<prompt>"   Initialize review-discovery mode
  *   ralphinho plan                     (Re)generate work plan from RFC
  *   ralphinho run                      Execute the initialized workflow
  *   ralphinho run --resume <run-id>    Resume a previous run
@@ -20,6 +21,7 @@ function printHelp() {
 
 Usage:
   ralphinho init ./rfc-003.md
+  ralphinho init review "Review src/api/auth for bugs and security issues" --paths src/api/auth
 
   ralphinho plan                             (Re)generate work plan from RFC
   ralphinho run                              Execute the initialized workflow
@@ -39,6 +41,7 @@ Init Options:
 
 Examples:
   ralphinho init ./docs/rfc-003.md
+  ralphinho init review "Review the cache layer" --paths src/cache src/lib/cache.ts
   ralphinho plan
   ralphinho run
   ralphinho run --force
@@ -64,6 +67,26 @@ async function main() {
 
   switch (command) {
     case "init": {
+      const initMode = parsed.positional[1];
+
+      if (initMode === "review") {
+        const { initReviewDiscovery } = await import("./init-review");
+        return initReviewDiscovery({
+          positional: parsed.positional.slice(2),
+          flags: parsed.flags,
+          repoRoot,
+        });
+      }
+
+      if (initMode === "scheduled-work") {
+        const { initScheduledWork } = await import("./init-scheduled");
+        return initScheduledWork({
+          positional: parsed.positional.slice(2),
+          flags: parsed.flags,
+          repoRoot,
+        });
+      }
+
       const { initScheduledWork } = await import("./init-scheduled");
       return initScheduledWork({
         positional: parsed.positional.slice(1),
