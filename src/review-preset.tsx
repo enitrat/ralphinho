@@ -4,7 +4,6 @@ import {
   ClaudeCodeAgent,
   CodexAgent,
   createSmithers,
-  type AgentLike,
 } from "smithers-orchestrator";
 
 import { loadReviewPreset } from "./preset-runtime";
@@ -19,8 +18,6 @@ const { paths, config, reviewPlan } = loadReviewPreset();
 const REPO_ROOT = config.repoRoot;
 const MAX_CONCURRENCY = config.maxConcurrency;
 const MAX_PASSES = 3;
-const HAS_CLAUDE = config.agents.claude;
-const HAS_CODEX = config.agents.codex;
 
 const WORKSPACE_POLICY = `
 ## WORKSPACE POLICY
@@ -49,39 +46,32 @@ function createClaude(role: string, model = "claude-sonnet-4-6") {
   });
 }
 
-function createCodex(role: string) {
+function createCodex(role: string, model = "gpt-5.4-codex", reasoningEffort?: string) {
   return new CodexAgent({
-    model: "gpt-5.3-codex",
+    model,
     systemPrompt: buildSystemPrompt(role),
     cwd: REPO_ROOT,
     yolo: true,
     timeoutMs: 60 * 60 * 1000,
     idleTimeoutMs: 5 * 60 * 1000,
+    ...(reasoningEffort && {
+      config: {
+        model_reasoning_effort: reasoningEffort,
+      },
+    }),
   });
 }
 
-function chooseAgent(
-  primary: "claude" | "codex" | "opus",
-  role: string,
-): AgentLike | AgentLike[] {
-  const claude = (model?: string) => createClaude(role, model ?? "claude-sonnet-4-6");
-  const codex = () => createCodex(role);
-
-  if (primary === "opus" && HAS_CLAUDE) {
-    return HAS_CODEX ? [claude("claude-opus-4-6"), codex()] : claude("claude-opus-4-6");
-  }
-  if (primary === "claude" && HAS_CLAUDE) {
-    return HAS_CODEX ? [claude(), codex()] : claude();
-  }
-  if (primary === "codex" && HAS_CODEX) {
-    return HAS_CLAUDE ? [codex(), claude()] : codex();
-  }
-  return HAS_CLAUDE ? claude() : codex();
-}
-
 const agents: ReviewDiscoveryWorkflowProps["agents"] = {
-  discoverer: chooseAgent("claude", "Review Discoverer — Find concrete candidate issues inside one bounded code slice"),
-  auditor: chooseAgent("opus", "Evidence Auditor — Confirm or reject review findings with strict evidence requirements"),
+  discoverer: createCodex(
+    "Review Discoverer — Find concrete candidate issues inside one bounded code slice",
+    "gpt-5.4",
+    "medium",
+  ),
+  auditor: createClaude(
+    "Evidence Auditor — Confirm or reject review findings with strict evidence requirements",
+    "claude-opus-4-6",
+  ),
 };
 
 const { smithers, outputs, Workflow } = createSmithers(
