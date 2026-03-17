@@ -73,6 +73,13 @@ function mergeQueueRows(snapshot: OutputSnapshot): MergeQueueRow[] {
   return snapshot.mergeQueueRows.filter((row) => row.nodeId === MERGE_QUEUE_NODE_ID);
 }
 
+function isTicketLandedInMergeQueueRows(rows: MergeQueueRow[], unitId: string): boolean {
+  return rows.some(
+    (row) => row.nodeId === MERGE_QUEUE_NODE_ID
+      && row.ticketsLanded.some((ticket) => ticket.ticketId === unitId),
+  );
+}
+
 export function isUnitLanded(snapshot: OutputSnapshot, unitId: string): boolean {
   return snapshot.isUnitLanded(unitId);
 }
@@ -147,11 +154,7 @@ export function buildOutputSnapshot(input: SnapshotInput): OutputSnapshot {
     finalReviewHistory: (id) => finalReviewByUnit.get(id) ?? [],
     implementHistory: (id) => implementByUnit.get(id) ?? [],
     reviewFixHistory: (id) => reviewFixByUnit.get(id) ?? [],
-    isUnitLanded: (id) =>
-      input.mergeQueueRows.some(
-        (row) => row.nodeId === MERGE_QUEUE_NODE_ID
-          && row.ticketsLanded.some((ticket) => ticket.ticketId === id),
-      ),
+    isUnitLanded: (id) => isTicketLandedInMergeQueueRows(input.mergeQueueRows, id),
   };
 }
 
