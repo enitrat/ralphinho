@@ -54,15 +54,6 @@ export type ReviewLoopResultRow = {
   exhausted: boolean;
 };
 
-export type FinalReviewRow = {
-  nodeId: string;
-  iteration: number;
-  readyToMoveOn: boolean;
-  approved: boolean;
-  reasoning: string | null;
-  qualityScore: number | null;
-};
-
 // ── SQLite row parsing utilities ──────────────────────────────────────────
 
 export function parseStringArray(raw: unknown): string[] {
@@ -165,28 +156,6 @@ export function reviewLoopResultRowFromSqlite(row: Record<string, unknown>): Rev
   };
 }
 
-const finalReviewRawSchema = z.object({
-  node_id: z.string(),
-  iteration: z.number(),
-  ready_to_move_on: z.number(),
-  approved: z.number(),
-  reasoning: z.string().nullable(),
-  quality_score: z.number().nullable(),
-});
-
-export function finalReviewRowFromSqlite(row: Record<string, unknown>): FinalReviewRow | null {
-  const r = finalReviewRawSchema.safeParse(row);
-  if (!r.success) return null;
-  return {
-    nodeId: r.data.node_id,
-    iteration: r.data.iteration,
-    readyToMoveOn: Boolean(r.data.ready_to_move_on),
-    approved: Boolean(r.data.approved),
-    reasoning: r.data.reasoning,
-    qualityScore: r.data.quality_score,
-  };
-}
-
 export type OutputSnapshot = {
   mergeQueueRows: MergeQueueRow[];
   latestTest: (unitId: string) => TestRow | null;
@@ -260,7 +229,6 @@ export function buildDepSummaries(snapshot: OutputSnapshot, unit: WorkUnit): Dep
 export type SnapshotInput = {
   mergeQueueRows: MergeQueueRow[];
   testRows: TestRow[];
-  finalReviewRows?: FinalReviewRow[];
   reviewLoopResultRows: ReviewLoopResultRow[];
   implementRows: ImplementRow[];
   reviewFixRows: ReviewFixRow[];
