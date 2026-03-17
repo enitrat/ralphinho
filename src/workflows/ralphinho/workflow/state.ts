@@ -19,16 +19,16 @@ export type MergeQueueRow = {
 };
 
 export type TestRow = {
-  nodeId?: string;
-  iteration?: number;
+  nodeId: string;
+  iteration: number;
   testsPassed: boolean;
   buildPassed: boolean;
   failingSummary?: string | null;
 };
 
 export type FinalReviewRow = {
-  nodeId?: string;
-  iteration?: number;
+  nodeId: string;
+  iteration: number;
   readyToMoveOn: boolean;
   approved: boolean;
   reasoning: string;
@@ -36,8 +36,8 @@ export type FinalReviewRow = {
 };
 
 export type ImplementRow = {
-  nodeId?: string;
-  iteration?: number;
+  nodeId: string;
+  iteration: number;
   whatWasDone: string;
   filesCreated: string[] | null;
   filesModified: string[] | null;
@@ -46,8 +46,8 @@ export type ImplementRow = {
 };
 
 export type ReviewFixRow = {
-  nodeId?: string;
-  iteration?: number;
+  nodeId: string;
+  iteration: number;
   summary: string;
   allIssuesResolved: boolean;
   buildPassed: boolean;
@@ -80,18 +80,14 @@ function isTicketLandedInMergeQueueRows(rows: MergeQueueRow[], unitId: string): 
   );
 }
 
-export function isUnitLanded(snapshot: OutputSnapshot, unitId: string): boolean {
-  return snapshot.isUnitLanded(unitId);
-}
-
 export function isUnitEvicted(snapshot: OutputSnapshot, unitId: string): boolean {
-  if (isUnitLanded(snapshot, unitId)) return false;
+  if (snapshot.isUnitLanded(unitId)) return false;
   return mergeQueueRows(snapshot)
     .some((mq) => mq.ticketsEvicted.some((ticket) => ticket.ticketId === unitId));
 }
 
 export function getEvictionContext(snapshot: OutputSnapshot, unitId: string): string | null {
-  if (isUnitLanded(snapshot, unitId)) return null;
+  if (snapshot.isUnitLanded(unitId)) return null;
   const relevantRows = mergeQueueRows(snapshot).slice().reverse();
   for (const row of relevantRows) {
     const evictedEntry = row.ticketsEvicted.find((ticket) => ticket.ticketId === unitId);
@@ -101,11 +97,11 @@ export function getEvictionContext(snapshot: OutputSnapshot, unitId: string): st
 }
 
 export function getUnitState(snapshot: OutputSnapshot, units: WorkUnit[], unitId: string): UnitState {
-  if (isUnitLanded(snapshot, unitId)) return "done";
+  if (snapshot.isUnitLanded(unitId)) return "done";
 
   const unit = units.find((u) => u.id === unitId);
   const deps = unit?.deps ?? [];
-  if (deps.length > 0 && !deps.every((depId) => isUnitLanded(snapshot, depId))) {
+  if (deps.length > 0 && !deps.every((depId) => snapshot.isUnitLanded(depId))) {
     return "not-ready";
   }
 
@@ -165,10 +161,9 @@ export function extractUnitId(nodeId: string): string | null {
   return nodeId.slice(0, lastColon);
 }
 
-function groupByUnit<T extends { nodeId?: string }>(rows: T[]): Map<string, T[]> {
+function groupByUnit<T extends { nodeId: string }>(rows: T[]): Map<string, T[]> {
   const map = new Map<string, T[]>();
   for (const row of rows) {
-    if (!row.nodeId) continue;
     const unitId = extractUnitId(row.nodeId);
     if (!unitId) continue;
     const current = map.get(unitId) ?? [];
@@ -190,7 +185,7 @@ export function buildMergeTickets(
 ): AgenticMergeQueueTicket[] {
   return units
     .filter((unit) => {
-      if (isUnitLanded(snapshot, unit.id)) return false;
+      if (snapshot.isUnitLanded(unit.id)) return false;
       if (getUnitState(snapshot, units, unit.id) !== "active") return false;
       if (!isMergeEligible(snapshot, unit.id)) return false;
 

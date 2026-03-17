@@ -6,11 +6,10 @@ import {
   getEvictionContext,
   getUnitState,
   isUnitEvicted,
-  isUnitLanded,
   type FinalReviewRow,
   type OutputSnapshot,
 } from "../state";
-import { getDecisionAudit, isMergeEligible, isSemanticallyComplete } from "../decisions";
+import { getDecisionAudit, isMergeEligible } from "../decisions";
 
 function unit(id: string, deps: string[] = []): WorkUnit {
   return {
@@ -68,12 +67,12 @@ describe("isUnitLanded", () => {
       }],
     });
 
-    expect(isUnitLanded(s, "u1")).toBe(true);
+    expect(s.isUnitLanded("u1")).toBe(true);
   });
 
   test("returns false when no landed entry exists", () => {
     const s = snapshot();
-    expect(isUnitLanded(s, "u1")).toBe(false);
+    expect(s.isUnitLanded("u1")).toBe(false);
   });
 });
 
@@ -177,7 +176,7 @@ describe("getUnitState", () => {
 describe("isMergeEligible", () => {
   test("returns false when testsPassed is false", () => {
     const s = snapshot({
-      latestTest: () => ({ nodeId: "u1:test", testsPassed: false, buildPassed: true }),
+      latestTest: () => ({ nodeId: "u1:test", iteration: 1, testsPassed: false, buildPassed: true }),
       latestFinalReview: () => finalReview(1, { readyToMoveOn: true, approved: true, reasoning: "ok" }),
       finalReviewHistory: () => [finalReview(1, { readyToMoveOn: true, approved: true, reasoning: "ok" })],
     });
@@ -187,7 +186,7 @@ describe("isMergeEligible", () => {
 
   test("returns false when tests pass but final review is not ready", () => {
     const s = snapshot({
-      latestTest: () => ({ nodeId: "u1:test", testsPassed: true, buildPassed: false }),
+      latestTest: () => ({ nodeId: "u1:test", iteration: 1, testsPassed: true, buildPassed: false }),
       latestFinalReview: () => finalReview(1),
       finalReviewHistory: () => [finalReview(1)],
     });
@@ -214,6 +213,7 @@ describe("buildDepSummaries", () => {
         if (unitId === "dep") {
           return {
             nodeId: "dep:implement",
+            iteration: 1,
             whatWasDone: "did work",
             filesCreated: ["a.ts"],
             filesModified: ["b.ts"],
@@ -427,6 +427,6 @@ describe("decision audits", () => {
     });
 
     expect(getDecisionAudit(s, "u1").status).toBe("approved");
-    expect(isSemanticallyComplete(s, "u1")).toBe(true);
+    expect(getDecisionAudit(s, "u1").semanticallyComplete).toBe(true);
   });
 });

@@ -36,7 +36,6 @@ import {
   buildMergeTickets,
   getEvictionContext,
   getUnitState,
-  isUnitLanded,
   type UnitState,
 } from "../workflow/state";
 import { type DecisionAudit, getDecisionAudit, isMergeEligible } from "../workflow/decisions";
@@ -83,7 +82,7 @@ export function ScheduledWorkflow({
   const snapshot = buildSnapshot(ctx);
 
   // ── Landing status ──────────────────────────────────────────────
-  const unitLandedAcrossIterations = (unitId: string) => isUnitLanded(snapshot, unitId);
+  const unitLandedAcrossIterations = (unitId: string) => snapshot.isUnitLanded(unitId);
   const unitState = (unitId: string): UnitState => getUnitState(snapshot, units, unitId);
   const unitEvictionContext = (unitId: string) => getEvictionContext(snapshot, unitId);
 

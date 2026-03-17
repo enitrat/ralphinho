@@ -41,12 +41,12 @@ export type PushAndCreatePRProps = {
 
 function buildTicketTable(tickets: PushAndCreatePRTicket[]): string {
   const columns: MarkdownColumn<PushAndCreatePRTicket>[] = [
-    { header: "#", separator: "---", cell: (_t, i) => String(i + 1) },
-    { header: "Ticket ID", separator: "-----------", cell: (t) => t.ticketId },
-    { header: "Title", separator: "-----", cell: (t) => t.ticketTitle },
-    { header: "Branch", separator: "--------", cell: (t) => t.branch },
-    { header: "Files Touched", separator: "---------------", cell: (t) => buildFileSummary(t) },
-    { header: "Worktree", separator: "----------", cell: (t) => t.worktreePath },
+    { header: "#", cell: (_t, i) => String(i + 1) },
+    { header: "Ticket ID", cell: (t) => t.ticketId },
+    { header: "Title", cell: (t) => t.ticketTitle },
+    { header: "Branch", cell: (t) => t.branch },
+    { header: "Files Touched", cell: (t) => buildFileSummary(t) },
+    { header: "Worktree", cell: (t) => t.worktreePath },
   ];
 
   return buildMarkdownTable(columns, tickets);

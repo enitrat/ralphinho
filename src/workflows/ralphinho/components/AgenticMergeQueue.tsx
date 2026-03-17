@@ -5,7 +5,7 @@ import type { z } from "zod";
 import { scheduledOutputSchemas } from "../schemas";
 import { STAGE_RETRY_POLICIES } from "../workflow/contracts";
 import type { ScheduledOutputs } from "./QualityPipeline";
-import { buildFileSummary, buildMarkdownTable, type MarkdownColumn } from "./markdownTableUtils";
+import { buildFileSummary, getAllFiles, buildMarkdownTable, type MarkdownColumn } from "./markdownTableUtils";
 
 export const mergeQueueResultSchema = scheduledOutputSchemas.merge_queue;
 export type MergeQueueResult = z.infer<typeof mergeQueueResultSchema>;
@@ -58,13 +58,13 @@ function buildQueueStatusTable(tickets: AgenticMergeQueueTicket[]): string {
   );
 
   const columns: MarkdownColumn<AgenticMergeQueueTicket>[] = [
-    { header: "#", separator: "---", cell: (_t, i) => String(i + 1) },
-    { header: "Ticket ID", separator: "-----------", cell: (t) => t.ticketId },
-    { header: "Title", separator: "-----", cell: (t) => t.ticketTitle },
-    { header: "Category", separator: "----------", cell: (t) => t.ticketCategory },
-    { header: "Priority", separator: "----------", cell: (t) => t.priority },
-    { header: "Files Touched", separator: "---------------", cell: (t) => buildFileSummary(t) },
-    { header: "Worktree", separator: "----------", cell: (t) => t.worktreePath },
+    { header: "#", cell: (_t, i) => String(i + 1) },
+    { header: "Ticket ID", cell: (t) => t.ticketId },
+    { header: "Title", cell: (t) => t.ticketTitle },
+    { header: "Category", cell: (t) => t.ticketCategory },
+    { header: "Priority", cell: (t) => t.priority },
+    { header: "Files Touched", cell: (t) => buildFileSummary(t) },
+    { header: "Worktree", cell: (t) => t.worktreePath },
   ];
 
   return buildMarkdownTable(columns, sorted);
@@ -73,7 +73,7 @@ function buildQueueStatusTable(tickets: AgenticMergeQueueTicket[]): string {
 function buildFileOverlapAnalysis(tickets: AgenticMergeQueueTicket[]): string {
   const fileToTickets = new Map<string, string[]>();
   for (const t of tickets) {
-    for (const f of [...(t.filesModified ?? []), ...(t.filesCreated ?? [])]) {
+    for (const f of getAllFiles(t)) {
       const existing = fileToTickets.get(f) ?? [];
       existing.push(t.ticketId);
       fileToTickets.set(f, existing);
