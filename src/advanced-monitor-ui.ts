@@ -254,8 +254,8 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
     // Can't open log file — captured logs still go to ring buffer
   }
 
-  function captureWrite(chunk: string | Uint8Array): boolean {
-    const text = typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
+  const captureWrite: typeof process.stdout.write = (chunk, _encodingOrCb?, _cb?) => {
+    const text = typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk as Uint8Array);
     for (const line of text.split("\n")) {
       const trimmed = line.trimEnd();
       if (trimmed) capturedLogs.push(`${fmtTime()} ${trimmed}`);
@@ -264,10 +264,10 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
       try { logFileHandle.write(text); } catch {}
     }
     return true;
-  }
+  };
 
-  process.stdout.write = captureWrite as any;
-  process.stderr.write = captureWrite as any;
+  process.stdout.write = captureWrite;
+  process.stderr.write = captureWrite;
 
   function restoreConsole() {
     process.stdout.write = origStdoutWrite;
