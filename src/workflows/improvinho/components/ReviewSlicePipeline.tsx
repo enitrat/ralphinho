@@ -6,15 +6,14 @@ import type { AgentLike, SmithersCtx } from "smithers-orchestrator";
 
 import type {
   DiscoveredFinding,
-  ReviewConfidence,
   ReviewFinding,
   ReviewLens,
   ReviewPlan,
-  ReviewPriority,
   ReviewSlice,
 } from "../types";
 import type { reviewOutputSchemas } from "../schemas";
 import { REVIEW_LENSES, getReviewLensDefinition } from "../lenses";
+import { normalizePart, confidenceRank, priorityRank } from "../projection";
 
 import DiscoverIssuesPrompt from "../prompts/DiscoverIssues.mdx";
 
@@ -60,30 +59,6 @@ function buildInputSignature(plan: ReviewPlan, slice: ReviewSlice, lens: ReviewL
     .digest("hex");
 }
 
-function normalizePart(value: string | null | undefined): string {
-  return (value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "") || "module";
-}
-
-function confidenceRank(confidence: ReviewConfidence): number {
-  return {
-    high: 3,
-    medium: 2,
-    low: 1,
-  }[confidence];
-}
-
-function priorityRank(priority: ReviewPriority): number {
-  return {
-    critical: 4,
-    high: 3,
-    medium: 2,
-    low: 1,
-  }[priority];
-}
 
 function computeDedupeKey(lens: ReviewLens, finding: DiscoveredFinding): string {
   return [
