@@ -3,7 +3,6 @@ import { Task, Sequence, Worktree } from "smithers-orchestrator";
 import type { SmithersCtx, AgentLike } from "smithers-orchestrator";
 import type { WorkUnit, WorkPlan } from "../types";
 import { scheduledOutputSchemas } from "../schemas";
-import type { Issue } from "../schemas";
 
 import ResearchPrompt from "../prompts/Research.mdx";
 import PlanPrompt from "../prompts/Plan.mdx";
@@ -14,9 +13,9 @@ import { ReviewLoop } from "./ReviewLoop";
 import {
   STAGE_RETRY_POLICIES,
   stageNodeId,
-  TIER_STAGES,
 } from "../workflow/contracts";
 import type { ScheduledTier, StageName } from "../workflow/contracts";
+import { buildIssueList, tierHasStep } from "../workflow/reviewUtils";
 
 export type ScheduledOutputs = typeof scheduledOutputSchemas;
 
@@ -58,26 +57,12 @@ export type QualityPipelineProps = {
   worktreePath?: string;
 };
 
-function tierHasStep(tier: ScheduledTier, step: string): boolean {
-  return (TIER_STAGES[tier] as readonly string[]).includes(step);
-}
-
 function buildReviewFeedback(parts: Array<string | null | undefined>): string | undefined {
   const lines = parts
     .filter(Boolean)
     .map((p) => String(p).trim())
     .filter((p) => p.length > 0);
   return lines.length > 0 ? lines.join("\n\n") : undefined;
-}
-
-function buildIssueList(issues: Issue[] | null | undefined): string[] {
-  if (!issues) return [];
-  return issues.map((issue) => {
-    const sev = issue.severity ? `[${issue.severity}] ` : "";
-    const desc = issue.description ?? "Unspecified issue";
-    const file = issue.file ? ` (${issue.file})` : "";
-    return `${sev}${desc}${file}`;
-  });
 }
 
 function buildTestSuites(workPlan: WorkPlan): Array<{ name: string; command: string; description: string }> {
