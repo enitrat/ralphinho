@@ -1,7 +1,164 @@
 import { readFile } from "node:fs/promises";
 
-import { DISPLAY_STAGES, type StageName } from "../workflows/ralphinho/workflow/contracts";
+import { z } from "zod";
+
+import type { StageName } from "../workflows/ralphinho/workflow/contracts";
 import type { DecisionStatus } from "../workflows/ralphinho/workflow/decisions";
+
+// ── Shared enum schemas ─────────────────────────────────────────
+
+const stageNameSchema = z.enum([
+  "research",
+  "plan",
+  "implement",
+  "test",
+  "prd-review",
+  "code-review",
+  "review-fix",
+  "final-review",
+  "learnings",
+]);
+
+const decisionStatusSchema = z.enum(["pending", "rejected", "approved", "invalidated"]);
+
+/** Accepts an array of unknown values and filters to only strings (preserving lenient behavior). */
+const stringArrayFilterSchema = z
+  .array(z.unknown())
+  .transform((arr) => arr.filter((s): s is string => typeof s === "string"));
+
+// ── Per-variant Zod schemas ─────────────────────────────────────
+
+const nodeStartedSchema = z.object({
+  type: z.literal("node-started"),
+  timestamp: z.number().finite(),
+  runId: z.string(),
+  nodeId: z.string(),
+  unitId: z.string(),
+  stageName: stageNameSchema,
+});
+
+const nodeCompletedSchema = z.object({
+  type: z.literal("node-completed"),
+  timestamp: z.number().finite(),
+  runId: z.string(),
+  nodeId: z.string(),
+  unitId: z.string(),
+  stageName: stageNameSchema,
+});
+
+const nodeFailedSchema = z.object({
+  type: z.literal("node-failed"),
+  timestamp: z.number().finite(),
+  runId: z.string(),
+  nodeId: z.string(),
+  unitId: z.string(),
+  stageName: stageNameSchema,
+  error: z.string().optional(),
+});
+
+const jobScheduledSchema = z.object({
+  type: z.literal("job-scheduled"),
+  timestamp: z.number().finite(),
+  jobType: z.string(),
+  agentId: z.string(),
+  ticketId: z.string().nullable(),
+  createdAtMs: z.number().finite(),
+});
+
+const jobCompletedSchema = z.object({
+  type: z.literal("job-completed"),
+  timestamp: z.number().finite(),
+  jobType: z.string(),
+  agentId: z.string(),
+  ticketId: z.string().nullable(),
+});
+
+const mergeQueueLandedSchema = z.object({
+  type: z.literal("merge-queue-landed"),
+  timestamp: z.number().finite(),
+  runId: z.string(),
+  ticketId: z.string(),
+  mergeCommit: z.string().nullable(),
+  summary: z.string(),
+});
+
+const mergeQueueEvictedSchema = z.object({
+  type: z.literal("merge-queue-evicted"),
+  timestamp: z.number().finite(),
+  runId: z.string(),
+  ticketId: z.string(),
+  reason: z.string(),
+  details: z.string(),
+});
+
+const mergeQueueSkippedSchema = z.object({
+  type: z.literal("merge-queue-skipped"),
+  timestamp: z.number().finite(),
+  runId: z.string(),
+  ticketId: z.string(),
+  reason: z.string(),
+});
+
+const passTrackerUpdateSchema = z.object({
+  type: z.literal("pass-tracker-update"),
+  timestamp: z.number().finite(),
+  runId: z.string(),
+  summary: z.string(),
+  maxConcurrency: z.number().finite(),
+});
+
+const workPlanLoadedSchema = z.object({
+  type: z.literal("work-plan-loaded"),
+  timestamp: z.number().finite(),
+  units: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      tier: z.enum(["small", "large"]),
+      priority: z.string(),
+    }),
+  ),
+});
+
+const finalReviewDecisionSchema = z.object({
+  type: z.literal("final-review-decision"),
+  timestamp: z.number().finite(),
+  runId: z.string(),
+  unitId: z.string(),
+  iteration: z.number().finite(),
+  status: decisionStatusSchema,
+  reasoning: z.string(),
+  approvalSupersededRejection: z.boolean(),
+  approvalOnlyCorrectedFormatting: z.boolean(),
+});
+
+const semanticCompletionUpdateSchema = z.object({
+  type: z.literal("semantic-completion-update"),
+  timestamp: z.number().finite(),
+  runId: z.string(),
+  totalUnits: z.number().finite(),
+  unitsLanded: stringArrayFilterSchema,
+  unitsSemanticallyComplete: stringArrayFilterSchema,
+});
+
+// ── Discriminated union ─────────────────────────────────────────
+
+const smithersEventSchema = z.discriminatedUnion("type", [
+  nodeStartedSchema,
+  nodeCompletedSchema,
+  nodeFailedSchema,
+  jobScheduledSchema,
+  jobCompletedSchema,
+  mergeQueueLandedSchema,
+  mergeQueueEvictedSchema,
+  mergeQueueSkippedSchema,
+  passTrackerUpdateSchema,
+  workPlanLoadedSchema,
+  finalReviewDecisionSchema,
+  semanticCompletionUpdateSchema,
+]);
+
+// ── Exported types (kept for consumers + documentation) ─────────
 
 export type SmithersEvent =
   | NodeStartedEvent
@@ -128,237 +285,21 @@ export interface SemanticCompletionUpdateEvent {
   unitsSemanticallyComplete: string[];
 }
 
-const STAGE_NAMES = new Set<StageName>(DISPLAY_STAGES.map((entry) => entry.key));
+// ── Parser ──────────────────────────────────────────────────────
 
-const DECISION_STATUSES = new Set<DecisionStatus>(["pending", "rejected", "approved", "invalidated"]);
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function isString(value: unknown): value is string {
-  return typeof value === "string";
-}
-
-function isNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
-}
-
-function isNullableString(value: unknown): value is string | null {
-  return value === null || typeof value === "string";
-}
-
-function isStageName(value: unknown): value is StageName {
-  return isString(value) && STAGE_NAMES.has(value as StageName);
-}
-
-function isDecisionStatus(value: unknown): value is DecisionStatus {
-  return isString(value) && DECISION_STATUSES.has(value as DecisionStatus);
-}
-
+/**
+ * Parse an unknown value into a SmithersEvent, returning null on failure.
+ *
+ * Note: We cast `result.data` because Zod 4's `discriminatedUnion` type
+ * inference for `.nullable()` / `.transform()` fields doesn't exactly match
+ * our hand-written interfaces. Behavioral correctness is verified by tests.
+ */
 export function parseEvent(value: unknown): SmithersEvent | null {
-  if (!isRecord(value) || !isString(value.type) || !isNumber(value.timestamp)) return null;
-
-  switch (value.type) {
-    case "node-started":
-      if (
-        isString(value.runId)
-        && isString(value.nodeId)
-        && isString(value.unitId)
-        && isStageName(value.stageName)
-      ) {
-        return {
-          type: "node-started",
-          timestamp: value.timestamp,
-          runId: value.runId,
-          nodeId: value.nodeId,
-          unitId: value.unitId,
-          stageName: value.stageName,
-        };
-      }
-      return null;
-    case "node-completed":
-      if (
-        isString(value.runId)
-        && isString(value.nodeId)
-        && isString(value.unitId)
-        && isStageName(value.stageName)
-      ) {
-        return {
-          type: "node-completed",
-          timestamp: value.timestamp,
-          runId: value.runId,
-          nodeId: value.nodeId,
-          unitId: value.unitId,
-          stageName: value.stageName,
-        };
-      }
-      return null;
-    case "node-failed":
-      if (
-        isString(value.runId)
-        && isString(value.nodeId)
-        && isString(value.unitId)
-        && isStageName(value.stageName)
-        && (value.error === undefined || isString(value.error))
-      ) {
-        return {
-          type: "node-failed",
-          timestamp: value.timestamp,
-          runId: value.runId,
-          nodeId: value.nodeId,
-          unitId: value.unitId,
-          stageName: value.stageName,
-          error: isString(value.error) ? value.error : undefined,
-        };
-      }
-      return null;
-    case "job-scheduled":
-      if (
-        isString(value.jobType)
-        && isString(value.agentId)
-        && isNullableString(value.ticketId)
-        && isNumber(value.createdAtMs)
-      ) {
-        return {
-          type: "job-scheduled",
-          timestamp: value.timestamp,
-          jobType: value.jobType,
-          agentId: value.agentId,
-          ticketId: value.ticketId,
-          createdAtMs: value.createdAtMs,
-        };
-      }
-      return null;
-    case "job-completed":
-      if (isString(value.jobType) && isString(value.agentId) && isNullableString(value.ticketId)) {
-        return {
-          type: "job-completed",
-          timestamp: value.timestamp,
-          jobType: value.jobType,
-          agentId: value.agentId,
-          ticketId: value.ticketId,
-        };
-      }
-      return null;
-    case "merge-queue-landed":
-      if (
-        isString(value.runId)
-        && isString(value.ticketId)
-        && isNullableString(value.mergeCommit)
-        && isString(value.summary)
-      ) {
-        return {
-          type: "merge-queue-landed",
-          timestamp: value.timestamp,
-          runId: value.runId,
-          ticketId: value.ticketId,
-          mergeCommit: value.mergeCommit,
-          summary: value.summary,
-        };
-      }
-      return null;
-    case "merge-queue-evicted":
-      if (
-        isString(value.runId)
-        && isString(value.ticketId)
-        && isString(value.reason)
-        && isString(value.details)
-      ) {
-        return {
-          type: "merge-queue-evicted",
-          timestamp: value.timestamp,
-          runId: value.runId,
-          ticketId: value.ticketId,
-          reason: value.reason,
-          details: value.details,
-        };
-      }
-      return null;
-    case "merge-queue-skipped":
-      if (isString(value.runId) && isString(value.ticketId) && isString(value.reason)) {
-        return {
-          type: "merge-queue-skipped",
-          timestamp: value.timestamp,
-          runId: value.runId,
-          ticketId: value.ticketId,
-          reason: value.reason,
-        };
-      }
-      return null;
-    case "final-review-decision":
-      if (
-        isString(value.runId)
-        && isString(value.unitId)
-        && isNumber(value.iteration)
-        && isDecisionStatus(value.status)
-        && isString(value.reasoning)
-        && typeof value.approvalSupersededRejection === "boolean"
-        && typeof value.approvalOnlyCorrectedFormatting === "boolean"
-      ) {
-        return {
-          type: "final-review-decision",
-          timestamp: value.timestamp,
-          runId: value.runId,
-          unitId: value.unitId,
-          iteration: value.iteration,
-          status: value.status,
-          reasoning: value.reasoning,
-          approvalSupersededRejection: value.approvalSupersededRejection,
-          approvalOnlyCorrectedFormatting: value.approvalOnlyCorrectedFormatting,
-        };
-      }
-      return null;
-    case "semantic-completion-update":
-      if (
-        isString(value.runId)
-        && isNumber(value.totalUnits)
-        && Array.isArray(value.unitsLanded)
-        && Array.isArray(value.unitsSemanticallyComplete)
-      ) {
-        return {
-          type: "semantic-completion-update",
-          timestamp: value.timestamp,
-          runId: value.runId,
-          totalUnits: value.totalUnits,
-          unitsLanded: value.unitsLanded.filter(isString),
-          unitsSemanticallyComplete: value.unitsSemanticallyComplete.filter(isString),
-        };
-      }
-      return null;
-    case "pass-tracker-update":
-      if (isString(value.runId) && isString(value.summary) && isNumber(value.maxConcurrency)) {
-        return {
-          type: "pass-tracker-update",
-          timestamp: value.timestamp,
-          runId: value.runId,
-          summary: value.summary,
-          maxConcurrency: value.maxConcurrency,
-        };
-      }
-      return null;
-    case "work-plan-loaded":
-      if (!Array.isArray(value.units)) return null;
-      for (const unit of value.units) {
-        if (
-          !isRecord(unit)
-          || !isString(unit.id)
-          || !isString(unit.name)
-          || (unit.tier !== "small" && unit.tier !== "large")
-          || !isString(unit.priority)
-        ) {
-          return null;
-        }
-      }
-      return {
-        type: "work-plan-loaded",
-        timestamp: value.timestamp,
-        units: value.units as WorkPlanLoadedEvent["units"],
-      };
-    default:
-      return null;
-  }
+  const result = smithersEventSchema.safeParse(value);
+  return result.success ? (result.data as SmithersEvent) : null;
 }
+
+// ── Event log reader ────────────────────────────────────────────
 
 export async function readEventLog(path: string): Promise<SmithersEvent[]> {
   let raw: string;
