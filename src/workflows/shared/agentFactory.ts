@@ -8,9 +8,8 @@ export interface AgentFactoryOptions {
 }
 
 export interface AgentFactory {
-  buildSystemPrompt: (role: string) => string;
   createClaude: (role: string, model?: string) => ClaudeCodeAgent;
-  createCodex: (role: string, model?: string, reasoningEffort?: string) => CodexAgent;
+  createCodex: (role: string, model: string, reasoningEffort?: string) => CodexAgent;
 }
 
 export function createAgentFactory(options: AgentFactoryOptions): AgentFactory {
@@ -31,7 +30,7 @@ export function createAgentFactory(options: AgentFactoryOptions): AgentFactory {
     });
   }
 
-  function createCodex(role: string, model = "gpt-5.3-codex", reasoningEffort?: string): CodexAgent {
+  function createCodex(role: string, model: string, reasoningEffort?: string): CodexAgent {
     return new CodexAgent({
       model,
       systemPrompt: buildSystemPrompt(role),
@@ -47,5 +46,5 @@ export function createAgentFactory(options: AgentFactoryOptions): AgentFactory {
     });
   }
 
-  return { buildSystemPrompt, createClaude, createCodex };
+  return { createClaude, createCodex };
 }
