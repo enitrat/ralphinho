@@ -25,13 +25,13 @@ import {
   projectReviewSummaryFromDb,
   resolveLatestReviewRunId,
 } from "../workflows/improvinho/projection";
-import { pushFindingsToLinear } from "../adapters/linear/push-findings";
 import {
+  pushFindingsToLinear,
   consumeTicket,
   consumeAllTickets,
   markTicketInProgress,
   markTicketDone,
-} from "../adapters/linear/consume-tickets";
+} from "../adapters/linear";
 import {
   groupByFileOverlap,
   groupToWorkPlan,

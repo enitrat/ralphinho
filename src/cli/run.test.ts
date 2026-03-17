@@ -63,12 +63,13 @@ const mockLaunchSmithers = mock(() => Promise.resolve(0));
 const mockResolveSmithersCliPath = mock(() => "/mock/smithers");
 const mockInitScheduledWork = mock(() => Promise.resolve());
 
-mock.module("../adapters/linear/consume-tickets", () => ({
+mock.module("../adapters/linear", () => ({
   consumeAllTickets: mockConsumeAllTickets,
   consumeTicket: mockConsumeTicket,
   markTicketInProgress: mockMarkTicketInProgress,
   markTicketDone: mockMarkTicketDone,
   issueToRfc: (issue: any) => `# ${issue.identifier}: ${issue.title}`,
+  pushFindingsToLinear: mock(() => Promise.resolve({ created: [], skipped: 0 })),
 }));
 
 mock.module("../../workflows/ralphinho/scheduler", () => ({
