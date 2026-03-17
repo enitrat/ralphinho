@@ -166,7 +166,7 @@ export async function pollEventsFromDb(
           .filter((unit) => typeof unit?.id === "string")
           .map((unit) => ({
             id: unit.id as string,
-            name: typeof unit.name === "string" ? unit.name : String(unit.id),
+            name: typeof unit.name === "string" ? unit.name : unit.id as string,
             tier: normalizeTier(unit.tier),
             priority: normalizePriority(unit.priority),
           }));
@@ -182,36 +182,29 @@ export async function pollEventsFromDb(
       }
     }
 
-    try {
-      const rawSmithersNodes = smithersNodeRowSchema.array().safeParse(
-        db.query(
-          "SELECT node_id, state, started_at_ms, completed_at_ms FROM _smithers_nodes WHERE run_id = ? ORDER BY iteration ASC",
-        ).all(runId),
-      );
-      const rows = rawSmithersNodes.success ? rawSmithersNodes.data : [];
-
-      for (const row of rows) {
-        const parsed = parseNodeId(row.node_id);
-        if (!parsed) continue;
+    const nodeEvents = queryRows(
+      db,
+      "SELECT node_id, state, started_at_ms, completed_at_ms FROM _smithers_nodes WHERE run_id = ? ORDER BY iteration ASC",
+      [runId],
+      (row): SmithersEvent | null => {
+        const r = smithersNodeRowSchema.safeParse(row);
+        if (!r.success) return null;
+        const parsed = parseNodeId(r.data.node_id);
+        if (!parsed) return null;
         const base = {
           runId,
-          nodeId: row.node_id,
+          nodeId: r.data.node_id,
           unitId: parsed.unitId,
           stageName: parsed.stageName,
-          timestamp: row.started_at_ms ?? row.completed_at_ms ?? now,
+          timestamp: r.data.started_at_ms ?? r.data.completed_at_ms ?? now,
         } as const;
-
-        if (row.state === "in-progress") {
-          events.push({ type: "node-started", ...base });
-        } else if (row.state === "completed") {
-          events.push({ type: "node-completed", ...base });
-        } else if (row.state === "failed") {
-          events.push({ type: "node-failed", ...base });
-        }
-      }
-    } catch {
-      // Optional tables may not exist in all runs.
-    }
+        if (r.data.state === "in-progress") return { type: "node-started", ...base };
+        if (r.data.state === "completed") return { type: "node-completed", ...base };
+        if (r.data.state === "failed") return { type: "node-failed", ...base };
+        return null;
+      },
+    );
+    events.push(...nodeEvents);
 
     const scheduledDbPath = join(dirname(dbPath), "..", "scheduled-tasks.db");
     let scheduledRowsCount = 0;
@@ -242,30 +235,27 @@ export async function pollEventsFromDb(
     }
 
     if (scheduledRowsCount === 0) {
-      try {
-        const rawAttemptRows = smithersAttemptRowSchema.array().safeParse(
-          db.query(
-            "SELECT node_id, started_at_ms FROM _smithers_attempts WHERE run_id = ? AND state = 'in-progress' ORDER BY started_at_ms ASC",
-          ).all(runId),
-        );
-        const rows = rawAttemptRows.success ? rawAttemptRows.data : [];
-
-        for (const row of rows) {
-          const parsed = parseNodeId(row.node_id);
+      const attemptEvents = queryRows(
+        db,
+        "SELECT node_id, started_at_ms FROM _smithers_attempts WHERE run_id = ? AND state = 'in-progress' ORDER BY started_at_ms ASC",
+        [runId],
+        (row): SmithersEvent | null => {
+          const r = smithersAttemptRowSchema.safeParse(row);
+          if (!r.success) return null;
+          const parsed = parseNodeId(r.data.node_id);
           const ticketId = parsed?.unitId ?? null;
-          const jobType = parsed ? `ticket:${parsed.stageName}` : row.node_id;
-          events.push({
+          const jobType = parsed ? `ticket:${parsed.stageName}` : r.data.node_id;
+          return {
             type: "job-scheduled",
-            timestamp: row.started_at_ms ?? now,
+            timestamp: r.data.started_at_ms ?? now,
             jobType,
             agentId: "claude",
             ticketId,
-            createdAtMs: row.started_at_ms ?? now,
-          });
-        }
-      } catch {
-        // attempts table may not exist depending on orchestrator version.
-      }
+            createdAtMs: r.data.started_at_ms ?? now,
+          };
+        },
+      );
+      events.push(...attemptEvents);
     }
 
     const mergeQueueRows: OutputSnapshot["mergeQueueRows"] = [];
