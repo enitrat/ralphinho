@@ -2,9 +2,6 @@ import { readFile } from "node:fs/promises";
 
 import { z } from "zod";
 
-import type { StageName } from "../workflows/ralphinho/workflow/contracts";
-import type { DecisionStatus } from "../workflows/ralphinho/workflow/decisions";
-
 // ── Shared enum schemas ─────────────────────────────────────────
 
 const stageNameSchema = z.enum([
@@ -158,145 +155,29 @@ const smithersEventSchema = z.discriminatedUnion("type", [
   semanticCompletionUpdateSchema,
 ]);
 
-// ── Exported types (kept for consumers + documentation) ─────────
+// ── Exported types (derived from Zod schemas — single source of truth) ──────
 
-export type SmithersEvent =
-  | NodeStartedEvent
-  | NodeCompletedEvent
-  | NodeFailedEvent
-  | JobScheduledEvent
-  | JobCompletedEvent
-  | MergeQueueLandedEvent
-  | MergeQueueEvictedEvent
-  | MergeQueueSkippedEvent
-  | PassTrackerUpdateEvent
-  | WorkPlanLoadedEvent
-  | FinalReviewDecisionEvent
-  | SemanticCompletionUpdateEvent;
+export type SmithersEvent = z.infer<typeof smithersEventSchema>;
 
-export interface NodeStartedEvent {
-  type: "node-started";
-  timestamp: number;
-  runId: string;
-  nodeId: string;
-  unitId: string;
-  stageName: StageName;
-}
-
-export interface NodeCompletedEvent {
-  type: "node-completed";
-  timestamp: number;
-  runId: string;
-  nodeId: string;
-  unitId: string;
-  stageName: StageName;
-}
-
-export interface NodeFailedEvent {
-  type: "node-failed";
-  timestamp: number;
-  runId: string;
-  nodeId: string;
-  unitId: string;
-  stageName: StageName;
-  error?: string;
-}
-
-export interface JobScheduledEvent {
-  type: "job-scheduled";
-  timestamp: number;
-  jobType: string;
-  agentId: string;
-  ticketId: string | null;
-  createdAtMs: number;
-}
-
-export interface JobCompletedEvent {
-  type: "job-completed";
-  timestamp: number;
-  jobType: string;
-  agentId: string;
-  ticketId: string | null;
-}
-
-export interface MergeQueueLandedEvent {
-  type: "merge-queue-landed";
-  timestamp: number;
-  runId: string;
-  ticketId: string;
-  mergeCommit: string | null;
-  summary: string;
-}
-
-export interface MergeQueueEvictedEvent {
-  type: "merge-queue-evicted";
-  timestamp: number;
-  runId: string;
-  ticketId: string;
-  reason: string;
-  details: string;
-}
-
-export interface MergeQueueSkippedEvent {
-  type: "merge-queue-skipped";
-  timestamp: number;
-  runId: string;
-  ticketId: string;
-  reason: string;
-}
-
-export interface PassTrackerUpdateEvent {
-  type: "pass-tracker-update";
-  timestamp: number;
-  runId: string;
-  summary: string;
-  maxConcurrency: number;
-}
-
-export interface WorkPlanLoadedEvent {
-  type: "work-plan-loaded";
-  timestamp: number;
-  units: Array<{
-    id: string;
-    name: string;
-    tier: "small" | "large";
-    priority: string;
-  }>;
-}
-
-export interface FinalReviewDecisionEvent {
-  type: "final-review-decision";
-  timestamp: number;
-  runId: string;
-  unitId: string;
-  iteration: number;
-  status: DecisionStatus;
-  reasoning: string;
-  approvalSupersededRejection: boolean;
-  approvalOnlyCorrectedFormatting: boolean;
-}
-
-export interface SemanticCompletionUpdateEvent {
-  type: "semantic-completion-update";
-  timestamp: number;
-  runId: string;
-  totalUnits: number;
-  unitsLanded: string[];
-  unitsSemanticallyComplete: string[];
-}
+export type NodeStartedEvent = z.infer<typeof nodeStartedSchema>;
+export type NodeCompletedEvent = z.infer<typeof nodeCompletedSchema>;
+export type NodeFailedEvent = z.infer<typeof nodeFailedSchema>;
+export type JobScheduledEvent = z.infer<typeof jobScheduledSchema>;
+export type JobCompletedEvent = z.infer<typeof jobCompletedSchema>;
+export type MergeQueueLandedEvent = z.infer<typeof mergeQueueLandedSchema>;
+export type MergeQueueEvictedEvent = z.infer<typeof mergeQueueEvictedSchema>;
+export type MergeQueueSkippedEvent = z.infer<typeof mergeQueueSkippedSchema>;
+export type PassTrackerUpdateEvent = z.infer<typeof passTrackerUpdateSchema>;
+export type WorkPlanLoadedEvent = z.infer<typeof workPlanLoadedSchema>;
+export type FinalReviewDecisionEvent = z.infer<typeof finalReviewDecisionSchema>;
+export type SemanticCompletionUpdateEvent = z.infer<typeof semanticCompletionUpdateSchema>;
 
 // ── Parser ──────────────────────────────────────────────────────
 
-/**
- * Parse an unknown value into a SmithersEvent, returning null on failure.
- *
- * Note: We cast `result.data` because Zod 4's `discriminatedUnion` type
- * inference for `.nullable()` / `.transform()` fields doesn't exactly match
- * our hand-written interfaces. Behavioral correctness is verified by tests.
- */
+/** Parse an unknown value into a SmithersEvent, returning null on failure. */
 export function parseEvent(value: unknown): SmithersEvent | null {
   const result = smithersEventSchema.safeParse(value);
-  return result.success ? (result.data as SmithersEvent) : null;
+  return result.success ? result.data : null;
 }
 
 // ── Event log reader ────────────────────────────────────────────
