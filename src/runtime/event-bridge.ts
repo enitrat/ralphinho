@@ -2,12 +2,87 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
+import { z } from "zod";
+
 import { DISPLAY_STAGES, type StageName } from "../workflows/ralphinho/workflow/contracts";
 import { getDecisionAudit } from "../workflows/ralphinho/workflow/decisions";
 import { buildOutputSnapshot, extractUnitId, type FinalReviewRow, type ImplementRow, type OutputSnapshot, type ReviewFixRow, type TestRow } from "../workflows/ralphinho/workflow/state";
 import type { SmithersEvent } from "./events";
 
 const STAGE_NAMES = new Set<StageName>(DISPLAY_STAGES.map((entry) => entry.key));
+
+// ── Structural interface for bun:sqlite Database (avoids dynamic-import types) ──
+
+interface SqliteDb {
+  query(sql: string): { all(...params: unknown[]): unknown[] };
+}
+
+// ── Zod row schemas (boolean columns typed as number — SQLite returns INTEGER 0|1) ──
+
+const smithersNodeRowSchema = z.object({
+  node_id: z.string(),
+  state: z.string(),
+  started_at_ms: z.number().nullish(),
+  completed_at_ms: z.number().nullish(),
+});
+
+const scheduledTaskRowSchema = z.object({
+  job_type: z.string(),
+  agent_id: z.string(),
+  ticket_id: z.string().nullable(),
+  created_at_ms: z.number(),
+});
+
+const smithersAttemptRowSchema = z.object({
+  node_id: z.string(),
+  started_at_ms: z.number().nullable(),
+});
+
+const mergeQueueRowSchema = z.object({
+  iteration: z.number(),
+  tickets_landed: z.string().nullable(),
+  tickets_evicted: z.string().nullable(),
+  tickets_skipped: z.string().nullable(),
+  summary: z.string().nullable(),
+});
+
+const finalReviewRawRowSchema = z.object({
+  node_id: z.string(),
+  iteration: z.number(),
+  ready_to_move_on: z.number(),
+  approved: z.number(),
+  reasoning: z.string(),
+  quality_score: z.number().nullable(),
+});
+
+const implementRawRowSchema = z.object({
+  node_id: z.string(),
+  iteration: z.number(),
+  what_was_done: z.string(),
+  files_created: z.string().nullable(),
+  files_modified: z.string().nullable(),
+  believes_complete: z.number(),
+  summary: z.string().nullable(),
+});
+
+const testRawRowSchema = z.object({
+  node_id: z.string(),
+  iteration: z.number(),
+  tests_passed: z.number(),
+  build_passed: z.number(),
+  failing_summary: z.string().nullable(),
+});
+
+const reviewFixRawRowSchema = z.object({
+  node_id: z.string(),
+  iteration: z.number(),
+  summary: z.string(),
+  all_issues_resolved: z.number(),
+  build_passed: z.number(),
+  tests_passed: z.number(),
+});
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function parseNodeId(nodeId: string): { unitId: string; stageName: StageName } | null {
   const parts = nodeId.split(":");
@@ -49,6 +124,27 @@ function normalizeTier(value: unknown): "small" | "large" {
   return value === "small" ? "small" : "large";
 }
 
+/**
+ * Generic DB-query helper that absorbs table-not-found errors and filters null
+ * mapper results. Exported for unit testing.
+ *
+ * @internal
+ */
+export function queryRows<T>(
+  db: SqliteDb,
+  sql: string,
+  params: unknown[],
+  mapper: (row: unknown) => T | null,
+): T[] {
+  try {
+    return db.query(sql).all(...params)
+      .map(mapper)
+      .filter((r): r is T => r !== null);
+  } catch {
+    return [];
+  }
+}
+
 export async function pollEventsFromDb(
   dbPath: string,
   runId: string,
@@ -69,7 +165,7 @@ export async function pollEventsFromDb(
         const units = (parsed.units ?? [])
           .filter((unit) => typeof unit?.id === "string")
           .map((unit) => ({
-            id: String(unit.id),
+            id: unit.id as string,
             name: typeof unit.name === "string" ? unit.name : String(unit.id),
             tier: normalizeTier(unit.tier),
             priority: normalizePriority(unit.priority),
@@ -87,9 +183,12 @@ export async function pollEventsFromDb(
     }
 
     try {
-      const rows = db.query(
-        "SELECT node_id, state, started_at_ms, completed_at_ms FROM _smithers_nodes WHERE run_id = ? ORDER BY iteration ASC",
-      ).all(runId) as Array<{ node_id: string; state: string; started_at_ms?: number; completed_at_ms?: number }>;
+      const rawSmithersNodes = smithersNodeRowSchema.array().safeParse(
+        db.query(
+          "SELECT node_id, state, started_at_ms, completed_at_ms FROM _smithers_nodes WHERE run_id = ? ORDER BY iteration ASC",
+        ).all(runId),
+      );
+      const rows = rawSmithersNodes.success ? rawSmithersNodes.data : [];
 
       for (const row of rows) {
         const parsed = parseNodeId(row.node_id);
@@ -119,9 +218,12 @@ export async function pollEventsFromDb(
     if (existsSync(scheduledDbPath)) {
       try {
         const scheduledDb = new Database(scheduledDbPath, { readonly: true });
-        const rows = scheduledDb.query(
-          "SELECT job_type, agent_id, ticket_id, created_at_ms FROM scheduled_tasks ORDER BY created_at_ms ASC",
-        ).all() as Array<{ job_type: string; agent_id: string; ticket_id: string | null; created_at_ms: number }>;
+        const rawScheduledRows = scheduledTaskRowSchema.array().safeParse(
+          scheduledDb.query(
+            "SELECT job_type, agent_id, ticket_id, created_at_ms FROM scheduled_tasks ORDER BY created_at_ms ASC",
+          ).all(),
+        );
+        const rows = rawScheduledRows.success ? rawScheduledRows.data : [];
         scheduledRowsCount = rows.length;
         for (const row of rows) {
           events.push({
@@ -141,9 +243,12 @@ export async function pollEventsFromDb(
 
     if (scheduledRowsCount === 0) {
       try {
-        const rows = db.query(
-          "SELECT node_id, started_at_ms FROM _smithers_attempts WHERE run_id = ? AND state = 'in-progress' ORDER BY started_at_ms ASC",
-        ).all(runId) as Array<{ node_id: string; started_at_ms: number | null }>;
+        const rawAttemptRows = smithersAttemptRowSchema.array().safeParse(
+          db.query(
+            "SELECT node_id, started_at_ms FROM _smithers_attempts WHERE run_id = ? AND state = 'in-progress' ORDER BY started_at_ms ASC",
+          ).all(runId),
+        );
+        const rows = rawAttemptRows.success ? rawAttemptRows.data : [];
 
         for (const row of rows) {
           const parsed = parseNodeId(row.node_id);
@@ -165,15 +270,13 @@ export async function pollEventsFromDb(
 
     const mergeQueueRows: OutputSnapshot["mergeQueueRows"] = [];
     try {
-      const rows = db.query(
-        "SELECT iteration, tickets_landed, tickets_evicted, tickets_skipped, summary FROM merge_queue WHERE run_id = ? ORDER BY iteration ASC",
-      ).all(runId) as Array<{
-        iteration: number;
-        tickets_landed: string | null;
-        tickets_evicted: string | null;
-        tickets_skipped: string | null;
-        summary: string | null;
-      }>;
+      const rawMergeQueueRows = mergeQueueRowSchema.array().safeParse(
+        db.query(
+          "SELECT iteration, tickets_landed, tickets_evicted, tickets_skipped, summary FROM merge_queue WHERE run_id = ? ORDER BY iteration ASC",
+        ).all(runId),
+      );
+      const rows = rawMergeQueueRows.success ? rawMergeQueueRows.data : [];
+
       for (const row of rows) {
         const landed = parseObjectArray(row.tickets_landed);
         mergeQueueRows.push({
@@ -181,7 +284,7 @@ export async function pollEventsFromDb(
           ticketsLanded: landed
             .filter((item) => typeof item.ticketId === "string")
             .map((item) => ({
-              ticketId: String(item.ticketId),
+              ticketId: item.ticketId as string,
               mergeCommit: typeof item.mergeCommit === "string" ? item.mergeCommit : null,
               summary: typeof item.summary === "string" ? item.summary : row.summary ?? "",
               decisionIteration: typeof item.decisionIteration === "number" ? item.decisionIteration : null,
@@ -191,7 +294,7 @@ export async function pollEventsFromDb(
           ticketsEvicted: parseObjectArray(row.tickets_evicted)
             .filter((item) => typeof item.ticketId === "string")
             .map((item) => ({
-              ticketId: String(item.ticketId),
+              ticketId: item.ticketId as string,
               reason: typeof item.reason === "string" ? item.reason : "evicted",
               details: typeof item.details === "string" ? item.details : "",
             })),
@@ -236,114 +339,85 @@ export async function pollEventsFromDb(
       // merge_queue may not be initialized yet.
     }
 
-    const allFinalReviewRows: FinalReviewRow[] = [];
-    const allImplementRows: ImplementRow[] = [];
-    const allTestRows: TestRow[] = [];
-    const allReviewFixRows: ReviewFixRow[] = [];
+    const allFinalReviewRows: FinalReviewRow[] = queryRows(
+      db,
+      "SELECT node_id, iteration, ready_to_move_on, approved, reasoning, quality_score FROM final_review WHERE run_id = ? ORDER BY iteration ASC",
+      [runId],
+      (row) => {
+        const parsed = finalReviewRawRowSchema.safeParse(row);
+        if (!parsed.success) return null;
+        const r = parsed.data;
+        if (!parseNodeId(r.node_id)) return null;
+        return {
+          nodeId: r.node_id,
+          iteration: r.iteration,
+          readyToMoveOn: Boolean(r.ready_to_move_on),
+          approved: Boolean(r.approved),
+          reasoning: r.reasoning ?? "",
+          qualityScore: r.quality_score,
+        };
+      },
+    );
 
-    try {
-      const finalReviewRows = db.query(
-        "SELECT node_id, iteration, ready_to_move_on, approved, reasoning, quality_score FROM final_review WHERE run_id = ? ORDER BY iteration ASC",
-      ).all(runId) as Array<{
-        node_id: string;
-        iteration: number;
-        ready_to_move_on: boolean;
-        approved: boolean;
-        reasoning: string;
-        quality_score: number | null;
-      }>;
-      for (const row of finalReviewRows) {
-        if (!parseNodeId(row.node_id)) continue;
-        allFinalReviewRows.push({
-          nodeId: row.node_id,
-          iteration: row.iteration,
-          readyToMoveOn: Boolean(row.ready_to_move_on),
-          approved: Boolean(row.approved),
-          reasoning: row.reasoning ?? "",
-          qualityScore: row.quality_score,
-        });
-      }
-    } catch {
-      // final_review may not exist yet.
-    }
+    const allImplementRows: ImplementRow[] = queryRows(
+      db,
+      "SELECT node_id, iteration, what_was_done, files_created, files_modified, believes_complete, summary FROM implement WHERE run_id = ? ORDER BY iteration ASC",
+      [runId],
+      (row) => {
+        const parsed = implementRawRowSchema.safeParse(row);
+        if (!parsed.success) return null;
+        const r = parsed.data;
+        if (!parseNodeId(r.node_id)) return null;
+        return {
+          nodeId: r.node_id,
+          iteration: r.iteration,
+          whatWasDone: r.what_was_done ?? "",
+          filesCreated: parseStringArray(r.files_created),
+          filesModified: parseStringArray(r.files_modified),
+          believesComplete: Boolean(r.believes_complete),
+          summary: r.summary ?? undefined,
+        };
+      },
+    );
 
-    try {
-      const implementRows = db.query(
-        "SELECT node_id, iteration, what_was_done, files_created, files_modified, believes_complete, summary FROM implement WHERE run_id = ? ORDER BY iteration ASC",
-      ).all(runId) as Array<{
-        node_id: string;
-        iteration: number;
-        what_was_done: string;
-        files_created: string | null;
-        files_modified: string | null;
-        believes_complete: boolean;
-        summary: string | null;
-      }>;
-      for (const row of implementRows) {
-        if (!parseNodeId(row.node_id)) continue;
-        allImplementRows.push({
-          nodeId: row.node_id,
-          iteration: row.iteration,
-          whatWasDone: row.what_was_done ?? "",
-          filesCreated: parseStringArray(row.files_created),
-          filesModified: parseStringArray(row.files_modified),
-          believesComplete: Boolean(row.believes_complete),
-          summary: row.summary ?? undefined,
-        });
-      }
-    } catch {
-      // implement may not exist yet.
-    }
+    const allTestRows: TestRow[] = queryRows(
+      db,
+      "SELECT node_id, iteration, tests_passed, build_passed, failing_summary FROM test WHERE run_id = ? ORDER BY iteration ASC",
+      [runId],
+      (row) => {
+        const parsed = testRawRowSchema.safeParse(row);
+        if (!parsed.success) return null;
+        const r = parsed.data;
+        if (!parseNodeId(r.node_id)) return null;
+        return {
+          nodeId: r.node_id,
+          iteration: r.iteration,
+          testsPassed: Boolean(r.tests_passed),
+          buildPassed: Boolean(r.build_passed),
+          failingSummary: r.failing_summary,
+        };
+      },
+    );
 
-    try {
-      const testRows = db.query(
-        "SELECT node_id, iteration, tests_passed, build_passed, failing_summary FROM test WHERE run_id = ? ORDER BY iteration ASC",
-      ).all(runId) as Array<{
-        node_id: string;
-        iteration: number;
-        tests_passed: boolean;
-        build_passed: boolean;
-        failing_summary: string | null;
-      }>;
-      for (const row of testRows) {
-        if (!parseNodeId(row.node_id)) continue;
-        allTestRows.push({
-          nodeId: row.node_id,
-          iteration: row.iteration,
-          testsPassed: Boolean(row.tests_passed),
-          buildPassed: Boolean(row.build_passed),
-          failingSummary: row.failing_summary,
-        });
-      }
-    } catch {
-      // test may not exist yet.
-    }
-
-    try {
-      const reviewFixRows = db.query(
-        "SELECT node_id, iteration, summary, all_issues_resolved, build_passed, tests_passed FROM review_fix WHERE run_id = ? ORDER BY iteration ASC",
-      ).all(runId) as Array<{
-        node_id: string;
-        iteration: number;
-        summary: string;
-        all_issues_resolved: boolean;
-        build_passed: boolean;
-        tests_passed: boolean;
-      }>;
-      for (const row of reviewFixRows) {
-        if (!parseNodeId(row.node_id)) continue;
-        allReviewFixRows.push({
-          nodeId: row.node_id,
-          iteration: row.iteration,
-          summary: row.summary ?? "",
-          allIssuesResolved: Boolean(row.all_issues_resolved),
-          buildPassed: Boolean(row.build_passed),
-          testsPassed: Boolean(row.tests_passed),
-        });
-      }
-    } catch {
-      // review_fix may not exist yet.
-    }
+    const allReviewFixRows: ReviewFixRow[] = queryRows(
+      db,
+      "SELECT node_id, iteration, summary, all_issues_resolved, build_passed, tests_passed FROM review_fix WHERE run_id = ? ORDER BY iteration ASC",
+      [runId],
+      (row) => {
+        const parsed = reviewFixRawRowSchema.safeParse(row);
+        if (!parsed.success) return null;
+        const r = parsed.data;
+        if (!parseNodeId(r.node_id)) return null;
+        return {
+          nodeId: r.node_id,
+          iteration: r.iteration,
+          summary: r.summary ?? "",
+          allIssuesResolved: Boolean(r.all_issues_resolved),
+          buildPassed: Boolean(r.build_passed),
+          testsPassed: Boolean(r.tests_passed),
+        };
+      },
+    );
 
     const unitIds = new Set<string>();
     for (const row of [...allTestRows, ...allFinalReviewRows, ...allImplementRows, ...allReviewFixRows]) {
