@@ -28,9 +28,14 @@ import {
 import { pushFindingsToLinear } from "../adapters/linear/push-findings";
 import {
   consumeTicket,
+  consumeAllTickets,
   markTicketInProgress,
   markTicketDone,
 } from "../adapters/linear/consume-tickets";
+import {
+  groupByFileOverlap,
+  groupToWorkPlan,
+} from "../workflows/ralphinho/scheduler";
 import { Database } from "bun:sqlite";
 
 function resolveLatestRunId(dbPath: string): string | null {
@@ -78,7 +83,11 @@ export async function runWorkflow(opts: {
     : undefined;
 
   // ── Linear consume-ticket path (scheduled-work only) ──────────────
+  const linearBatch = flags.batch === true;
   if (linearOpts && !existsSync(configPath)) {
+    if (linearBatch) {
+      return runBatchFromLinear({ repoRoot, ralphDir, linearOpts, force, flags });
+    }
     // No config yet — attempt to consume a Linear ticket and auto-init
     return runFromLinearTicket({ repoRoot, ralphDir, linearOpts, force, flags });
   }
@@ -446,6 +455,173 @@ async function runFromLinearTicket(opts: {
       issueId: ticket.issue.id,
     },
   });
+}
+
+/**
+ * Consume all actionable tickets from Linear, group by file overlap,
+ * and run each group sequentially via Smithers with landingMode: "pr".
+ */
+export async function runBatchFromLinear(opts: {
+  repoRoot: string;
+  ralphDir: string;
+  linearOpts: {
+    teamId: string;
+    label: string;
+    minPriority?: "critical" | "high" | "medium" | "low";
+  };
+  force: boolean;
+  flags: ParsedArgs["flags"];
+}): Promise<void> {
+  const { repoRoot, ralphDir, linearOpts, force, flags } = opts;
+
+  console.log("🔍 Fetching all approved tickets from Linear...\n");
+
+  const { tickets, unparseable } = await consumeAllTickets({
+    teamId: linearOpts.teamId,
+    label: linearOpts.label,
+  });
+
+  if (tickets.length === 0 && unparseable.length === 0) {
+    console.log("  No approved tickets found. Nothing to do.\n");
+    return;
+  }
+
+  if (tickets.length === 0) {
+    console.log(
+      "  No parseable tickets found (all tickets lack metadata). Nothing to do.\n",
+    );
+    return;
+  }
+
+  // Log unparseable tickets
+  if (unparseable.length > 0) {
+    console.log(
+      `  ⚠️  Skipping ${unparseable.length} unparseable ticket(s):`,
+    );
+    for (const t of unparseable) {
+      console.log(`    - ${t.issue.identifier}: ${t.issue.title}`);
+    }
+    console.log();
+  }
+
+  console.log(`  Found ${tickets.length} parseable ticket(s).\n`);
+
+  // Group by file overlap
+  const groups = groupByFileOverlap(tickets);
+
+  // Log grouping plan
+  console.log(`  📋 Batch plan: ${groups.length} group(s)\n`);
+  for (const group of groups) {
+    const ticketIds = group.tickets
+      .map((t) => t.issue.identifier)
+      .join(", ");
+    console.log(`    ${group.id}: files=[${group.files.join(", ")}] tickets=[${ticketIds}]`);
+  }
+  console.log();
+
+  // Mark all parseable tickets in-progress before executing groups
+  await Promise.all(
+    tickets.map((ticket) =>
+      markTicketInProgress({
+        issueId: ticket.issue.id,
+        teamId: linearOpts.teamId,
+      }),
+    ),
+  );
+
+  // Find Smithers
+  const smithersCliPath = resolveSmithersCliPath(
+    join(repoRoot, "package.json"),
+  );
+  if (!smithersCliPath) {
+    console.error("Error: Could not find smithers CLI.");
+    process.exit(1);
+  }
+
+  // Scan repo for build/test commands
+  const { scanRepo } = await import("./shared");
+  const repoConfig = await scanRepo(repoRoot);
+
+  // Ensure ralphDir exists before writing group artifacts
+  await mkdir(ralphDir, { recursive: true });
+
+  // Execute groups sequentially
+  for (const group of groups) {
+    console.log(`\n🚀 Executing ${group.id}...\n`);
+
+    const workPlan = groupToWorkPlan(group, repoConfig);
+
+    // Write group-specific plan
+    const planPath = join(ralphDir, `batch-plan-${group.id}.json`);
+    await writeFile(planPath, JSON.stringify(workPlan, null, 2), "utf8");
+
+    // Synthesize a minimal config.json for the Smithers subprocess.
+    // loadScheduledPreset() reads landingMode from this file.
+    const batchConfigPath = join(ralphDir, "config.json");
+    await writeFile(
+      batchConfigPath,
+      JSON.stringify(
+        {
+          mode: "scheduled-work",
+          repoRoot,
+          rfcPath: planPath,
+          baseBranch: "main",
+          landingMode: "pr",
+          agentOverride: null,
+          agents: { claude: true, codex: true, gh: false },
+          maxConcurrency:
+            typeof flags["max-concurrency"] === "string"
+              ? Math.max(1, Number(flags["max-concurrency"]) || 4)
+              : 4,
+          createdAt: new Date().toISOString(),
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const dbPath = join(ralphDir, `batch-${group.id}.db`);
+    const workflowPath = getRalphinhoPresetPath("scheduled-work");
+    const envOverrides = buildPresetEnv(ralphDir, dbPath, planPath);
+
+    const runId = `sw-batch-${group.id}-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+
+    const maxConcurrency =
+      typeof flags["max-concurrency"] === "string"
+        ? Math.max(1, Number(flags["max-concurrency"]) || 4)
+        : 4;
+
+    const exitCode = await launchSmithers({
+      mode: "run",
+      workflowPath,
+      repoRoot,
+      runId,
+      maxConcurrency,
+      smithersCliPath,
+      envOverrides,
+      force,
+    });
+
+    if (exitCode === 0) {
+      console.log(`  ✅ ${group.id} completed successfully.`);
+      // Mark this group's tickets as done
+      for (const ticket of group.tickets) {
+        await markTicketDone({
+          issueId: ticket.issue.id,
+          teamId: linearOpts.teamId,
+          summary: `Completed by batch run ${runId}.`,
+        });
+      }
+    } else {
+      console.error(
+        `  ❌ ${group.id} failed (exit ${exitCode}). Tickets remain in-progress.`,
+      );
+      // Continue to next group — failed group tickets stay in-progress
+    }
+  }
+
+  console.log("\n🏁 Batch execution complete.\n");
 }
 
 async function projectReviewArtifacts(repoRoot: string): Promise<void> {

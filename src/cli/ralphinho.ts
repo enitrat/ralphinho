@@ -42,6 +42,7 @@ Linear Integration:
   --team <id>                 Linear team ID (required with --linear)
   --label <name>              Linear label filter (default: "ralph-approved")
   --min-priority <level>      Minimum priority to push (critical|high|medium|low)
+  --batch                     Consume all approved tickets, group by file overlap, run sequentially
 
 Init Options:
   --dry-run                   Generate work plan but don't execute
@@ -59,6 +60,7 @@ Examples:
   # Linear integration
   ralphinho run --linear --team <team-id>              # improvinho: push findings to Linear
   ralphinho run --linear --team <team-id> --label approved   # ralphinho: consume from Linear
+  ralphinho run --linear --team <team-id> --batch            # batch: consume all tickets, group & run
 `);
 }
 

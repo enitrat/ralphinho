@@ -130,6 +130,7 @@ export default smithers((ctx) => (
       maxConcurrency={MAX_CONCURRENCY}
       maxPasses={MAX_PASSES}
       baseBranch={BASE_BRANCH}
+      landingMode={config.landingMode}
       agents={agents}
       fallbacks={fallbacks}
     />
