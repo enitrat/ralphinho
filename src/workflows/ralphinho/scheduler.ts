@@ -7,6 +7,7 @@
  */
 
 import type { ConsumedTicket } from "../../adapters/linear/types";
+import { slugify } from "../../cli/shared";
 import type { WorkPlan, WorkUnit } from "./types";
 
 // ── Types ───────────────────────────────────────────────────────────────
@@ -115,7 +116,7 @@ export function groupToWorkPlan(
   for (const [, chain] of fileChains) {
     let prevId: string | null = null;
     for (const ticket of chain) {
-      const unitId = sanitizeUnitId(ticket.issue.identifier);
+      const unitId = slugify(ticket.issue.identifier);
       units.push({
         id: unitId,
         name: `${ticket.issue.identifier}: ${ticket.issue.title}`,
@@ -141,17 +142,3 @@ export function groupToWorkPlan(
   };
 }
 
-// ── sanitizeUnitId ──────────────────────────────────────────────────────
-
-/**
- * Convert a Linear issue identifier to a valid kebab-case unit ID.
- * Lowercases, strips non-alphanumeric chars (except hyphens), collapses
- * multiple hyphens, and strips leading/trailing hyphens.
- */
-export function sanitizeUnitId(identifier: string): string {
-  return identifier
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
-}

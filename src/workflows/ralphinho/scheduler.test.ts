@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { ConsumedTicket } from "../../adapters/linear/types";
 import type { LinearIssue } from "smithers-orchestrator/linear";
+import { slugify } from "../../cli/shared";
 import {
   groupByFileOverlap,
   groupToWorkPlan,
-  sanitizeUnitId,
 } from "./scheduler";
 
 // ── Helpers ─────────────────────────────────────────────────────────────
@@ -246,22 +246,22 @@ describe("groupToWorkPlan", () => {
   });
 });
 
-// ── sanitizeUnitId ──────────────────────────────────────────────────────
+// ── slugify (reused from cli/shared) ────────────────────────────────────
 
-describe("sanitizeUnitId", () => {
+describe("slugify (used as unit ID sanitizer)", () => {
   test("converts IMP-0001 to imp-0001", () => {
-    expect(sanitizeUnitId("IMP-0001")).toBe("imp-0001");
+    expect(slugify("IMP-0001")).toBe("imp-0001");
   });
 
-  test("strips non-alphanumeric characters except hyphens", () => {
-    expect(sanitizeUnitId("IMP@#$0001")).toBe("imp-0001");
+  test("strips non-alphanumeric characters", () => {
+    expect(slugify("IMP@#$0001")).toBe("imp-0001");
   });
 
   test("collapses multiple hyphens", () => {
-    expect(sanitizeUnitId("IMP---0001")).toBe("imp-0001");
+    expect(slugify("IMP---0001")).toBe("imp-0001");
   });
 
   test("strips leading and trailing hyphens", () => {
-    expect(sanitizeUnitId("-IMP-0001-")).toBe("imp-0001");
+    expect(slugify("-IMP-0001-")).toBe("imp-0001");
   });
 });
