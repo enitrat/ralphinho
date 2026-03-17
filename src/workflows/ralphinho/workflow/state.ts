@@ -121,6 +121,65 @@ export function buildDepSummaries(snapshot: OutputSnapshot, unit: WorkUnit): Dep
     .filter((dep): dep is DepSummary => dep !== null);
 }
 
+// --- Shared OutputSnapshot builder ---
+
+export type SnapshotInput = {
+  mergeQueueRows: MergeQueueRow[];
+  testRows: TestRow[];
+  finalReviewRows: FinalReviewRow[];
+  implementRows: ImplementRow[];
+  reviewFixRows: ReviewFixRow[];
+};
+
+export function buildOutputSnapshot(input: SnapshotInput): OutputSnapshot {
+  const testByUnit = groupByUnit(input.testRows);
+  const finalReviewByUnit = groupByUnit(input.finalReviewRows);
+  const implementByUnit = groupByUnit(input.implementRows);
+  const reviewFixByUnit = groupByUnit(input.reviewFixRows);
+
+  return {
+    mergeQueueRows: input.mergeQueueRows,
+    latestTest: (id) => latestRow(testByUnit.get(id) ?? []),
+    latestFinalReview: (id) => latestRow(finalReviewByUnit.get(id) ?? []),
+    latestImplement: (id) => latestRow(implementByUnit.get(id) ?? []),
+    freshTest: (id, iteration) =>
+      (testByUnit.get(id) ?? []).find((row) => row.iteration === iteration) ?? null,
+    testHistory: (id) => testByUnit.get(id) ?? [],
+    finalReviewHistory: (id) => finalReviewByUnit.get(id) ?? [],
+    implementHistory: (id) => implementByUnit.get(id) ?? [],
+    reviewFixHistory: (id) => reviewFixByUnit.get(id) ?? [],
+    isUnitLanded: (id) =>
+      input.mergeQueueRows.some(
+        (row) => row.nodeId === MERGE_QUEUE_NODE_ID
+          && row.ticketsLanded.some((ticket) => ticket.ticketId === id),
+      ),
+  };
+}
+
+/** Extract unitId from a nodeId of the form `{unitId}:{stageName}` */
+export function extractUnitId(nodeId: string): string | null {
+  const lastColon = nodeId.lastIndexOf(":");
+  if (lastColon <= 0) return null;
+  return nodeId.slice(0, lastColon);
+}
+
+function groupByUnit<T extends { nodeId?: string }>(rows: T[]): Map<string, T[]> {
+  const map = new Map<string, T[]>();
+  for (const row of rows) {
+    if (!row.nodeId) continue;
+    const unitId = extractUnitId(row.nodeId);
+    if (!unitId) continue;
+    const current = map.get(unitId) ?? [];
+    current.push(row);
+    map.set(unitId, current);
+  }
+  return map;
+}
+
+function latestRow<T>(rows: T[]): T | null {
+  return rows.at(-1) ?? null;
+}
+
 export function buildMergeTickets(
   snapshot: OutputSnapshot,
   units: WorkUnit[],

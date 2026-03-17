@@ -2,9 +2,9 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import { DISPLAY_STAGES, MERGE_QUEUE_NODE_ID, type StageName } from "../workflows/ralphinho/workflow/contracts";
+import { DISPLAY_STAGES, type StageName } from "../workflows/ralphinho/workflow/contracts";
 import { getDecisionAudit } from "../workflows/ralphinho/workflow/decisions";
-import type { FinalReviewRow, ImplementRow, OutputSnapshot, ReviewFixRow, TestRow } from "../workflows/ralphinho/workflow/state";
+import { buildOutputSnapshot, extractUnitId, type FinalReviewRow, type ImplementRow, type OutputSnapshot, type ReviewFixRow, type TestRow } from "../workflows/ralphinho/workflow/state";
 import type { SmithersEvent } from "./events";
 
 const STAGE_NAMES = new Set<StageName>(DISPLAY_STAGES.map((entry) => entry.key));
@@ -47,10 +47,6 @@ function normalizePriority(value: unknown): string {
 
 function normalizeTier(value: unknown): "small" | "large" {
   return value === "small" ? "small" : "large";
-}
-
-function latestRow<T extends { iteration?: number }>(rows: T[]): T | null {
-  return rows.at(-1) ?? null;
 }
 
 export async function pollEventsFromDb(
@@ -240,10 +236,10 @@ export async function pollEventsFromDb(
       // merge_queue may not be initialized yet.
     }
 
-    const finalReviewByUnit = new Map<string, FinalReviewRow[]>();
-    const implementByUnit = new Map<string, ImplementRow[]>();
-    const testByUnit = new Map<string, TestRow[]>();
-    const reviewFixByUnit = new Map<string, ReviewFixRow[]>();
+    const allFinalReviewRows: FinalReviewRow[] = [];
+    const allImplementRows: ImplementRow[] = [];
+    const allTestRows: TestRow[] = [];
+    const allReviewFixRows: ReviewFixRow[] = [];
 
     try {
       const finalReviewRows = db.query(
@@ -257,10 +253,8 @@ export async function pollEventsFromDb(
         quality_score: number | null;
       }>;
       for (const row of finalReviewRows) {
-        const parsed = parseNodeId(row.node_id);
-        if (!parsed) continue;
-        const current = finalReviewByUnit.get(parsed.unitId) ?? [];
-        current.push({
+        if (!parseNodeId(row.node_id)) continue;
+        allFinalReviewRows.push({
           nodeId: row.node_id,
           iteration: row.iteration,
           readyToMoveOn: Boolean(row.ready_to_move_on),
@@ -268,7 +262,6 @@ export async function pollEventsFromDb(
           reasoning: row.reasoning ?? "",
           qualityScore: row.quality_score,
         });
-        finalReviewByUnit.set(parsed.unitId, current);
       }
     } catch {
       // final_review may not exist yet.
@@ -287,10 +280,8 @@ export async function pollEventsFromDb(
         summary: string | null;
       }>;
       for (const row of implementRows) {
-        const parsed = parseNodeId(row.node_id);
-        if (!parsed) continue;
-        const current = implementByUnit.get(parsed.unitId) ?? [];
-        current.push({
+        if (!parseNodeId(row.node_id)) continue;
+        allImplementRows.push({
           nodeId: row.node_id,
           iteration: row.iteration,
           whatWasDone: row.what_was_done ?? "",
@@ -299,7 +290,6 @@ export async function pollEventsFromDb(
           believesComplete: Boolean(row.believes_complete),
           summary: row.summary ?? undefined,
         });
-        implementByUnit.set(parsed.unitId, current);
       }
     } catch {
       // implement may not exist yet.
@@ -316,17 +306,14 @@ export async function pollEventsFromDb(
         failing_summary: string | null;
       }>;
       for (const row of testRows) {
-        const parsed = parseNodeId(row.node_id);
-        if (!parsed) continue;
-        const current = testByUnit.get(parsed.unitId) ?? [];
-        current.push({
+        if (!parseNodeId(row.node_id)) continue;
+        allTestRows.push({
           nodeId: row.node_id,
           iteration: row.iteration,
           testsPassed: Boolean(row.tests_passed),
           buildPassed: Boolean(row.build_passed),
           failingSummary: row.failing_summary,
         });
-        testByUnit.set(parsed.unitId, current);
       }
     } catch {
       // test may not exist yet.
@@ -344,10 +331,8 @@ export async function pollEventsFromDb(
         tests_passed: boolean;
       }>;
       for (const row of reviewFixRows) {
-        const parsed = parseNodeId(row.node_id);
-        if (!parsed) continue;
-        const current = reviewFixByUnit.get(parsed.unitId) ?? [];
-        current.push({
+        if (!parseNodeId(row.node_id)) continue;
+        allReviewFixRows.push({
           nodeId: row.node_id,
           iteration: row.iteration,
           summary: row.summary ?? "",
@@ -355,32 +340,25 @@ export async function pollEventsFromDb(
           buildPassed: Boolean(row.build_passed),
           testsPassed: Boolean(row.tests_passed),
         });
-        reviewFixByUnit.set(parsed.unitId, current);
       }
     } catch {
       // review_fix may not exist yet.
     }
 
-    const unitIds = new Set<string>([
-      ...finalReviewByUnit.keys(),
-      ...implementByUnit.keys(),
-      ...testByUnit.keys(),
-      ...reviewFixByUnit.keys(),
-    ]);
-    const snapshot: OutputSnapshot = {
+    const unitIds = new Set<string>();
+    for (const row of [...allTestRows, ...allFinalReviewRows, ...allImplementRows, ...allReviewFixRows]) {
+      if (row.nodeId) {
+        const uid = extractUnitId(row.nodeId);
+        if (uid) unitIds.add(uid);
+      }
+    }
+    const snapshot = buildOutputSnapshot({
       mergeQueueRows,
-      latestTest: (id) => latestRow(testByUnit.get(id) ?? []),
-      latestFinalReview: (id) => latestRow(finalReviewByUnit.get(id) ?? []),
-      latestImplement: (id) => latestRow(implementByUnit.get(id) ?? []),
-      freshTest: (id, iteration) => (testByUnit.get(id) ?? []).find((row) => row.iteration === iteration) ?? null,
-      testHistory: (id) => testByUnit.get(id) ?? [],
-      finalReviewHistory: (id) => finalReviewByUnit.get(id) ?? [],
-      implementHistory: (id) => implementByUnit.get(id) ?? [],
-      reviewFixHistory: (id) => reviewFixByUnit.get(id) ?? [],
-      isUnitLanded: (id) =>
-        mergeQueueRows.some((row) => row.nodeId === MERGE_QUEUE_NODE_ID
-          && row.ticketsLanded.some((ticket) => ticket.ticketId === id)),
-    };
+      testRows: allTestRows,
+      finalReviewRows: allFinalReviewRows,
+      implementRows: allImplementRows,
+      reviewFixRows: allReviewFixRows,
+    });
     for (const unitId of unitIds) {
       const audit = getDecisionAudit(snapshot, unitId);
       if (!audit.finalDecision) continue;

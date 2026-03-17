@@ -1,19 +1,14 @@
 import type { SmithersCtx } from "smithers-orchestrator";
 import type { ScheduledOutputs } from "../components/QualityPipeline";
-import { MERGE_QUEUE_NODE_ID, stageNodeId } from "./contracts";
-import type {
-  FinalReviewRow,
-  ImplementRow,
-  MergeQueueRow,
-  OutputSnapshot,
-  ReviewFixRow,
-  TestRow,
+import {
+  buildOutputSnapshot,
+  type MergeQueueRow,
+  type OutputSnapshot,
+  type FinalReviewRow,
+  type ImplementRow,
+  type ReviewFixRow,
+  type TestRow,
 } from "./state";
-
-type SnapshotCapableCtx = SmithersCtx<ScheduledOutputs> & {
-  outputs: (table: string) => unknown;
-  outputMaybe: (table: string, where: { nodeId: string; iteration: number }) => unknown;
-};
 
 function normalizeMergeQueueRow(row: unknown): MergeQueueRow {
   const record = (row && typeof row === "object") ? row as Record<string, unknown> : {};
@@ -35,45 +30,33 @@ function normalizeMergeQueueRow(row: unknown): MergeQueueRow {
   };
 }
 
-function rowsForNode<T extends { nodeId?: string; iteration?: number }>(
-  rows: unknown,
-  nodeId: string,
-): T[] {
-  if (!Array.isArray(rows)) return [];
-  return rows
-    .filter((row): row is T => typeof row === "object" && row !== null)
-    .filter((row) => row.nodeId === nodeId)
-    .sort((a, b) => (a.iteration ?? 0) - (b.iteration ?? 0));
+/**
+ * Single boundary cast: Smithers ctx.outputs() is typed via complex generics
+ * that TS can't resolve for ScheduledOutputs. We cast once here to access
+ * the runtime rows, then feed them into the shared typed builder.
+ */
+function runtimeOutputs(ctx: SmithersCtx<ScheduledOutputs>, table: string): unknown[] {
+  return (ctx as unknown as { outputs: (t: string) => unknown[] }).outputs(table);
 }
 
 export function buildSnapshot(ctx: SmithersCtx<ScheduledOutputs>): OutputSnapshot {
-  const runtimeCtx = ctx as SnapshotCapableCtx;
-  const rawRows = runtimeCtx.outputs("merge_queue");
-  const mergeQueueRows = Array.isArray(rawRows) ? rawRows.map(normalizeMergeQueueRow) : [];
-  const testRows = runtimeCtx.outputs("test");
-  const finalReviewRows = runtimeCtx.outputs("final_review");
-  const implementRows = runtimeCtx.outputs("implement");
-  const reviewFixRows = runtimeCtx.outputs("review_fix");
+  const rawMergeQueue = runtimeOutputs(ctx, "merge_queue");
+  const mergeQueueRows = Array.isArray(rawMergeQueue)
+    ? rawMergeQueue.map(normalizeMergeQueueRow)
+    : [];
 
-  return {
+  // Boundary casts: Smithers adds nodeId/iteration at runtime
+  // but they're not in the Zod schemas. Row types include optional nodeId/iteration.
+  const testRows = runtimeOutputs(ctx, "test") as TestRow[];
+  const finalReviewRows = runtimeOutputs(ctx, "final_review") as FinalReviewRow[];
+  const implementRows = runtimeOutputs(ctx, "implement") as ImplementRow[];
+  const reviewFixRows = runtimeOutputs(ctx, "review_fix") as ReviewFixRow[];
+
+  return buildOutputSnapshot({
     mergeQueueRows,
-    latestTest: (unitId) =>
-      (ctx.latest("test", stageNodeId(unitId, "test")) as TestRow | null) ?? null,
-    latestFinalReview: (unitId) =>
-      (ctx.latest("final_review", stageNodeId(unitId, "final-review")) as FinalReviewRow | null) ?? null,
-    latestImplement: (unitId) =>
-      (ctx.latest("implement", stageNodeId(unitId, "implement")) as ImplementRow | null) ?? null,
-    freshTest: (unitId, iteration) =>
-      (runtimeCtx.outputMaybe("test", {
-        nodeId: stageNodeId(unitId, "test"),
-        iteration,
-      }) as TestRow | null) ?? null,
-    testHistory: (unitId) => rowsForNode<TestRow>(testRows, stageNodeId(unitId, "test")),
-    finalReviewHistory: (unitId) => rowsForNode<FinalReviewRow>(finalReviewRows, stageNodeId(unitId, "final-review")),
-    implementHistory: (unitId) => rowsForNode<ImplementRow>(implementRows, stageNodeId(unitId, "implement")),
-    reviewFixHistory: (unitId) => rowsForNode<ReviewFixRow>(reviewFixRows, stageNodeId(unitId, "review-fix")),
-    isUnitLanded: (unitId) =>
-      mergeQueueRows.some((row) => row.nodeId === MERGE_QUEUE_NODE_ID
-        && row.ticketsLanded.some((ticket) => ticket.ticketId === unitId)),
-  };
+    testRows,
+    finalReviewRows,
+    implementRows,
+    reviewFixRows,
+  });
 }
