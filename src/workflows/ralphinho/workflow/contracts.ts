@@ -16,10 +16,10 @@ export function stageNodeId(unitId: string, stage: StageName): string {
 export type RetryPolicyKind = "fail-fast" | "backoff";
 
 export type StageRetryPolicy = {
-  kind: RetryPolicyKind;
-  retries: number;
-  initialDelayMs?: number;
-  maxDelayMs?: number;
+  readonly kind: RetryPolicyKind;
+  readonly retries: number;
+  readonly initialDelayMs?: number;
+  readonly maxDelayMs?: number;
 };
 
 export const MERGE_QUEUE_NODE_ID = "merge-queue" as const;
