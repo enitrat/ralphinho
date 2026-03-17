@@ -65,54 +65,28 @@ export const DISPLAY_STAGES = [
 ] as const;
 
 // Smithers semantics: retries=N means N+1 total attempts.
-export const RESEARCH_RETRY_POLICY: StageRetryPolicy = {
+const FAIL_FAST_RETRY_POLICY: StageRetryPolicy = {
+  kind: "fail-fast",
+  retries: 1,
+};
+
+const BACKOFF_RETRY_POLICY: StageRetryPolicy = {
   kind: "backoff",
   retries: 2,
   initialDelayMs: 1_000,
   maxDelayMs: 8_000,
 };
-export const PLAN_RETRY_POLICY: StageRetryPolicy = {
-  kind: "backoff",
-  retries: 2,
-  initialDelayMs: 1_000,
-  maxDelayMs: 8_000,
-};
-export const IMPLEMENT_RETRY_POLICY: StageRetryPolicy = {
-  kind: "fail-fast",
-  retries: 1,
-};
-export const TEST_RETRY_POLICY: StageRetryPolicy = {
-  kind: "fail-fast",
-  retries: 1,
-};
-export const REVIEW_RETRY_POLICY: StageRetryPolicy = {
-  kind: "fail-fast",
-  retries: 1,
-};
-export const REVIEW_FIX_RETRY_POLICY: StageRetryPolicy = {
-  kind: "fail-fast",
-  retries: 1,
-};
-export const FINAL_REVIEW_RETRY_POLICY: StageRetryPolicy = {
-  kind: "fail-fast",
-  retries: 1,
-};
-export const LEARNINGS_RETRY_POLICY: StageRetryPolicy = {
-  kind: "fail-fast",
-  retries: 1,
-};
-export const MERGE_QUEUE_RETRY_POLICY: StageRetryPolicy = {
-  kind: "backoff",
-  retries: 2,
-  initialDelayMs: 1_000,
-  maxDelayMs: 8_000,
-};
-export const PR_CREATION_RETRY_POLICY: StageRetryPolicy = {
-  kind: "backoff",
-  retries: 2,
-  initialDelayMs: 1_000,
-  maxDelayMs: 8_000,
-};
+
+export const RESEARCH_RETRY_POLICY: StageRetryPolicy = BACKOFF_RETRY_POLICY;
+export const PLAN_RETRY_POLICY: StageRetryPolicy = BACKOFF_RETRY_POLICY;
+export const IMPLEMENT_RETRY_POLICY: StageRetryPolicy = FAIL_FAST_RETRY_POLICY;
+export const TEST_RETRY_POLICY: StageRetryPolicy = FAIL_FAST_RETRY_POLICY;
+export const REVIEW_RETRY_POLICY: StageRetryPolicy = FAIL_FAST_RETRY_POLICY;
+export const REVIEW_FIX_RETRY_POLICY: StageRetryPolicy = FAIL_FAST_RETRY_POLICY;
+export const FINAL_REVIEW_RETRY_POLICY: StageRetryPolicy = FAIL_FAST_RETRY_POLICY;
+export const LEARNINGS_RETRY_POLICY: StageRetryPolicy = FAIL_FAST_RETRY_POLICY;
+export const MERGE_QUEUE_RETRY_POLICY: StageRetryPolicy = BACKOFF_RETRY_POLICY;
+export const PR_CREATION_RETRY_POLICY: StageRetryPolicy = BACKOFF_RETRY_POLICY;
 
 type ResearchSignatureInput = {
   unitId: string;
