@@ -1,7 +1,6 @@
 import React from "react";
 import { Task, Sequence, Parallel, Worktree } from "smithers-orchestrator";
 import type { SmithersCtx, AgentLike } from "smithers-orchestrator";
-import { z } from "zod";
 import type { WorkUnit, WorkPlan } from "../types";
 import { scheduledOutputSchemas } from "../schemas";
 import type { Issue } from "../schemas";
@@ -13,7 +12,6 @@ import TestPrompt from "../prompts/Test.mdx";
 import PrdReviewPrompt from "../prompts/PrdReview.mdx";
 import CodeReviewPrompt from "../prompts/CodeReview.mdx";
 import ReviewFixPrompt from "../prompts/ReviewFix.mdx";
-import FinalReviewPrompt from "../prompts/FinalReview.mdx";
 import LearningsExtractionPrompt from "../prompts/LearningsExtraction.mdx";
 import { buildUnitWorktreePath } from "./runtimeNames";
 import {
@@ -24,22 +22,6 @@ import {
 import type { ScheduledTier, StageName } from "../workflow/contracts";
 
 export type ScheduledOutputs = typeof scheduledOutputSchemas;
-
-const legacyFinalReviewOutputSchema = z.object({
-  readyToMoveOn: z.boolean(),
-  reasoning: z.string(),
-  approved: z.boolean(),
-  qualityScore: z.number(),
-  remainingIssues: z
-    .array(
-      z.object({
-        severity: z.enum(["critical", "major", "minor"]),
-        description: z.string(),
-        file: z.string().nullable(),
-      }),
-    )
-    .nullable(),
-});
 
 export type DepSummary = {
   id: string;
@@ -56,7 +38,6 @@ export type QualityPipelineAgents = {
   prdReviewer: AgentLike | AgentLike[];
   codeReviewer: AgentLike | AgentLike[];
   reviewFixer: AgentLike | AgentLike[];
-  finalReviewer: AgentLike | AgentLike[];
   learningsExtractor?: AgentLike | AgentLike[];
 };
 
@@ -140,11 +121,9 @@ export function QualityPipeline({
   const prdReview = ctx.latest("prd_review", stageNodeId(uid, "prd-review"));
   const codeReview = ctx.latest("code_review", stageNodeId(uid, "code-review"));
   const reviewFix = ctx.latest("review_fix", stageNodeId(uid, "review-fix"));
-  const finalReview = ctx.latest("final_review", stageNodeId(uid, "final-review"));
   const learnings = ctx.latest("learnings", stageNodeId(uid, "learnings"));
 
   const combinedReviewFeedback = buildReviewFeedback([
-    finalReview?.reasoning ? `Final review feedback:\n${finalReview.reasoning}` : null,
     prdReview?.feedback ? `PRD review feedback:\n${prdReview.feedback}` : null,
     codeReview?.feedback ? `Code review feedback:\n${codeReview.feedback}` : null,
   ]);
@@ -416,41 +395,6 @@ export function QualityPipeline({
           </Task>
         )}
 
-        {tierHasStep(tier, "final-review") && (
-          <Task
-            id={stageNodeId(uid, "final-review")}
-            output={legacyFinalReviewOutputSchema}
-            agent={agents.finalReviewer}
-            fallbackAgent={fallbacks?.finalReviewer}
-            retries={STAGE_RETRY_POLICIES["final-review"].retries}
-            meta={{
-              dependsOn: [stageNodeId(uid, "review-fix")],
-              retryPolicy: STAGE_RETRY_POLICIES["final-review"],
-            }}
-            // No cache: final gate should always evaluate latest stage artifacts.
-          >
-            <FinalReviewPrompt
-              unitId={uid}
-              unitName={unit.name}
-              description={unit.description}
-              acceptanceCriteria={unit.acceptance}
-              pass={pass + 1}
-              maxPasses={maxPasses}
-              implSummary={impl?.whatWasDone ?? null}
-              believesComplete={impl?.believesComplete ?? false}
-              buildPassed={test?.buildPassed ?? null}
-              testsPassCount={test?.testsPassCount ?? 0}
-              testsFailCount={test?.testsFailCount ?? 0}
-              failingSummary={test?.failingSummary ?? null}
-              prdSeverity={prdReview?.severity ?? null}
-              prdApproved={prdReview?.approved ?? null}
-              codeSeverity={codeReview?.severity ?? null}
-              codeApproved={codeReview?.approved ?? null}
-              issuesResolved={reviewFix?.allIssuesResolved ?? null}
-            />
-          </Task>
-        )}
-
         {tierHasStep(tier, "learnings") && agents.learningsExtractor && (
           <Task
             id={stageNodeId(uid, "learnings")}
@@ -459,7 +403,7 @@ export function QualityPipeline({
             fallbackAgent={fallbacks?.learningsExtractor}
             retries={STAGE_RETRY_POLICIES["learnings"].retries}
             meta={{
-              dependsOn: [stageNodeId(uid, "final-review")],
+              dependsOn: [stageNodeId(uid, "review-fix")],
               retryPolicy: STAGE_RETRY_POLICIES["learnings"],
             }}
             // Cache semantics: learnings are write-once per unit — do not re-extract on subsequent passes.
@@ -481,8 +425,8 @@ export function QualityPipeline({
                   (fp) => `${fp.issue}: ${fp.reasoning}`,
                 ) ?? []
               }
-              finalReviewApproved={finalReview?.approved ?? false}
-              finalReviewReasoning={finalReview?.reasoning ?? null}
+              finalReviewApproved={false}
+              finalReviewReasoning={null}
               learningsFilePath={learnings?.learningsFilePath ?? `docs/learnings/${uid}.md`}
               branchPrefix={branchPrefix}
             />

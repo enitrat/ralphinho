@@ -78,7 +78,6 @@ const roles = {
   prdReviewer: chooseAgent(AGENT_OVERRIDE ?? "sonnet", "PRD Reviewer — Verify implementation matches RFC specification"),
   codeReviewer: chooseAgent(AGENT_OVERRIDE ?? "opus", "Code Reviewer — Check code quality, conventions, security"),
   reviewFixer: chooseAgent(AGENT_OVERRIDE ?? "codex", "ReviewFixer — Fix issues found in code review"),
-  finalReviewer: chooseAgent(AGENT_OVERRIDE ?? "opus", "Final Reviewer — Decide if unit is complete"),
   learningsExtractor: chooseAgent(AGENT_OVERRIDE ?? "sonnet", "Learnings Extractor — Extract generalizable patterns from review cycles"),
   mergeQueue: chooseAgent(AGENT_OVERRIDE ?? "opus", "MergeQueue Coordinator — Rebase and land unit branches onto the configured target branch"),
 } satisfies Record<keyof ScheduledWorkflowAgents, { agent: AgentLike | AgentLike[]; fallback?: AgentLike }>;

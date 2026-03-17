@@ -49,7 +49,6 @@ function createAgents(): ScheduledWorkflowAgents {
     prdReviewer: a,
     codeReviewer: a,
     reviewFixer: a,
-    finalReviewer: a,
     mergeQueue: a,
   };
 }

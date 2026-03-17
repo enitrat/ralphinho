@@ -43,7 +43,6 @@ function createAgents(): QualityPipelineAgents {
     prdReviewer: a,
     codeReviewer: a,
     reviewFixer: a,
-    finalReviewer: a,
   };
 }
 
@@ -73,6 +72,42 @@ function collectTasks(node: React.ReactNode): Record<string, Record<string, unkn
 }
 
 describe("QualityPipeline stage semantics", () => {
+  test("learnings depends on review-fix and final-review stage is absent", () => {
+    const unit: WorkUnit = {
+      id: "u-learnings",
+      name: "Learn unit",
+      rfcSections: [],
+      description: "desc",
+      deps: [],
+      acceptance: ["ac1"],
+      tier: "small",
+    };
+    const workPlan = createWorkPlan(unit);
+    const ctx = createCtx(() => null);
+
+    const element = QualityPipeline({
+      unit,
+      ctx,
+      outputs: scheduledOutputSchemas,
+      agents: {
+        ...createAgents(),
+        learningsExtractor: {} as AgentLike,
+      },
+      workPlan,
+      depSummaries: [],
+      evictionContext: null,
+    });
+
+    const tasks = collectTasks(element);
+    const learningsTask = tasks[stageNodeId(unit.id, "learnings")];
+
+    expect(learningsTask).toBeDefined();
+    expect((learningsTask.meta as Record<string, unknown>).dependsOn).toEqual([
+      stageNodeId(unit.id, "review-fix"),
+    ]);
+    expect(tasks[`${unit.id}:final-review`]).toBeUndefined();
+  });
+
   test("applies retry policy semantics and input-matched cache skips for large units", () => {
     const unit: WorkUnit = {
       id: "u-large",
