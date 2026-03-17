@@ -21,11 +21,13 @@ import type { AgentLike } from "smithers-orchestrator";
 import type { WorkPlan } from "../types";
 import { QualityPipeline, type QualityPipelineAgents, type QualityPipelineFallbacks, type ScheduledOutputs } from "./QualityPipeline";
 import { AgenticMergeQueue, type AgenticMergeQueueTicket } from "./AgenticMergeQueue";
+import { PushAndCreatePR, type PushAndCreatePRTicket } from "./PushAndCreatePR";
 import { buildUnitBranchPrefix, buildUnitWorktreePath } from "./runtimeNames";
 import {
   COMPLETION_REPORT_NODE_ID,
   MERGE_QUEUE_NODE_ID,
   PASS_TRACKER_NODE_ID,
+  PR_CREATION_NODE_ID,
   stageNodeId,
   TIER_STAGES,
 } from "../workflow/contracts";
@@ -55,6 +57,7 @@ export type ScheduledWorkflowProps = {
   maxConcurrency: number;
   maxPasses?: number;
   baseBranch?: string;
+  landingMode?: "merge" | "pr";
   agents: ScheduledWorkflowAgents;
   fallbacks?: QualityPipelineFallbacks & { mergeQueue?: AgentLike };
 };
@@ -69,6 +72,7 @@ export function ScheduledWorkflow({
   maxConcurrency,
   maxPasses = 9,
   baseBranch = "main",
+  landingMode = "merge",
   agents,
   fallbacks,
 }: ScheduledWorkflowProps) {
@@ -199,21 +203,42 @@ export function ScheduledWorkflow({
             })}
           </Parallel>
 
-          {/* Phase 2: Merge queue — land all quality-complete units */}
-          <AgenticMergeQueue
-            nodeId={MERGE_QUEUE_NODE_ID}
-            branchPrefix={unitBranchPrefix}
-            ctx={ctx}
-            tickets={mergeTickets}
-            agent={agents.mergeQueue}
-            fallbackAgent={fallbacks?.mergeQueue}
-            output={outputs.merge_queue}
-            outputs={outputs}
-            repoRoot={repoRoot}
-            baseBranch={baseBranch}
-            postLandChecks={verificationChecks}
-            preLandChecks={verificationChecks}
-          />
+          {/* Phase 2: Land completed units via merge queue or PR creation */}
+          {landingMode === "pr" ? (
+            <PushAndCreatePR
+              ctx={ctx}
+              tickets={mergeTickets.map((t) => ({
+                ticketId: t.ticketId,
+                ticketTitle: t.ticketTitle,
+                branch: `${unitBranchPrefix}${t.ticketId}`,
+                worktreePath: t.worktreePath,
+                filesModified: t.filesModified,
+                filesCreated: t.filesCreated,
+              }))}
+              agent={agents.mergeQueue}
+              fallbackAgent={fallbacks?.mergeQueue}
+              repoRoot={repoRoot}
+              baseBranch={baseBranch}
+              branchPrefix={unitBranchPrefix}
+              output={outputs.pr_creation}
+              nodeId={PR_CREATION_NODE_ID}
+            />
+          ) : (
+            <AgenticMergeQueue
+              nodeId={MERGE_QUEUE_NODE_ID}
+              branchPrefix={unitBranchPrefix}
+              ctx={ctx}
+              tickets={mergeTickets}
+              agent={agents.mergeQueue}
+              fallbackAgent={fallbacks?.mergeQueue}
+              output={outputs.merge_queue}
+              outputs={outputs}
+              repoRoot={repoRoot}
+              baseBranch={baseBranch}
+              postLandChecks={verificationChecks}
+              preLandChecks={verificationChecks}
+            />
+          )}
 
           {/* Pass tracker (compute task — no agent needed) */}
           <Task id={PASS_TRACKER_NODE_ID} output={outputs.pass_tracker}>

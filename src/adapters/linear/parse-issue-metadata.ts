@@ -24,7 +24,7 @@ function extractField(description: string, key: string): string | null {
 }
 
 export function parseIssueMetadata(description: string | null): IssueMetadata {
-  if (!description) return { ...NULL_METADATA, lineRefs: [] };
+  if (!description) return { ...NULL_METADATA };
 
   const kind = extractField(description, "Kind");
   const priority = extractField(description, "Priority");

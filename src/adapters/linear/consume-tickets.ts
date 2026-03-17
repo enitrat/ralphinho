@@ -64,7 +64,7 @@ export async function consumeTicket(opts: {
   const { teamId, label } = opts;
   const linear = useLinear();
 
-  const issues = await linear.listIssues({
+  let issues = await linear.listIssues({
     teamId,
     labels: [label],
     stateType: "unstarted",
@@ -72,28 +72,22 @@ export async function consumeTicket(opts: {
   });
 
   if (issues.length === 0) {
-    // Also check "started" state in case some are in progress
-    const startedIssues = await linear.listIssues({
+    // Fall back to "started" state in case some are in progress
+    issues = await linear.listIssues({
       teamId,
       labels: [label],
       stateType: "started",
       limit: 10,
     });
+  }
 
-    if (startedIssues.length === 0) {
-      return null;
-    }
-
-    // Sort by priority (1=urgent, 4=low) and take the first
-    startedIssues.sort((a, b) => a.priority - b.priority);
-    const issue = startedIssues[0]!;
-    return { issue, rfcContent: issueToRfc(issue) };
+  if (issues.length === 0) {
+    return null;
   }
 
   // Sort by priority (1=urgent, 4=low) and take the first
   issues.sort((a, b) => a.priority - b.priority);
   const issue = issues[0]!;
-
   return { issue, rfcContent: issueToRfc(issue) };
 }
 

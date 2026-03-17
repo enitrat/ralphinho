@@ -13,6 +13,7 @@ function createCtx(latestImpl?: (table: string, nodeId: string) => unknown): Smi
     runId: "run-1",
     iteration: 0,
     latest: latestImpl ?? (() => null),
+    outputs: () => [],
   } as unknown as SmithersCtx<ScheduledOutputs>;
 }
 

@@ -114,6 +114,12 @@ export async function initScheduledWork(opts: {
       : await detectCurrentBranch(repoRoot);
   console.log(`  Base branch: ${baseBranch}`);
 
+  const landingMode =
+    typeof flags["landing-mode"] === "string" &&
+    (flags["landing-mode"] === "merge" || flags["landing-mode"] === "pr")
+      ? flags["landing-mode"]
+      : "merge";
+
   const config: ScheduledWorkConfig = {
     mode: "scheduled-work",
     repoRoot,
@@ -121,6 +127,7 @@ export async function initScheduledWork(opts: {
     agents,
     maxConcurrency,
     baseBranch,
+    landingMode,
     agentOverride,
     createdAt: new Date().toISOString(),
   };
