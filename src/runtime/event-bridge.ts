@@ -6,7 +6,21 @@ import { z } from "zod";
 
 import { DISPLAY_STAGES, type StageName } from "../workflows/ralphinho/workflow/contracts";
 import { getDecisionAudit } from "../workflows/ralphinho/workflow/decisions";
-import { buildOutputSnapshot, extractUnitId, type FinalReviewRow, type ImplementRow, type OutputSnapshot, type ReviewFixRow, type TestRow } from "../workflows/ralphinho/workflow/state";
+import { scheduledOutputSchemas } from "../workflows/ralphinho/schemas";
+import {
+  buildOutputSnapshot,
+  extractUnitId,
+  finalReviewRowFromSqlite,
+  implementRowFromSqlite,
+  parseStringArray,
+  reviewFixRowFromSqlite,
+  testRowFromSqlite,
+  type FinalReviewRow,
+  type ImplementRow,
+  type OutputSnapshot,
+  type ReviewFixRow,
+  type TestRow,
+} from "../workflows/ralphinho/workflow/state";
 import type { SmithersEvent } from "./events";
 
 const STAGE_NAMES = new Set<StageName>(DISPLAY_STAGES.map((entry) => entry.key));
@@ -46,41 +60,6 @@ const mergeQueueRowSchema = z.object({
   summary: z.string().nullable(),
 });
 
-const finalReviewRawRowSchema = z.object({
-  node_id: z.string(),
-  iteration: z.number(),
-  ready_to_move_on: z.number(),
-  approved: z.number(),
-  reasoning: z.string(),
-  quality_score: z.number().nullable(),
-});
-
-const implementRawRowSchema = z.object({
-  node_id: z.string(),
-  iteration: z.number(),
-  what_was_done: z.string(),
-  files_created: z.string().nullable(),
-  files_modified: z.string().nullable(),
-  believes_complete: z.number(),
-  summary: z.string().nullable(),
-});
-
-const testRawRowSchema = z.object({
-  node_id: z.string(),
-  iteration: z.number(),
-  tests_passed: z.number(),
-  build_passed: z.number(),
-  failing_summary: z.string().nullable(),
-});
-
-const reviewFixRawRowSchema = z.object({
-  node_id: z.string(),
-  iteration: z.number(),
-  summary: z.string(),
-  all_issues_resolved: z.number(),
-  build_passed: z.number(),
-  tests_passed: z.number(),
-});
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -94,26 +73,9 @@ function parseNodeId(nodeId: string): { unitId: string; stageName: StageName } |
   return { unitId, stageName: stage as StageName };
 }
 
-function parseObjectArray(raw: unknown): Array<Record<string, unknown>> {
-  if (typeof raw !== "string") return [];
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed)
-      ? parsed.filter((entry) => typeof entry === "object" && entry !== null) as Array<Record<string, unknown>>
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function parseStringArray(raw: unknown): string[] {
-  if (typeof raw !== "string") return [];
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.map((entry) => String(entry)) : [];
-  } catch {
-    return [];
-  }
+function safeJsonParse(raw: unknown): unknown {
+  if (typeof raw !== "string") return undefined;
+  try { return JSON.parse(raw); } catch { return undefined; }
 }
 
 function normalizePriority(value: unknown): string {
@@ -267,61 +229,60 @@ export async function pollEventsFromDb(
       );
       const rows = rawMergeQueueRows.success ? rawMergeQueueRows.data : [];
 
+      const ticketsLandedSchema = scheduledOutputSchemas.merge_queue.shape.ticketsLanded;
+      const ticketsEvictedSchema = scheduledOutputSchemas.merge_queue.shape.ticketsEvicted;
+      const ticketsSkippedSchema = scheduledOutputSchemas.merge_queue.shape.ticketsSkipped;
+
       for (const row of rows) {
-        const landed = parseObjectArray(row.tickets_landed);
+        const landedParsed = ticketsLandedSchema.safeParse(safeJsonParse(row.tickets_landed));
+        const landed = landedParsed.success ? landedParsed.data : [];
+        const evictedParsed = ticketsEvictedSchema.safeParse(safeJsonParse(row.tickets_evicted));
+        const evicted = evictedParsed.success ? evictedParsed.data : [];
+        const skippedParsed = ticketsSkippedSchema.safeParse(safeJsonParse(row.tickets_skipped));
+        const skipped = skippedParsed.success ? skippedParsed.data : [];
+
         mergeQueueRows.push({
           nodeId: "merge-queue",
-          ticketsLanded: landed
-            .filter((item) => typeof item.ticketId === "string")
-            .map((item) => ({
-              ticketId: item.ticketId as string,
-              mergeCommit: typeof item.mergeCommit === "string" ? item.mergeCommit : null,
-              summary: typeof item.summary === "string" ? item.summary : row.summary ?? "",
-              decisionIteration: typeof item.decisionIteration === "number" ? item.decisionIteration : null,
-              testIteration: typeof item.testIteration === "number" ? item.testIteration : null,
-              approvalSupersededRejection: item.approvalSupersededRejection === true,
-            })),
-          ticketsEvicted: parseObjectArray(row.tickets_evicted)
-            .filter((item) => typeof item.ticketId === "string")
-            .map((item) => ({
-              ticketId: item.ticketId as string,
-              reason: typeof item.reason === "string" ? item.reason : "evicted",
-              details: typeof item.details === "string" ? item.details : "",
-            })),
+          ticketsLanded: landed.map((item) => ({
+            ticketId: item.ticketId,
+            mergeCommit: item.mergeCommit ?? null,
+            summary: item.summary || (row.summary ?? ""),
+            decisionIteration: item.decisionIteration ?? null,
+            testIteration: item.testIteration ?? null,
+            approvalSupersededRejection: item.approvalSupersededRejection ?? false,
+          })),
+          ticketsEvicted: evicted,
         });
 
         for (const item of landed) {
-          if (typeof item.ticketId !== "string") continue;
           events.push({
             type: "merge-queue-landed",
             timestamp: now + row.iteration,
             runId,
             ticketId: item.ticketId,
-            mergeCommit: typeof item.mergeCommit === "string" ? item.mergeCommit : null,
-            summary: typeof item.summary === "string" ? item.summary : row.summary ?? "",
+            mergeCommit: item.mergeCommit ?? null,
+            summary: item.summary || (row.summary ?? ""),
           });
         }
 
-        for (const item of parseObjectArray(row.tickets_evicted)) {
-          if (typeof item.ticketId !== "string") continue;
+        for (const item of evicted) {
           events.push({
             type: "merge-queue-evicted",
             timestamp: now + row.iteration,
             runId,
             ticketId: item.ticketId,
-            reason: typeof item.reason === "string" ? item.reason : "evicted",
-            details: typeof item.details === "string" ? item.details : "",
+            reason: item.reason,
+            details: item.details,
           });
         }
 
-        for (const item of parseObjectArray(row.tickets_skipped)) {
-          if (typeof item.ticketId !== "string") continue;
+        for (const item of skipped) {
           events.push({
             type: "merge-queue-skipped",
             timestamp: now + row.iteration,
             runId,
             ticketId: item.ticketId,
-            reason: typeof item.reason === "string" ? item.reason : "skipped",
+            reason: item.reason,
           });
         }
       }
@@ -334,18 +295,9 @@ export async function pollEventsFromDb(
       "SELECT node_id, iteration, ready_to_move_on, approved, reasoning, quality_score FROM final_review WHERE run_id = ? ORDER BY iteration ASC",
       [runId],
       (row) => {
-        const parsed = finalReviewRawRowSchema.safeParse(row);
-        if (!parsed.success) return null;
-        const r = parsed.data;
-        if (!parseNodeId(r.node_id)) return null;
-        return {
-          nodeId: r.node_id,
-          iteration: r.iteration,
-          readyToMoveOn: Boolean(r.ready_to_move_on),
-          approved: Boolean(r.approved),
-          reasoning: r.reasoning ?? "",
-          qualityScore: r.quality_score,
-        };
+        const mapped = finalReviewRowFromSqlite(row as Record<string, unknown>);
+        if (!mapped || !parseNodeId(mapped.nodeId)) return null;
+        return mapped;
       },
     );
 
@@ -354,19 +306,9 @@ export async function pollEventsFromDb(
       "SELECT node_id, iteration, what_was_done, files_created, files_modified, believes_complete, summary FROM implement WHERE run_id = ? ORDER BY iteration ASC",
       [runId],
       (row) => {
-        const parsed = implementRawRowSchema.safeParse(row);
-        if (!parsed.success) return null;
-        const r = parsed.data;
-        if (!parseNodeId(r.node_id)) return null;
-        return {
-          nodeId: r.node_id,
-          iteration: r.iteration,
-          whatWasDone: r.what_was_done ?? "",
-          filesCreated: parseStringArray(r.files_created),
-          filesModified: parseStringArray(r.files_modified),
-          believesComplete: Boolean(r.believes_complete),
-          summary: r.summary ?? undefined,
-        };
+        const mapped = implementRowFromSqlite(row as Record<string, unknown>);
+        if (!mapped || !parseNodeId(mapped.nodeId)) return null;
+        return mapped;
       },
     );
 
@@ -375,17 +317,9 @@ export async function pollEventsFromDb(
       "SELECT node_id, iteration, tests_passed, build_passed, failing_summary FROM test WHERE run_id = ? ORDER BY iteration ASC",
       [runId],
       (row) => {
-        const parsed = testRawRowSchema.safeParse(row);
-        if (!parsed.success) return null;
-        const r = parsed.data;
-        if (!parseNodeId(r.node_id)) return null;
-        return {
-          nodeId: r.node_id,
-          iteration: r.iteration,
-          testsPassed: Boolean(r.tests_passed),
-          buildPassed: Boolean(r.build_passed),
-          failingSummary: r.failing_summary,
-        };
+        const mapped = testRowFromSqlite(row as Record<string, unknown>);
+        if (!mapped || !parseNodeId(mapped.nodeId)) return null;
+        return mapped;
       },
     );
 
@@ -394,18 +328,9 @@ export async function pollEventsFromDb(
       "SELECT node_id, iteration, summary, all_issues_resolved, build_passed, tests_passed FROM review_fix WHERE run_id = ? ORDER BY iteration ASC",
       [runId],
       (row) => {
-        const parsed = reviewFixRawRowSchema.safeParse(row);
-        if (!parsed.success) return null;
-        const r = parsed.data;
-        if (!parseNodeId(r.node_id)) return null;
-        return {
-          nodeId: r.node_id,
-          iteration: r.iteration,
-          summary: r.summary ?? "",
-          allIssuesResolved: Boolean(r.all_issues_resolved),
-          buildPassed: Boolean(r.build_passed),
-          testsPassed: Boolean(r.tests_passed),
-        };
+        const mapped = reviewFixRowFromSqlite(row as Record<string, unknown>);
+        if (!mapped || !parseNodeId(mapped.nodeId)) return null;
+        return mapped;
       },
     );
 

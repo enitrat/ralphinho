@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import type { WorkUnit } from "../types";
 import type { DepSummary } from "../components/QualityPipeline";
 import type { AgenticMergeQueueTicket } from "../components/AgenticMergeQueue";
@@ -53,6 +55,108 @@ export type ReviewFixRow = {
   buildPassed: boolean;
   testsPassed: boolean;
 };
+
+// ── SQLite row parsing utilities ──────────────────────────────────────────
+
+export function parseStringArray(raw: unknown): string[] {
+  if (typeof raw !== "string") return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map((entry) => String(entry)) : [];
+  } catch {
+    return [];
+  }
+}
+
+// Internal raw row schemas (SQLite: snake_case, INTEGER for booleans)
+
+const finalReviewRawSchema = z.object({
+  node_id: z.string(),
+  iteration: z.number(),
+  ready_to_move_on: z.number(),
+  approved: z.number(),
+  reasoning: z.string(),
+  quality_score: z.number().nullable(),
+});
+
+export function finalReviewRowFromSqlite(row: Record<string, unknown>): FinalReviewRow | null {
+  const r = finalReviewRawSchema.safeParse(row);
+  if (!r.success) return null;
+  return {
+    nodeId: r.data.node_id,
+    iteration: r.data.iteration,
+    readyToMoveOn: Boolean(r.data.ready_to_move_on),
+    approved: Boolean(r.data.approved),
+    reasoning: r.data.reasoning ?? "",
+    qualityScore: r.data.quality_score,
+  };
+}
+
+const implementRawSchema = z.object({
+  node_id: z.string(),
+  iteration: z.number(),
+  what_was_done: z.string(),
+  files_created: z.string().nullable(),
+  files_modified: z.string().nullable(),
+  believes_complete: z.number(),
+  summary: z.string().nullable(),
+});
+
+export function implementRowFromSqlite(row: Record<string, unknown>): ImplementRow | null {
+  const r = implementRawSchema.safeParse(row);
+  if (!r.success) return null;
+  return {
+    nodeId: r.data.node_id,
+    iteration: r.data.iteration,
+    whatWasDone: r.data.what_was_done ?? "",
+    filesCreated: parseStringArray(r.data.files_created),
+    filesModified: parseStringArray(r.data.files_modified),
+    believesComplete: Boolean(r.data.believes_complete),
+    summary: r.data.summary ?? undefined,
+  };
+}
+
+const testRawSchema = z.object({
+  node_id: z.string(),
+  iteration: z.number(),
+  tests_passed: z.number(),
+  build_passed: z.number(),
+  failing_summary: z.string().nullable(),
+});
+
+export function testRowFromSqlite(row: Record<string, unknown>): TestRow | null {
+  const r = testRawSchema.safeParse(row);
+  if (!r.success) return null;
+  return {
+    nodeId: r.data.node_id,
+    iteration: r.data.iteration,
+    testsPassed: Boolean(r.data.tests_passed),
+    buildPassed: Boolean(r.data.build_passed),
+    failingSummary: r.data.failing_summary,
+  };
+}
+
+const reviewFixRawSchema = z.object({
+  node_id: z.string(),
+  iteration: z.number(),
+  summary: z.string(),
+  all_issues_resolved: z.number(),
+  build_passed: z.number(),
+  tests_passed: z.number(),
+});
+
+export function reviewFixRowFromSqlite(row: Record<string, unknown>): ReviewFixRow | null {
+  const r = reviewFixRawSchema.safeParse(row);
+  if (!r.success) return null;
+  return {
+    nodeId: r.data.node_id,
+    iteration: r.data.iteration,
+    summary: r.data.summary ?? "",
+    allIssuesResolved: Boolean(r.data.all_issues_resolved),
+    buildPassed: Boolean(r.data.build_passed),
+    testsPassed: Boolean(r.data.tests_passed),
+  };
+}
 
 export type OutputSnapshot = {
   mergeQueueRows: MergeQueueRow[];
