@@ -212,6 +212,23 @@ describe("groupToWorkPlan", () => {
     expect(plan.units[1]!.deps).toEqual([]);
   });
 
+  test("multiple no-primaryFile tickets in a group have independent (empty) deps", () => {
+    const tickets = [
+      buildTicket({ id: "a", identifier: "IMP-0001", primaryFile: null }),
+      buildTicket({ id: "b", identifier: "IMP-0002", primaryFile: null }),
+      buildTicket({ id: "c", identifier: "IMP-0003", primaryFile: null }),
+    ];
+
+    const group = { id: "group-0", files: [], tickets };
+    const plan = groupToWorkPlan(group, repoConfig);
+
+    expect(plan.units).toHaveLength(3);
+    // Each no-file ticket should be independent — no deps
+    for (const unit of plan.units) {
+      expect(unit.deps).toEqual([]);
+    }
+  });
+
   test("work plan has correct source and repo config", () => {
     const group = {
       id: "group-0",

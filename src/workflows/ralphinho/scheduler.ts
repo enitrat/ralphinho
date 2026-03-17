@@ -103,10 +103,12 @@ export function groupToWorkPlan(
     testCmds: Record<string, string>;
   },
 ): WorkPlan {
-  // Build per-file chains
+  // Build per-file chains. Tickets without a primaryFile get unique keys
+  // so they remain independent (no spurious sequential deps).
   const fileChains = new Map<string, ConsumedTicket[]>();
+  let noFileIdx = 0;
   for (const ticket of group.tickets) {
-    const file = ticket.metadata?.primaryFile ?? "__unknown__";
+    const file = ticket.metadata?.primaryFile ?? `__no-file-${noFileIdx++}__`;
     const chain = fileChains.get(file) ?? [];
     chain.push(ticket);
     fileChains.set(file, chain);
