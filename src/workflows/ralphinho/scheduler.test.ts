@@ -206,18 +206,19 @@ describe("groupToWorkPlan", () => {
     }
   });
 
-  test("work plan has correct source and repo config", () => {
+  test("work plan has correct source, repo config, and generatedAt", () => {
+    const fixedDate = new Date("2026-03-17T12:00:00.000Z");
     const group = {
       id: "group-0",
       files: ["src/foo.ts"],
       tickets: [buildTicket({ identifier: "IMP-0001", primaryFile: "src/foo.ts" })],
     };
 
-    const plan = groupToWorkPlan(group, repoConfig);
+    const plan = groupToWorkPlan(group, repoConfig, { now: () => fixedDate });
 
     expect(plan.source).toBe("linear-batch");
     expect(plan.repo).toEqual(repoConfig);
-    expect(plan.generatedAt).toBeTruthy();
+    expect(plan.generatedAt).toBe("2026-03-17T12:00:00.000Z");
   });
 
   test("units have correct shape", () => {

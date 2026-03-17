@@ -102,6 +102,7 @@ export function groupToWorkPlan(
     buildCmds: Record<string, string>;
     testCmds: Record<string, string>;
   },
+  { now = () => new Date() }: { now?: () => Date } = {},
 ): WorkPlan {
   // Build per-file chains. Tickets without a primaryFile get unique keys
   // so they remain independent (no spurious sequential deps).
@@ -138,7 +139,7 @@ export function groupToWorkPlan(
 
   return {
     source: "linear-batch",
-    generatedAt: new Date().toISOString(),
+    generatedAt: now().toISOString(),
     repo: repoConfig,
     units,
   };
