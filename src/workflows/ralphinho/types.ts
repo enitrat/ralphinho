@@ -49,37 +49,6 @@ export const workPlanSchema = z.object({
 
 export type WorkPlan = z.infer<typeof workPlanSchema>;
 
-// ── Tier Pipeline Stages ──────────────────────────────────────────────
-
-/**
- * Quality pipeline stages per tier for scheduled work.
- * These always include review steps because scheduled work is
- * driven by a spec (the RFC).
- */
-export const SCHEDULED_TIERS = {
-  small: [
-    "implement",
-    "test",
-    "code-review",
-    "review-fix",
-    "final-review",
-    "learnings",
-  ] as const,
-  large: [
-    "research",
-    "plan",
-    "implement",
-    "test",
-    "prd-review",
-    "code-review",
-    "review-fix",
-    "final-review",
-    "learnings",
-  ] as const,
-} as const;
-
-export type ScheduledTier = keyof typeof SCHEDULED_TIERS;
-
 // ── DAG Utilities ─────────────────────────────────────────────────────
 
 /**

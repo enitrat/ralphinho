@@ -43,6 +43,10 @@ declare module "smithers-orchestrator" {
 
   export class ClaudeCodeAgent {
     constructor(options: Record<string, unknown>);
+    generate(options: {
+      prompt: string;
+      [key: string]: unknown;
+    }): Promise<{ text: string; [key: string]: unknown }>;
   }
 
   export class CodexAgent {

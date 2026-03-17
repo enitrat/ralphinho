@@ -3,6 +3,7 @@ import { Task, Sequence, Parallel, Worktree } from "smithers-orchestrator";
 import type { SmithersCtx, AgentLike } from "smithers-orchestrator";
 import type { WorkUnit, WorkPlan } from "../types";
 import { scheduledOutputSchemas } from "../schemas";
+import type { Issue } from "../schemas";
 
 import ResearchPrompt from "../prompts/Research.mdx";
 import PlanPrompt from "../prompts/Plan.mdx";
@@ -17,25 +18,18 @@ import { buildUnitWorktreePath } from "./runtimeNames";
 import {
   buildPlanInputSignature,
   buildResearchInputSignature,
-  FINAL_REVIEW_RETRIES,
   FINAL_REVIEW_RETRY_POLICY,
-  IMPLEMENT_RETRIES,
   IMPLEMENT_RETRY_POLICY,
-  LEARNINGS_RETRIES,
   LEARNINGS_RETRY_POLICY,
-  PLAN_RETRIES,
   PLAN_RETRY_POLICY,
-  RESEARCH_RETRIES,
   RESEARCH_RETRY_POLICY,
-  REVIEW_FIX_RETRIES,
   REVIEW_FIX_RETRY_POLICY,
-  REVIEW_RETRIES,
   REVIEW_RETRY_POLICY,
   stageNodeId,
-  TEST_RETRIES,
   TEST_RETRY_POLICY,
   TIER_STAGES,
 } from "../workflow/contracts";
+import type { ScheduledTier, StageName } from "../workflow/contracts";
 
 export type ScheduledOutputs = typeof scheduledOutputSchemas;
 
@@ -78,11 +72,8 @@ export type QualityPipelineProps = {
   worktreePath?: string;
 };
 
-function tierHasStep(tier: string, step: string): boolean {
-  const stages = TIER_STAGES[tier as keyof typeof TIER_STAGES];
-  return stages
-    ? (stages as readonly string[]).includes(step)
-    : (TIER_STAGES.large as readonly string[]).includes(step);
+function tierHasStep(tier: ScheduledTier, step: StageName): boolean {
+  return (TIER_STAGES[tier] as readonly string[]).includes(step);
 }
 
 function buildReviewFeedback(parts: Array<string | null | undefined>): string | undefined {
@@ -93,17 +84,12 @@ function buildReviewFeedback(parts: Array<string | null | undefined>): string | 
   return lines.length > 0 ? lines.join("\n\n") : undefined;
 }
 
-function buildIssueList(issues: unknown): string[] {
-  if (!Array.isArray(issues)) return [];
+function buildIssueList(issues: Issue[] | null | undefined): string[] {
+  if (!issues) return [];
   return issues.map((issue) => {
-    const entry = issue as {
-      severity?: string;
-      description?: string;
-      file?: string | null;
-    };
-    const sev = entry.severity ? `[${entry.severity}] ` : "";
-    const desc = entry.description ?? "Unspecified issue";
-    const file = entry.file ? ` (${entry.file})` : "";
+    const sev = issue.severity ? `[${issue.severity}] ` : "";
+    const desc = issue.description ?? "Unspecified issue";
+    const file = issue.file ? ` (${issue.file})` : "";
     return `${sev}${desc}${file}`;
   });
 }
@@ -202,7 +188,7 @@ export function QualityPipeline({
             output={outputs.research}
             agent={agents.researcher}
             fallbackAgent={fallbacks?.researcher}
-            retries={RESEARCH_RETRIES}
+            retries={RESEARCH_RETRY_POLICY.retries}
             meta={{ retryPolicy: RESEARCH_RETRY_POLICY }}
             // Cache semantics: reuse only when the prior output matches current inputs.
             skipIf={research?.inputSignature === researchInputSignature}
@@ -231,7 +217,7 @@ export function QualityPipeline({
             output={outputs.plan}
             agent={agents.planner}
             fallbackAgent={fallbacks?.planner}
-            retries={PLAN_RETRIES}
+            retries={PLAN_RETRY_POLICY.retries}
             meta={{
               dependsOn: [stageNodeId(uid, "research")],
               retryPolicy: PLAN_RETRY_POLICY,
@@ -262,7 +248,7 @@ export function QualityPipeline({
           output={outputs.implement}
           agent={agents.implementer}
           fallbackAgent={fallbacks?.implementer}
-          retries={IMPLEMENT_RETRIES}
+          retries={IMPLEMENT_RETRY_POLICY.retries}
           meta={{ dependsOn: implementDependsOn, retryPolicy: IMPLEMENT_RETRY_POLICY }}
           // No cache: implementation must re-run against latest review context.
         >
@@ -295,7 +281,7 @@ export function QualityPipeline({
           output={outputs.test}
           agent={agents.tester}
           fallbackAgent={fallbacks?.tester}
-          retries={TEST_RETRIES}
+          retries={TEST_RETRY_POLICY.retries}
           meta={{
             dependsOn: [stageNodeId(uid, "implement")],
             retryPolicy: TEST_RETRY_POLICY,
@@ -322,7 +308,7 @@ export function QualityPipeline({
               output={outputs.prd_review}
               agent={agents.prdReviewer}
               fallbackAgent={fallbacks?.prdReviewer}
-              retries={REVIEW_RETRIES}
+              retries={REVIEW_RETRY_POLICY.retries}
               meta={{
                 dependsOn: [stageNodeId(uid, "implement")],
                 retryPolicy: REVIEW_RETRY_POLICY,
@@ -357,7 +343,7 @@ export function QualityPipeline({
               output={outputs.code_review}
               agent={agents.codeReviewer}
               fallbackAgent={fallbacks?.codeReviewer}
-              retries={REVIEW_RETRIES}
+              retries={REVIEW_RETRY_POLICY.retries}
               meta={{
                 dependsOn: [stageNodeId(uid, "implement")],
                 retryPolicy: REVIEW_RETRY_POLICY,
@@ -393,7 +379,7 @@ export function QualityPipeline({
             output={outputs.review_fix}
             agent={agents.reviewFixer}
             fallbackAgent={fallbacks?.reviewFixer}
-            retries={REVIEW_FIX_RETRIES}
+            retries={REVIEW_FIX_RETRY_POLICY.retries}
             meta={{
               dependsOn: [
                 stageNodeId(uid, "prd-review"),
@@ -428,7 +414,7 @@ export function QualityPipeline({
             output={outputs.final_review}
             agent={agents.finalReviewer}
             fallbackAgent={fallbacks?.finalReviewer}
-            retries={FINAL_REVIEW_RETRIES}
+            retries={FINAL_REVIEW_RETRY_POLICY.retries}
             meta={{
               dependsOn: [stageNodeId(uid, "review-fix")],
               retryPolicy: FINAL_REVIEW_RETRY_POLICY,
@@ -463,7 +449,7 @@ export function QualityPipeline({
             output={outputs.learnings}
             agent={agents.learningsExtractor}
             fallbackAgent={fallbacks?.learningsExtractor}
-            retries={LEARNINGS_RETRIES}
+            retries={LEARNINGS_RETRY_POLICY.retries}
             meta={{
               dependsOn: [stageNodeId(uid, "final-review")],
               retryPolicy: LEARNINGS_RETRY_POLICY,

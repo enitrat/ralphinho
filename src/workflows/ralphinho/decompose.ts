@@ -1,12 +1,19 @@
 /**
  * RFC Decomposition — AI-powered RFC → work units + dependency DAG.
  *
- * Takes an RFC file content and repo context, calls the Anthropic API
+ * Takes an RFC file content and repo context, calls an AI agent
  * to produce a structured WorkPlan with parallelizable work units.
  */
 
+import { ClaudeCodeAgent } from "smithers-orchestrator";
 import type { RepoConfig } from "../../cli/shared";
-import { workPlanSchema, type WorkPlan, type WorkUnit, validateDAG, computeLayers } from "./types";
+import {
+  workPlanSchema,
+  type WorkPlan,
+  type WorkUnit,
+  validateDAG,
+  computeLayers,
+} from "./types";
 
 const DECOMPOSE_SYSTEM_PROMPT = `You are a senior software architect decomposing an RFC/PRD into executable work units for an automated AI development pipeline.
 
@@ -80,29 +87,14 @@ Decompose this RFC into work units. Prefer fewer cohesive units over many granul
 }
 
 /**
- * Decompose an RFC into work units using the Anthropic API.
+ * Decompose an RFC into work units using an AI agent.
  */
 export async function decomposeRFC(
   rfcContent: string,
   repoConfig: RepoConfig,
 ): Promise<{ plan: WorkPlan; layers: WorkUnit[][] }> {
   const prompt = buildDecomposePrompt(rfcContent, repoConfig);
-
-  const spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-  let spinIdx = 0;
-  const spinInterval = setInterval(() => {
-    process.stdout.write(
-      `\r${spinner[spinIdx++ % spinner.length]} Decomposing RFC into work units...`,
-    );
-  }, 80);
-
-  let rawResult: string;
-  try {
-    rawResult = await callAI(prompt);
-  } finally {
-    clearInterval(spinInterval);
-    process.stdout.write("\r\x1b[K");
-  }
+  const rawResult = await callAI(prompt);
 
   // Parse the JSON response
   let jsonStr = rawResult;
@@ -152,69 +144,20 @@ export async function decomposeRFC(
 }
 
 /**
- * Call the Anthropic API (or fall back to claude CLI).
+ * Call AI via ClaudeCodeAgent (wraps the claude CLI).
  */
 async function callAI(prompt: string): Promise<string> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const agent = new ClaudeCodeAgent({
+    model: "claude-sonnet-4-6",
+    systemPrompt: DECOMPOSE_SYSTEM_PROMPT,
+    cwd: process.cwd(),
+    dangerouslySkipPermissions: true,
+    timeoutMs: 5 * 60 * 1000,
+  });
 
-  if (apiKey) {
-    const resp = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 8192,
-        system: DECOMPOSE_SYSTEM_PROMPT,
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
-
-    if (!resp.ok) {
-      throw new Error(`Anthropic API ${resp.status}: ${await resp.text()}`);
-    }
-
-    const data = (await resp.json()) as any;
-    const text = data.content?.[0]?.text ?? "";
-    if (!text.trim()) throw new Error("Empty API response");
-    return text;
-  }
-
-  // Fallback to claude CLI
-  console.log("  (no API key, falling back to claude CLI...)\n");
-  const claudeEnv = { ...process.env, ANTHROPIC_API_KEY: "" };
-  delete (claudeEnv as any).CLAUDECODE;
-
-  const fullPrompt = `${DECOMPOSE_SYSTEM_PROMPT}\n\n${prompt}`;
-  const proc = Bun.spawn(
-    [
-      "claude",
-      "--print",
-      "--output-format",
-      "text",
-      "--model",
-      "claude-sonnet-4-6",
-      fullPrompt,
-    ],
-    {
-      stdout: "pipe",
-      stderr: "pipe",
-      env: claudeEnv,
-    },
-  );
-
-  const out = await new Response(proc.stdout).text();
-  const err = await new Response(proc.stderr).text();
-  const code = await proc.exited;
-
-  if (code !== 0 || !out.trim()) {
-    throw new Error(`claude CLI failed (code ${code}): ${err}`);
-  }
-
-  return out.trim();
+  const result = await agent.generate({ prompt });
+  if (!result.text.trim()) throw new Error("Empty agent response");
+  return result.text;
 }
 
 /**

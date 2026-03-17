@@ -1,5 +1,3 @@
-import type { ScheduledTier } from "../types";
-
 export type StageName =
   | "research"
   | "plan"
@@ -9,17 +7,6 @@ export type StageName =
   | "code-review"
   | "review-fix"
   | "final-review"
-  | "learnings";
-
-export type StageTableName =
-  | "research"
-  | "plan"
-  | "implement"
-  | "test"
-  | "prd_review"
-  | "code_review"
-  | "review_fix"
-  | "final_review"
   | "learnings";
 
 export function stageNodeId(unitId: string, stage: StageName): string {
@@ -40,7 +27,7 @@ export const PR_CREATION_NODE_ID = "pr-creation" as const;
 export const PASS_TRACKER_NODE_ID = "pass-tracker" as const;
 export const COMPLETION_REPORT_NODE_ID = "completion-report" as const;
 
-export const TIER_STAGES: Record<ScheduledTier, readonly StageName[]> = {
+export const TIER_STAGES = {
   small: [
     "implement",
     "test",
@@ -48,7 +35,7 @@ export const TIER_STAGES: Record<ScheduledTier, readonly StageName[]> = {
     "review-fix",
     "final-review",
     "learnings",
-  ],
+  ] as const,
   large: [
     "research",
     "plan",
@@ -59,19 +46,21 @@ export const TIER_STAGES: Record<ScheduledTier, readonly StageName[]> = {
     "review-fix",
     "final-review",
     "learnings",
-  ],
-};
+  ] as const,
+} as const satisfies Record<string, readonly StageName[]>;
+
+export type ScheduledTier = keyof typeof TIER_STAGES;
 
 export const DISPLAY_STAGES = [
-  { key: "research", abbr: "R", table: "research" as StageTableName },
-  { key: "plan", abbr: "P", table: "plan" as StageTableName },
-  { key: "implement", abbr: "I", table: "implement" as StageTableName },
-  { key: "test", abbr: "T", table: "test" as StageTableName },
-  { key: "prd-review", abbr: "D", table: "prd_review" as StageTableName },
-  { key: "code-review", abbr: "V", table: "code_review" as StageTableName },
-  { key: "review-fix", abbr: "F", table: "review_fix" as StageTableName },
-  { key: "final-review", abbr: "G", table: "final_review" as StageTableName },
-  { key: "learnings", abbr: "L", table: "learnings" as StageTableName },
+  { key: "research", abbr: "R", table: "research" },
+  { key: "plan", abbr: "P", table: "plan" },
+  { key: "implement", abbr: "I", table: "implement" },
+  { key: "test", abbr: "T", table: "test" },
+  { key: "prd-review", abbr: "D", table: "prd_review" },
+  { key: "code-review", abbr: "V", table: "code_review" },
+  { key: "review-fix", abbr: "F", table: "review_fix" },
+  { key: "final-review", abbr: "G", table: "final_review" },
+  { key: "learnings", abbr: "L", table: "learnings" },
 ] as const;
 
 // Smithers semantics: retries=N means N+1 total attempts.
@@ -123,17 +112,6 @@ export const PR_CREATION_RETRY_POLICY: StageRetryPolicy = {
   initialDelayMs: 1_000,
   maxDelayMs: 8_000,
 };
-
-export const RESEARCH_RETRIES = RESEARCH_RETRY_POLICY.retries;
-export const PLAN_RETRIES = PLAN_RETRY_POLICY.retries;
-export const IMPLEMENT_RETRIES = IMPLEMENT_RETRY_POLICY.retries;
-export const TEST_RETRIES = TEST_RETRY_POLICY.retries;
-export const REVIEW_RETRIES = REVIEW_RETRY_POLICY.retries;
-export const REVIEW_FIX_RETRIES = REVIEW_FIX_RETRY_POLICY.retries;
-export const FINAL_REVIEW_RETRIES = FINAL_REVIEW_RETRY_POLICY.retries;
-export const LEARNINGS_RETRIES = LEARNINGS_RETRY_POLICY.retries;
-export const MERGE_QUEUE_RETRIES = MERGE_QUEUE_RETRY_POLICY.retries;
-export const PR_CREATION_RETRIES = PR_CREATION_RETRY_POLICY.retries;
 
 type ResearchSignatureInput = {
   unitId: string;

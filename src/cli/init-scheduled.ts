@@ -21,7 +21,9 @@ import {
   scanRepo,
   type ParsedArgs,
 } from "./shared";
+import { createSpinner } from "./spinner";
 import { decomposeRFC, printPlanSummary } from "../workflows/ralphinho/decompose";
+import type { WorkPlan, WorkUnit } from "../workflows/ralphinho/types";
 import {
   reviewAgentOverrideSchema,
   type ScheduledWorkConfig,
@@ -94,7 +96,15 @@ export async function initScheduledWork(opts: {
 
   // ── Decompose RFC ───────────────────────────────────────────────────
   console.log();
-  const { plan, layers } = await decomposeRFC(rfcContent, repoConfig);
+  const spinner = createSpinner("Decomposing RFC into work units...");
+  spinner.start();
+  let plan: WorkPlan;
+  let layers: WorkUnit[][];
+  try {
+    ({ plan, layers } = await decomposeRFC(rfcContent, repoConfig));
+  } finally {
+    spinner.stop();
+  }
   plan.source = rfcPath;
 
   printPlanSummary(plan, layers);

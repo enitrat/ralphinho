@@ -15,8 +15,10 @@ import {
   scanRepo,
   type ParsedArgs,
 } from "./shared";
+import { createSpinner } from "./spinner";
 import { ralphinhoConfigSchema } from "../config/types";
 import { decomposeRFC, printPlanSummary } from "../workflows/ralphinho/decompose";
+import type { WorkPlan, WorkUnit } from "../workflows/ralphinho/types";
 import { buildReviewPlan } from "../workflows/improvinho/plan";
 
 export async function runPlan(opts: {
@@ -50,7 +52,15 @@ export async function runPlan(opts: {
     const rfcContent = await readFile(config.rfcPath, "utf8");
     const repoConfig = await scanRepo(repoRoot);
 
-    const { plan, layers } = await decomposeRFC(rfcContent, repoConfig);
+    const spinner = createSpinner("Decomposing RFC into work units...");
+    spinner.start();
+    let plan: WorkPlan;
+    let layers: WorkUnit[][];
+    try {
+      ({ plan, layers } = await decomposeRFC(rfcContent, repoConfig));
+    } finally {
+      spinner.stop();
+    }
     plan.source = config.rfcPath;
 
     printPlanSummary(plan, layers);

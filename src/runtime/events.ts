@@ -156,7 +156,7 @@ function isDecisionStatus(value: unknown): value is DecisionStatus {
   return isString(value) && DECISION_STATUSES.has(value as DecisionStatus);
 }
 
-function parseEvent(value: unknown): SmithersEvent | null {
+export function parseEvent(value: unknown): SmithersEvent | null {
   if (!isRecord(value) || !isString(value.type) || !isNumber(value.timestamp)) return null;
 
   switch (value.type) {

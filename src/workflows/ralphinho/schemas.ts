@@ -8,13 +8,15 @@
 
 import { z } from "zod";
 
-const issueSchema = z.object({
+export const issueSchema = z.object({
   severity: z.enum(["critical", "major", "minor"]),
   description: z.string(),
   file: z.string().nullable(),
   suggestion: z.string().nullable(),
   reference: z.string().nullable(),
 });
+
+export type Issue = z.infer<typeof issueSchema>;
 
 export const scheduledOutputSchemas = {
   // ── Research ──────────────────────────────────────────────────────
