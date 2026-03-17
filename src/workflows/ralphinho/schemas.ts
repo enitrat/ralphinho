@@ -105,6 +105,15 @@ export const scheduledOutputSchemas = {
     exhausted: z.boolean(),
   }),
 
+  // ── Review Backlog ───────────────────────────────────────────────
+  review_backlog: z.object({
+    backlogPath: z.string(),
+    wroteBacklog: z.boolean(),
+    iterationCount: z.number(),
+    codeMinorIssueCount: z.number(),
+    prdMinorIssueCount: z.number(),
+  }),
+
   // ── Learnings Extraction ────────────────────────────────────────────
   learnings: z.object({
     learningsFilePath: z.string(),

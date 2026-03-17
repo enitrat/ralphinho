@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import React from "react";
 import { Parallel, Ralph, Sequence, Task } from "smithers-orchestrator";
 import type { AgentLike, SmithersCtx } from "smithers-orchestrator";
@@ -9,8 +9,8 @@ import CodeReviewPrompt from "../prompts/CodeReview.mdx";
 import PrdReviewPrompt from "../prompts/PrdReview.mdx";
 import ReviewFixPrompt from "../prompts/ReviewFix.mdx";
 import TestPrompt from "../prompts/Test.mdx";
-import { STAGE_RETRY_POLICIES, stageNodeId, TIER_STAGES } from "../workflow/contracts";
-import type { ScheduledTier } from "../workflow/contracts";
+import { STAGE_RETRY_POLICIES, stageNodeId } from "../workflow/contracts";
+import { buildIssueList, tierHasStep } from "../workflow/reviewUtils";
 import type { ScheduledOutputs } from "./QualityPipeline";
 
 export type ReviewLoopAgents = {
@@ -39,20 +39,6 @@ export type ReviewLoopProps = {
   branchPrefix?: string;
   maxReviewPasses?: number;
 };
-
-function tierHasStep(tier: ScheduledTier, step: string): boolean {
-  return (TIER_STAGES[tier] as readonly string[]).includes(step);
-}
-
-function buildIssueList(issues: Issue[] | null | undefined): string[] {
-  if (!issues) return [];
-  return issues.map((issue) => {
-    const sev = issue.severity ? `[${issue.severity}] ` : "";
-    const desc = issue.description ?? "Unspecified issue";
-    const file = issue.file ? ` (${issue.file})` : "";
-    return `${sev}${desc}${file}`;
-  });
-}
 
 function buildMinorChecklist(issues: Issue[] | null | undefined): string[] {
   if (!issues) return [];
@@ -140,7 +126,7 @@ export function ReviewLoop({
 
   return (
     <Sequence>
-      <Ralph until={done} maxIterations={maxReviewPasses * 10} onMaxReached="return-last">
+      <Ralph until={done} maxIterations={maxReviewPasses} onMaxReached="return-last">
         <Sequence>
           <Task
             id={stageNodeId(uid, "test")}
@@ -284,12 +270,13 @@ export function ReviewLoop({
 
       <Task
         id={`${uid}:review-backlog`}
-        output={outputs.review_loop_result}
+        output={outputs.review_backlog}
         skipIf={!exitConditionMet || !hasMinorIssues}
         continueOnFail
       >
         {async () => {
-          const backlogPath = `docs/review-backlog/${uid}.md`;
+          // Resolve from active task cwd (unit worktree root) to make write target explicit.
+          const backlogPath = resolve(process.cwd(), "docs", "review-backlog", `${uid}.md`);
           const markdown = buildBacklogMarkdown({
             unitId: uid,
             unitName: unit.name,
@@ -303,11 +290,11 @@ export function ReviewLoop({
           await writeFile(backlogPath, markdown, "utf8");
 
           return {
+            backlogPath,
+            wroteBacklog: true,
             iterationCount,
-            codeSeverity,
-            prdSeverity,
-            passed: true,
-            exhausted: false,
+            codeMinorIssueCount: codeMinorIssues.length,
+            prdMinorIssueCount: prdMinorIssues.length,
           };
         }}
       </Task>
