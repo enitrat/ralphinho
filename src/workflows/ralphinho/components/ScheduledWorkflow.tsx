@@ -82,7 +82,6 @@ export function ScheduledWorkflow({
   const snapshot = buildSnapshot(ctx);
 
   // ── Landing status ──────────────────────────────────────────────
-  const unitLandedAcrossIterations = (unitId: string) => snapshot.isUnitLanded(unitId);
   const unitState = (unitId: string): UnitState => getUnitState(snapshot, units, unitId);
   const unitEvictionContext = (unitId: string) => getEvictionContext(snapshot, unitId);
 
@@ -97,13 +96,13 @@ export function ScheduledWorkflow({
 
   const passTracker = ctx.latest("pass_tracker", PASS_TRACKER_NODE_ID);
   const currentPass = passTracker?.totalIterations ?? 0;
-  const allUnitsLanded = units.every((u) => unitLandedAcrossIterations(u.id));
+  const allUnitsLanded = units.every((u) => snapshot.isUnitLanded(u.id));
   const allUnitsSemanticallyComplete = units.every((u) => isSemanticComplete(u.id));
   const done = currentPass >= maxPasses || allUnitsLanded || allUnitsSemanticallyComplete;
 
   // ── Completion report data ─────────────────────────────────────
 
-  const landedIds = units.filter((u) => unitLandedAcrossIterations(u.id)).map((u) => u.id);
+  const landedIds = units.filter((u) => snapshot.isUnitLanded(u.id)).map((u) => u.id);
   const semanticallyCompleteIds = units.filter((u) => isSemanticComplete(u.id)).map((u) => u.id);
   const failedUnits = units
     .filter((u) => !isSemanticComplete(u.id))
@@ -132,7 +131,7 @@ export function ScheduledWorkflow({
         }
       }
       let reason = state === "not-ready"
-        ? `Blocked: dependencies not landed (${(units.find((x) => x.id === u.id)?.deps ?? []).filter((d) => !unitLandedAcrossIterations(d)).join(", ")})`
+        ? `Blocked: dependencies not landed (${(units.find((x) => x.id === u.id)?.deps ?? []).filter((d) => !snapshot.isUnitLanded(d)).join(", ")})`
         : `Did not complete within ${maxPasses} passes`;
       const evCtx = unitEvictionContext(u.id);
       if (evCtx) reason = `Evicted from merge queue: ${evCtx.slice(0, 200)}`;
@@ -148,7 +147,7 @@ export function ScheduledWorkflow({
           ? "Final review approval only repaired formatting/schema after a rejection; no new substantive evidence was recorded."
           : "Final review approval is stale or invalidated.";
       }
-      if (unitLandedAcrossIterations(u.id) && !isSemanticComplete(u.id)) {
+      if (snapshot.isUnitLanded(u.id) && !isSemanticComplete(u.id)) {
         reason = `Landed without semantic completion: ${reason}`;
       }
       return { unitId: u.id, lastStage, reason };
@@ -247,10 +246,10 @@ export function ScheduledWorkflow({
                 .map((u) => u.id),
               unitsComplete: semanticallyCompleteIds,
               unitsLanded: units
-                .filter((u) => unitLandedAcrossIterations(u.id))
+                .filter((u) => snapshot.isUnitLanded(u.id))
                 .map((u) => u.id),
               unitsSemanticallyComplete: semanticallyCompleteIds,
-              summary: `Pass ${currentPass + 1} of ${maxPasses}. ${units.filter((u) => unitLandedAcrossIterations(u.id)).length}/${units.length} units landed on ${baseBranch}. ${units.filter((u) => unitState(u.id) === "not-ready").length} units waiting on deps.`,
+              summary: `Pass ${currentPass + 1} of ${maxPasses}. ${units.filter((u) => snapshot.isUnitLanded(u.id)).length}/${units.length} units landed on ${baseBranch}. ${units.filter((u) => unitState(u.id) === "not-ready").length} units waiting on deps.`,
             }}
           </Task>
         </Sequence>
