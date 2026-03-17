@@ -43,7 +43,6 @@ function createAgents(): QualityPipelineAgents {
     prdReviewer: a,
     codeReviewer: a,
     reviewFixer: a,
-    finalReviewer: a,
   };
 }
 

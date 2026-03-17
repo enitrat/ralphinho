@@ -21,9 +21,8 @@ export type AgenticMergeQueueTicket = {
   filesCreated: string[];
   worktreePath: string;
   eligibilityProof: {
-    decisionIteration: number | null;
+    reviewLoopIteration: number | null;
     testIteration: number | null;
-    approvalSupersededRejection: boolean;
   };
 };
 
@@ -113,9 +112,8 @@ function buildMergeQueuePrompt(
     .map((ticket) => {
       const proof = ticket.eligibilityProof;
       const proofBits = [
-        `decisionIteration=${proof.decisionIteration ?? "unknown"}`,
+        `reviewLoopIteration=${proof.reviewLoopIteration ?? "unknown"}`,
         `testIteration=${proof.testIteration ?? "unknown"}`,
-        `supersededRejection=${proof.approvalSupersededRejection}`,
       ];
       return `- \`${ticket.ticketId}\`: \`${ticket.worktreePath}\` (${proofBits.join(", ")})`;
     })

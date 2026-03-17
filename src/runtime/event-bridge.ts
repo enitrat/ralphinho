@@ -5,19 +5,17 @@ import { dirname, join } from "node:path";
 import { z } from "zod";
 
 import { DISPLAY_STAGES, type StageName } from "../workflows/ralphinho/workflow/contracts";
-import { getDecisionAudit } from "../workflows/ralphinho/workflow/decisions";
 import { scheduledOutputSchemas } from "../workflows/ralphinho/schemas";
 import {
-  buildOutputSnapshot,
   extractUnitId,
-  finalReviewRowFromSqlite,
   implementRowFromSqlite,
   parseStringArray,
+  reviewLoopResultRowFromSqlite,
   reviewFixRowFromSqlite,
   testRowFromSqlite,
-  type FinalReviewRow,
+  type MergeQueueRow,
   type ImplementRow,
-  type OutputSnapshot,
+  type ReviewLoopResult,
   type ReviewFixRow,
   type TestRow,
 } from "../workflows/ralphinho/workflow/state";
@@ -59,6 +57,14 @@ const mergeQueueRowSchema = z.object({
   tickets_skipped: z.string().nullable(),
   summary: z.string().nullable(),
 });
+
+function deriveFinalReviewDecisionStatus(
+  result: Pick<ReviewLoopResult, "passed"> & { exhausted?: boolean | null },
+): "pending" | "rejected" | "approved" {
+  if (result.passed) return "approved";
+  if (result.exhausted === true) return "rejected";
+  return "pending";
+}
 
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -220,7 +226,7 @@ export async function pollEventsFromDb(
       events.push(...attemptEvents);
     }
 
-    const mergeQueueRows: OutputSnapshot["mergeQueueRows"] = [];
+    const mergeQueueRows: MergeQueueRow[] = [];
     try {
       const rawMergeQueueRows = mergeQueueRowSchema.array().safeParse(
         db.query(
@@ -247,9 +253,8 @@ export async function pollEventsFromDb(
             ticketId: item.ticketId,
             mergeCommit: item.mergeCommit ?? null,
             summary: item.summary || (row.summary ?? ""),
-            decisionIteration: item.decisionIteration ?? null,
+            reviewLoopIteration: item.reviewLoopIteration ?? null,
             testIteration: item.testIteration ?? null,
-            approvalSupersededRejection: item.approvalSupersededRejection ?? false,
           })),
           ticketsEvicted: evicted,
         });
@@ -290,14 +295,18 @@ export async function pollEventsFromDb(
       // merge_queue may not be initialized yet.
     }
 
-    const allFinalReviewRows: FinalReviewRow[] = queryRows(
+    const allReviewLoopRows: Array<ReviewLoopResult & { exhausted?: boolean | null }> = queryRows(
       db,
-      "SELECT node_id, iteration, ready_to_move_on, approved, reasoning, quality_score FROM final_review WHERE run_id = ? ORDER BY iteration ASC",
+      "SELECT node_id, iteration, passed, summary, exhausted FROM review_loop_result WHERE run_id = ? ORDER BY iteration ASC",
       [runId],
       (row) => {
-        const mapped = finalReviewRowFromSqlite(row as Record<string, unknown>);
+        const mapped = reviewLoopResultRowFromSqlite(row as Record<string, unknown>);
         if (!mapped || !parseNodeId(mapped.nodeId)) return null;
-        return mapped;
+        const exhaustedRaw = (row as { exhausted?: unknown }).exhausted;
+        return {
+          ...mapped,
+          exhausted: typeof exhaustedRaw === "number" ? Boolean(exhaustedRaw) : null,
+        };
       },
     );
 
@@ -335,32 +344,28 @@ export async function pollEventsFromDb(
     );
 
     const unitIds = new Set<string>();
-    for (const row of [...allTestRows, ...allFinalReviewRows, ...allImplementRows, ...allReviewFixRows]) {
+    for (const row of [...allTestRows, ...allReviewLoopRows, ...allImplementRows, ...allReviewFixRows]) {
       if (row.nodeId) {
         const uid = extractUnitId(row.nodeId);
         if (uid) unitIds.add(uid);
       }
     }
-    const snapshot = buildOutputSnapshot({
-      mergeQueueRows,
-      testRows: allTestRows,
-      finalReviewRows: allFinalReviewRows,
-      implementRows: allImplementRows,
-      reviewFixRows: allReviewFixRows,
-    });
     for (const unitId of unitIds) {
-      const audit = getDecisionAudit(snapshot, unitId);
-      if (!audit.finalDecision) continue;
+      const latestReviewLoopResult = allReviewLoopRows
+        .filter((row) => extractUnitId(row.nodeId) === unitId)
+        .at(-1);
+      if (!latestReviewLoopResult) continue;
+      const status = deriveFinalReviewDecisionStatus(latestReviewLoopResult);
       events.push({
         type: "final-review-decision",
-        timestamp: now + audit.finalDecision.iteration,
+        timestamp: now + latestReviewLoopResult.iteration,
         runId,
         unitId,
-        iteration: audit.finalDecision.iteration,
-        status: audit.finalDecision.status,
-        reasoning: audit.finalDecision.reasoning,
-        approvalSupersededRejection: audit.finalDecision.approvalSupersededRejection,
-        approvalOnlyCorrectedFormatting: audit.finalDecision.approvalOnlyCorrectedFormatting,
+        iteration: latestReviewLoopResult.iteration,
+        status,
+        reasoning: latestReviewLoopResult.summary,
+        approvalSupersededRejection: false,
+        approvalOnlyCorrectedFormatting: false,
       });
     }
 

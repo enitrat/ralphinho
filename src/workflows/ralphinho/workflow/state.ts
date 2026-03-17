@@ -5,7 +5,6 @@ import type { DepSummary } from "../components/QualityPipeline";
 import type { AgenticMergeQueueTicket } from "../components/AgenticMergeQueue";
 import { buildUnitWorktreePath } from "../components/runtimeNames";
 import { MERGE_QUEUE_NODE_ID, TIER_STAGES, stageNodeId } from "./contracts";
-import type { DecisionAudit } from "./decisions";
 
 export type MergeQueueRow = {
   nodeId: string;
@@ -13,9 +12,8 @@ export type MergeQueueRow = {
     ticketId: string;
     mergeCommit: string | null;
     summary: string;
-    decisionIteration: number | null;
+    reviewLoopIteration: number | null;
     testIteration: number | null;
-    approvalSupersededRejection: boolean;
   }>;
   ticketsEvicted: Array<{ ticketId: string; reason: string; details: string }>;
 };
@@ -28,13 +26,11 @@ export type TestRow = {
   failingSummary?: string | null;
 };
 
-export type FinalReviewRow = {
+export type ReviewLoopResult = {
   nodeId: string;
   iteration: number;
-  readyToMoveOn: boolean;
-  approved: boolean;
-  reasoning: string;
-  qualityScore?: number | null;
+  passed: boolean;
+  summary: string;
 };
 
 export type ImplementRow = {
@@ -70,25 +66,21 @@ export function parseStringArray(raw: unknown): string[] {
 
 // Internal raw row schemas (SQLite: snake_case, INTEGER for booleans)
 
-const finalReviewRawSchema = z.object({
+const reviewLoopResultRawSchema = z.object({
   node_id: z.string(),
   iteration: z.number(),
-  ready_to_move_on: z.number(),
-  approved: z.number(),
-  reasoning: z.string(),
-  quality_score: z.number().nullable(),
+  passed: z.number(),
+  summary: z.string(),
 });
 
-export function finalReviewRowFromSqlite(row: Record<string, unknown>): FinalReviewRow | null {
-  const r = finalReviewRawSchema.safeParse(row);
+export function reviewLoopResultRowFromSqlite(row: Record<string, unknown>): ReviewLoopResult | null {
+  const r = reviewLoopResultRawSchema.safeParse(row);
   if (!r.success) return null;
   return {
     nodeId: r.data.node_id,
     iteration: r.data.iteration,
-    readyToMoveOn: Boolean(r.data.ready_to_move_on),
-    approved: Boolean(r.data.approved),
-    reasoning: r.data.reasoning ?? "",
-    qualityScore: r.data.quality_score,
+    passed: Boolean(r.data.passed),
+    summary: r.data.summary,
   };
 }
 
@@ -161,11 +153,10 @@ export function reviewFixRowFromSqlite(row: Record<string, unknown>): ReviewFixR
 export type OutputSnapshot = {
   mergeQueueRows: MergeQueueRow[];
   latestTest: (unitId: string) => TestRow | null;
-  latestFinalReview: (unitId: string) => FinalReviewRow | null;
+  latestReviewLoopResult: (unitId: string) => ReviewLoopResult | null;
   latestImplement: (unitId: string) => ImplementRow | null;
   freshTest: (unitId: string, iteration: number) => TestRow | null;
   testHistory: (unitId: string) => TestRow[];
-  finalReviewHistory: (unitId: string) => FinalReviewRow[];
   implementHistory: (unitId: string) => ImplementRow[];
   reviewFixHistory: (unitId: string) => ReviewFixRow[];
   isUnitLanded: (unitId: string) => boolean;
@@ -232,26 +223,25 @@ export function buildDepSummaries(snapshot: OutputSnapshot, unit: WorkUnit): Dep
 export type SnapshotInput = {
   mergeQueueRows: MergeQueueRow[];
   testRows: TestRow[];
-  finalReviewRows: FinalReviewRow[];
+  reviewLoopResultRows: ReviewLoopResult[];
   implementRows: ImplementRow[];
   reviewFixRows: ReviewFixRow[];
 };
 
 export function buildOutputSnapshot(input: SnapshotInput): OutputSnapshot {
   const testByUnit = groupByUnit(input.testRows);
-  const finalReviewByUnit = groupByUnit(input.finalReviewRows);
+  const reviewLoopResultByUnit = groupByUnit(input.reviewLoopResultRows);
   const implementByUnit = groupByUnit(input.implementRows);
   const reviewFixByUnit = groupByUnit(input.reviewFixRows);
 
   return {
     mergeQueueRows: input.mergeQueueRows,
     latestTest: (id) => latestRow(testByUnit.get(id) ?? []),
-    latestFinalReview: (id) => latestRow(finalReviewByUnit.get(id) ?? []),
+    latestReviewLoopResult: (id) => latestRow(reviewLoopResultByUnit.get(id) ?? []),
     latestImplement: (id) => latestRow(implementByUnit.get(id) ?? []),
     freshTest: (id, iteration) =>
       (testByUnit.get(id) ?? []).find((row) => row.iteration === iteration) ?? null,
     testHistory: (id) => testByUnit.get(id) ?? [],
-    finalReviewHistory: (id) => finalReviewByUnit.get(id) ?? [],
     implementHistory: (id) => implementByUnit.get(id) ?? [],
     reviewFixHistory: (id) => reviewFixByUnit.get(id) ?? [],
     isUnitLanded: (id) => isTicketLandedInMergeQueueRows(input.mergeQueueRows, id),
@@ -290,18 +280,15 @@ export type FailedUnitReport = {
 export function buildFailedUnitReport(
   snapshot: OutputSnapshot,
   units: WorkUnit[],
-  auditMap: Map<string, DecisionAudit>,
   maxPasses: number,
   stageExists: (key: string, nodeId: string) => boolean,
 ): FailedUnitReport[] {
   return units
-    .filter((u) => !auditMap.get(u.id)!.semanticallyComplete)
+    .filter((u) => !snapshot.isUnitLanded(u.id))
     .map((u) => {
       const state = getUnitState(snapshot, units, u.id);
-      const audit = auditMap.get(u.id)!;
       const tierStages = TIER_STAGES[u.tier] ?? TIER_STAGES.large;
       const allStages = [
-        { key: "final_review", stage: "final-review", nodeId: stageNodeId(u.id, "final-review") },
         { key: "review_fix", stage: "review-fix", nodeId: stageNodeId(u.id, "review-fix") },
         { key: "code_review", stage: "code-review", nodeId: stageNodeId(u.id, "code-review") },
         { key: "prd_review", stage: "prd-review", nodeId: stageNodeId(u.id, "prd-review") },
@@ -329,16 +316,9 @@ export function buildFailedUnitReport(
       if (testRow && !testRow.testsPassed) {
         reason = `Tests failing: ${testRow.failingSummary ?? "unknown"}`;
       }
-      if (audit.status === "rejected") {
-        reason = `Final review rejected: ${audit.finalDecision?.reasoning ?? "missing reasoning"}`;
-      }
-      if (audit.status === "invalidated") {
-        reason = audit.finalDecision?.approvalOnlyCorrectedFormatting
-          ? "Final review approval only repaired formatting/schema after a rejection; no new substantive evidence was recorded."
-          : "Final review approval is stale or invalidated.";
-      }
-      if (snapshot.isUnitLanded(u.id) && !auditMap.get(u.id)!.semanticallyComplete) {
-        reason = `Landed without semantic completion: ${reason}`;
+      const loopResult = snapshot.latestReviewLoopResult(u.id);
+      if (loopResult?.passed === false) {
+        reason = `Review loop did not pass: ${loopResult.summary ?? "missing summary"}`;
       }
       return { unitId: u.id, lastStage, reason };
     });
@@ -349,19 +329,20 @@ export function buildMergeTickets(
   units: WorkUnit[],
   runId: string,
   iteration: number,
-  auditMap: Map<string, DecisionAudit>,
 ): AgenticMergeQueueTicket[] {
   return units
     .filter((unit) => {
       if (snapshot.isUnitLanded(unit.id)) return false;
       if (getUnitState(snapshot, units, unit.id) !== "active") return false;
-      if (!auditMap.get(unit.id)!.mergeEligible) return false;
+
+      const loopResult = snapshot.latestReviewLoopResult(unit.id);
+      if (!loopResult?.passed) return false;
 
       if (isUnitEvicted(snapshot, unit.id)) {
         const freshTest = snapshot.freshTest(unit.id, iteration);
         if (!freshTest?.testsPassed) return false;
-        // Fresh build failed — fall back to latest test's build status via merge eligibility
-        if (!freshTest.buildPassed) return auditMap.get(unit.id)!.mergeEligible;
+        // Fresh build failed — fall back to latest review-loop pass status.
+        if (!freshTest.buildPassed) return snapshot.latestReviewLoopResult(unit.id)?.passed === true;
       }
 
       return true;
@@ -369,7 +350,7 @@ export function buildMergeTickets(
     .map((unit) => {
       const latestImplement = snapshot.latestImplement(unit.id);
       const latestTest = snapshot.latestTest(unit.id);
-      const audit = auditMap.get(unit.id)!;
+      const loopResult = snapshot.latestReviewLoopResult(unit.id);
       return {
         ticketId: unit.id,
         ticketTitle: unit.name,
@@ -381,9 +362,8 @@ export function buildMergeTickets(
         filesCreated: latestImplement?.filesCreated ?? [],
         worktreePath: buildUnitWorktreePath(runId, unit.id),
         eligibilityProof: {
-          decisionIteration: audit.finalDecision?.iteration ?? null,
+          reviewLoopIteration: loopResult?.iteration ?? null,
           testIteration: latestTest?.iteration ?? null,
-          approvalSupersededRejection: audit.finalDecision?.approvalSupersededRejection ?? false,
         },
       };
     });

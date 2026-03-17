@@ -64,7 +64,7 @@ function mergeQueueEvicted(ticketId: string, timestamp = BASE_TS + 30): Smithers
 
 function finalReviewDecision(
   unitId: string,
-  status: "pending" | "rejected" | "approved" | "invalidated",
+  status: Extract<SmithersEvent, { type: "final-review-decision" }>["status"],
   timestamp = BASE_TS + 25,
 ): SmithersEvent {
   return {

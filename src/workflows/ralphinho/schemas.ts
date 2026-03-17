@@ -113,6 +113,13 @@ export const scheduledOutputSchemas = {
       .nullable(),
   }),
 
+  // ── Review Loop Result ─────────────────────────────────────────────
+  review_loop_result: z.object({
+    passed: z.boolean(),
+    iteration: z.number(),
+    summary: z.string(),
+  }),
+
   // ── Learnings Extraction ────────────────────────────────────────────
   learnings: z.object({
     learningsFilePath: z.string(),
@@ -188,9 +195,8 @@ export const scheduledOutputSchemas = {
       ticketId: z.string(),
       mergeCommit: z.string().nullable(),
       summary: z.string(),
-      decisionIteration: z.number().nullable(),
+      reviewLoopIteration: z.number().nullable(),
       testIteration: z.number().nullable(),
-      approvalSupersededRejection: z.boolean(),
     })),
     ticketsEvicted: z.array(z.object({
       ticketId: z.string(),
