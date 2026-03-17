@@ -225,7 +225,11 @@ export async function runWorkflow(opts: {
     console.log(`  Review slices: ${reviewPlan.slices?.length ?? 0}`);
   }
   console.log(`  Max concurrency: ${maxConcurrency}`);
-  const agentOverride = config.mode === "review-discovery" ? config.reviewAgentOverride : null;
+  const agentOverride = config.mode === "review-discovery"
+    ? config.reviewAgentOverride
+    : config.mode === "scheduled-work"
+      ? config.agentOverride
+      : null;
   if (agentOverride) {
     console.log(`  Agent: ${agentOverride}`);
   } else {

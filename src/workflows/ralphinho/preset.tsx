@@ -19,6 +19,7 @@ const MAX_PASSES = 9;
 const BASE_BRANCH = config.baseBranch;
 const HAS_CLAUDE = config.agents.claude;
 const HAS_CODEX = config.agents.codex;
+const AGENT_OVERRIDE = config.agentOverride;
 
 const WORKSPACE_POLICY = `
 ## WORKSPACE POLICY
@@ -90,15 +91,15 @@ function chooseAgent(
 }
 
 const roles = {
-  researcher: chooseAgent("claude", "Researcher — Gather context from codebase for implementation"),
-  planner: chooseAgent("opus", "Planner — Create implementation plan from RFC section and context"),
-  implementer: chooseAgent("codex", "Implementer — Write code following the plan"),
-  tester: chooseAgent("claude", "Tester — Run tests and validate implementation"),
-  prdReviewer: chooseAgent("claude", "PRD Reviewer — Verify implementation matches RFC specification"),
-  codeReviewer: chooseAgent("opus", "Code Reviewer — Check code quality, conventions, security"),
-  reviewFixer: chooseAgent("codex", "ReviewFixer — Fix issues found in code review"),
-  finalReviewer: chooseAgent("opus", "Final Reviewer — Decide if unit is complete"),
-  mergeQueue: chooseAgent("opus", "MergeQueue Coordinator — Rebase and land unit branches onto the configured target branch"),
+  researcher: chooseAgent(AGENT_OVERRIDE ?? "claude", "Researcher — Gather context from codebase for implementation"),
+  planner: chooseAgent(AGENT_OVERRIDE ?? "opus", "Planner — Create implementation plan from RFC section and context"),
+  implementer: chooseAgent(AGENT_OVERRIDE ?? "codex", "Implementer — Write code following the plan"),
+  tester: chooseAgent(AGENT_OVERRIDE ?? "claude", "Tester — Run tests and validate implementation"),
+  prdReviewer: chooseAgent(AGENT_OVERRIDE ?? "claude", "PRD Reviewer — Verify implementation matches RFC specification"),
+  codeReviewer: chooseAgent(AGENT_OVERRIDE ?? "opus", "Code Reviewer — Check code quality, conventions, security"),
+  reviewFixer: chooseAgent(AGENT_OVERRIDE ?? "codex", "ReviewFixer — Fix issues found in code review"),
+  finalReviewer: chooseAgent(AGENT_OVERRIDE ?? "opus", "Final Reviewer — Decide if unit is complete"),
+  mergeQueue: chooseAgent(AGENT_OVERRIDE ?? "opus", "MergeQueue Coordinator — Rebase and land unit branches onto the configured target branch"),
 } satisfies Record<keyof ScheduledWorkflowAgents, { agent: AgentLike | AgentLike[]; fallback?: AgentLike }>;
 
 const agents = Object.fromEntries(

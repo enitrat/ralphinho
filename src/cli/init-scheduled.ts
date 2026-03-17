@@ -22,7 +22,11 @@ import {
   type ParsedArgs,
 } from "./shared";
 import { decomposeRFC, printPlanSummary } from "../workflows/ralphinho/decompose";
-import type { ScheduledWorkConfig } from "../config/types";
+import {
+  reviewAgentOverrideSchema,
+  type ScheduledWorkConfig,
+  type ReviewAgentOverride,
+} from "../config/types";
 
 export async function initScheduledWork(opts: {
   positional: string[];
@@ -72,9 +76,14 @@ export async function initScheduledWork(opts: {
 
   // ── Detect agents ───────────────────────────────────────────────────
   const agents = await detectAgents(repoRoot);
-  console.log(
-    `  Agents: claude=${agents.claude} codex=${agents.codex}`,
-  );
+  const agentOverride = parseAgentOverride(flags);
+  if (agentOverride) {
+    console.log(`  Agent override: ${agentOverride}`);
+  } else {
+    console.log(
+      `  Agents: claude=${agents.claude} codex=${agents.codex}`,
+    );
+  }
 
   if (!agents.claude && !agents.codex) {
     console.error(
@@ -112,6 +121,7 @@ export async function initScheduledWork(opts: {
     agents,
     maxConcurrency,
     baseBranch,
+    agentOverride,
     createdAt: new Date().toISOString(),
   };
 
@@ -135,4 +145,20 @@ export async function initScheduledWork(opts: {
     console.log("  (dry-run: workflow not executed)\n");
     return;
   }
+}
+
+function parseAgentOverride(
+  flags: ParsedArgs["flags"],
+): ReviewAgentOverride | null {
+  if (typeof flags.agent !== "string") return null;
+
+  const parsed = reviewAgentOverrideSchema.safeParse(flags.agent.trim().toLowerCase());
+  if (!parsed.success) {
+    console.error(
+      'Error: Invalid --agent value. Use one of: "sonnet", "opus", "codex".',
+    );
+    process.exit(1);
+  }
+
+  return parsed.data;
 }

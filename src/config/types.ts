@@ -23,6 +23,7 @@ export const scheduledWorkConfigSchema = baseConfigSchema.extend({
   mode: z.literal("scheduled-work"),
   rfcPath: z.string(),
   baseBranch: z.string().default("main"),
+  agentOverride: reviewAgentOverrideSchema.nullable().default(null),
 });
 
 export const reviewDiscoveryConfigSchema = baseConfigSchema.extend({

@@ -45,7 +45,7 @@ Linear Integration:
 
 Init Options:
   --dry-run                   Generate work plan but don't execute
-  --agent <sonnet|opus|codex> Review mode only: override all review lens agents
+  --agent <sonnet|opus|codex> Override agent for all workflow roles
 
 Examples:
   ralphinho init ./docs/rfc-003.md
