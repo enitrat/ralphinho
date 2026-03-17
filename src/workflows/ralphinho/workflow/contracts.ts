@@ -27,7 +27,7 @@ export const PR_CREATION_NODE_ID = "pr-creation" as const;
 export const PASS_TRACKER_NODE_ID = "pass-tracker" as const;
 export const COMPLETION_REPORT_NODE_ID = "completion-report" as const;
 
-export const TIER_STAGES = {
+const _TIER_STAGES = {
   small: [
     "implement",
     "test",
@@ -35,7 +35,7 @@ export const TIER_STAGES = {
     "review-fix",
     "final-review",
     "learnings",
-  ] as const,
+  ],
   large: [
     "research",
     "plan",
@@ -46,10 +46,11 @@ export const TIER_STAGES = {
     "review-fix",
     "final-review",
     "learnings",
-  ] as const,
-} as const satisfies Record<string, readonly StageName[]>;
+  ],
+} as const;
 
-export type ScheduledTier = keyof typeof TIER_STAGES;
+export type ScheduledTier = keyof typeof _TIER_STAGES;
+export const TIER_STAGES: Record<ScheduledTier, readonly StageName[]> = _TIER_STAGES;
 
 export const DISPLAY_STAGES = [
   { key: "research", abbr: "R", table: "research" },

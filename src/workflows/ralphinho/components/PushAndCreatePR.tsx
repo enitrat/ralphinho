@@ -1,26 +1,14 @@
 import React from "react";
 import { Task } from "smithers-orchestrator";
-import type { SmithersCtx } from "smithers-orchestrator";
-import { z } from "zod";
-import { PR_CREATION_RETRIES, PR_CREATION_RETRY_POLICY } from "../workflow/contracts";
+import type { SmithersCtx, AgentLike } from "smithers-orchestrator";
+import type { z } from "zod";
+import { scheduledOutputSchemas } from "../schemas";
+import { PR_CREATION_RETRY_POLICY } from "../workflow/contracts";
+import type { ScheduledOutputs } from "./QualityPipeline";
 
 // ── Schema ───────────────────────────────────────────────────────────
 
-export const prCreationResultSchema = z.object({
-  ticketsPushed: z.array(z.object({
-    ticketId: z.string(),
-    branch: z.string(),
-    prUrl: z.string().nullable(),
-    prNumber: z.number().nullable(),
-    summary: z.string(),
-  })),
-  ticketsFailed: z.array(z.object({
-    ticketId: z.string(),
-    reason: z.string(),
-  })),
-  summary: z.string(),
-});
-
+export const prCreationResultSchema = scheduledOutputSchemas.pr_creation;
 export type PrCreationResult = z.infer<typeof prCreationResultSchema>;
 
 // ── Ticket type ──────────────────────────────────────────────────────
@@ -37,14 +25,14 @@ export type PushAndCreatePRTicket = {
 // ── Props ────────────────────────────────────────────────────────────
 
 export type PushAndCreatePRProps = {
-  ctx: SmithersCtx<any>;
+  ctx: SmithersCtx<ScheduledOutputs>;
   tickets: PushAndCreatePRTicket[];
-  agent: any;
-  fallbackAgent?: any;
+  agent: AgentLike | AgentLike[];
+  fallbackAgent?: AgentLike;
   repoRoot: string;
   baseBranch?: string;
   branchPrefix?: string;
-  output: any;
+  output: typeof scheduledOutputSchemas.pr_creation;
   nodeId?: string;
 };
 
@@ -166,7 +154,7 @@ export function PushAndCreatePR({
       output={output}
       agent={agent}
       fallbackAgent={fallbackAgent}
-      retries={PR_CREATION_RETRIES}
+      retries={PR_CREATION_RETRY_POLICY.retries}
       meta={{ retryPolicy: PR_CREATION_RETRY_POLICY }}
     >
       {prompt}

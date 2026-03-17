@@ -21,7 +21,7 @@ export {
   scheduledOutputSchemas,
   computeLayers,
   validateDAG,
-  SCHEDULED_TIERS,
+  TIER_STAGES,
   workPlanSchema,
   workUnitSchema,
   ralphinhoConfigSchema,

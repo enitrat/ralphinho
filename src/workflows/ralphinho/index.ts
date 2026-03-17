@@ -11,7 +11,6 @@ export {
   workPlanSchema,
   workUnitSchema,
   ralphinhoConfigSchema,
-  SCHEDULED_TIERS,
   validateDAG,
   computeLayers,
 } from "./types";
@@ -20,8 +19,10 @@ export type {
   WorkPlan,
   WorkUnit,
   RalphinhoConfig,
-  ScheduledTier,
 } from "./types";
+
+export type { ScheduledTier } from "./workflow/contracts";
+export { TIER_STAGES } from "./workflow/contracts";
 
 export { scheduledOutputSchemas } from "./schemas";
 

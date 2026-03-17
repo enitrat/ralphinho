@@ -50,12 +50,12 @@ describe("parseEvent", () => {
 
   test("parses node-started with valid StageName", () => {
     const input = {
-      type: "node-started",
+      type: "node-started" as const,
       timestamp: 1000,
       runId: "run-1",
       nodeId: "n1",
       unitId: "u1",
-      stageName: "implement",
+      stageName: "implement" as const,
     };
     const result = parseEvent(input);
     expect(result).toEqual(input);
@@ -63,12 +63,12 @@ describe("parseEvent", () => {
 
   test("parses node-completed with valid StageName", () => {
     const input = {
-      type: "node-completed",
+      type: "node-completed" as const,
       timestamp: 2000,
       runId: "run-1",
       nodeId: "n1",
       unitId: "u1",
-      stageName: "test",
+      stageName: "test" as const,
     };
     const result = parseEvent(input);
     expect(result).toEqual(input);
@@ -76,12 +76,12 @@ describe("parseEvent", () => {
 
   test("parses node-failed with error string", () => {
     const input = {
-      type: "node-failed",
+      type: "node-failed" as const,
       timestamp: 3000,
       runId: "run-1",
       nodeId: "n1",
       unitId: "u1",
-      stageName: "research",
+      stageName: "research" as const,
       error: "something broke",
     };
     const result = parseEvent(input);
@@ -90,12 +90,12 @@ describe("parseEvent", () => {
 
   test("parses node-failed without error (optional field omitted)", () => {
     const input = {
-      type: "node-failed",
+      type: "node-failed" as const,
       timestamp: 3001,
       runId: "run-1",
       nodeId: "n1",
       unitId: "u1",
-      stageName: "plan",
+      stageName: "plan" as const,
     };
     const result = parseEvent(input);
     expect(result).toEqual(input);
@@ -103,11 +103,11 @@ describe("parseEvent", () => {
 
   test("parses job-scheduled with null ticketId", () => {
     const input = {
-      type: "job-scheduled",
+      type: "job-scheduled" as const,
       timestamp: 4000,
       jobType: "ci",
       agentId: "a1",
-      ticketId: null,
+      ticketId: null as string | null,
       createdAtMs: 4000000,
     };
     const result = parseEvent(input);
@@ -116,11 +116,11 @@ describe("parseEvent", () => {
 
   test("parses job-scheduled with string ticketId", () => {
     const input = {
-      type: "job-scheduled",
+      type: "job-scheduled" as const,
       timestamp: 4001,
       jobType: "ci",
       agentId: "a1",
-      ticketId: "t1",
+      ticketId: "t1" as string | null,
       createdAtMs: 4001000,
     };
     const result = parseEvent(input);
@@ -129,11 +129,11 @@ describe("parseEvent", () => {
 
   test("parses job-completed with nullable ticketId", () => {
     const input = {
-      type: "job-completed",
+      type: "job-completed" as const,
       timestamp: 5000,
       jobType: "ci",
       agentId: "a1",
-      ticketId: null,
+      ticketId: null as string | null,
     };
     const result = parseEvent(input);
     expect(result).toEqual(input);
@@ -141,11 +141,11 @@ describe("parseEvent", () => {
 
   test("parses merge-queue-landed with null mergeCommit", () => {
     const input = {
-      type: "merge-queue-landed",
+      type: "merge-queue-landed" as const,
       timestamp: 6000,
       runId: "run-1",
       ticketId: "t1",
-      mergeCommit: null,
+      mergeCommit: null as string | null,
       summary: "landed ok",
     };
     const result = parseEvent(input);
@@ -154,7 +154,7 @@ describe("parseEvent", () => {
 
   test("parses merge-queue-evicted", () => {
     const input = {
-      type: "merge-queue-evicted",
+      type: "merge-queue-evicted" as const,
       timestamp: 7000,
       runId: "run-1",
       ticketId: "t1",
@@ -167,7 +167,7 @@ describe("parseEvent", () => {
 
   test("parses merge-queue-skipped", () => {
     const input = {
-      type: "merge-queue-skipped",
+      type: "merge-queue-skipped" as const,
       timestamp: 8000,
       runId: "run-1",
       ticketId: "t1",
@@ -179,7 +179,7 @@ describe("parseEvent", () => {
 
   test("parses pass-tracker-update", () => {
     const input = {
-      type: "pass-tracker-update",
+      type: "pass-tracker-update" as const,
       timestamp: 9000,
       runId: "run-1",
       summary: "pass 2 of 3",
@@ -191,7 +191,7 @@ describe("parseEvent", () => {
 
   test("parses work-plan-loaded with nested units", () => {
     const input = {
-      type: "work-plan-loaded",
+      type: "work-plan-loaded" as const,
       timestamp: 10000,
       units: [
         { id: "u1", name: "Unit 1", tier: "small" as const, priority: "high" },
@@ -204,7 +204,7 @@ describe("parseEvent", () => {
 
   test("parses final-review-decision", () => {
     const input = {
-      type: "final-review-decision",
+      type: "final-review-decision" as const,
       timestamp: 11000,
       runId: "run-1",
       unitId: "u1",
@@ -220,7 +220,7 @@ describe("parseEvent", () => {
 
   test("parses semantic-completion-update with string arrays", () => {
     const input = {
-      type: "semantic-completion-update",
+      type: "semantic-completion-update" as const,
       timestamp: 12000,
       runId: "run-1",
       totalUnits: 5,

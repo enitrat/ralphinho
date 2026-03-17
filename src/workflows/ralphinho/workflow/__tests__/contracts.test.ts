@@ -1,12 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
-  IMPLEMENT_RETRIES,
   IMPLEMENT_RETRY_POLICY,
-  PLAN_RETRIES,
   PLAN_RETRY_POLICY,
-  RESEARCH_RETRIES,
   RESEARCH_RETRY_POLICY,
-  TEST_RETRIES,
   TEST_RETRY_POLICY,
   buildPlanInputSignature,
   buildResearchInputSignature,
@@ -23,15 +19,11 @@ describe("retry policy semantics", () => {
   test("uses backoff policy for research and plan", () => {
     expect(RESEARCH_RETRY_POLICY.kind).toBe("backoff");
     expect(PLAN_RETRY_POLICY.kind).toBe("backoff");
-    expect(RESEARCH_RETRY_POLICY.retries).toBe(RESEARCH_RETRIES);
-    expect(PLAN_RETRY_POLICY.retries).toBe(PLAN_RETRIES);
   });
 
   test("uses fail-fast policy for implement and test", () => {
     expect(IMPLEMENT_RETRY_POLICY.kind).toBe("fail-fast");
     expect(TEST_RETRY_POLICY.kind).toBe("fail-fast");
-    expect(IMPLEMENT_RETRY_POLICY.retries).toBe(IMPLEMENT_RETRIES);
-    expect(TEST_RETRY_POLICY.retries).toBe(TEST_RETRIES);
   });
 });
 

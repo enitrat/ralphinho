@@ -1,31 +1,12 @@
 import React from "react";
 import { Task } from "smithers-orchestrator";
-import type { SmithersCtx } from "smithers-orchestrator";
-import { z } from "zod";
-import { MERGE_QUEUE_RETRIES, MERGE_QUEUE_RETRY_POLICY } from "../workflow/contracts";
+import type { SmithersCtx, AgentLike } from "smithers-orchestrator";
+import type { z } from "zod";
+import { scheduledOutputSchemas } from "../schemas";
+import { MERGE_QUEUE_RETRY_POLICY } from "../workflow/contracts";
+import type { ScheduledOutputs } from "./QualityPipeline";
 
-export const mergeQueueResultSchema = z.object({
-  ticketsLanded: z.array(z.object({
-    ticketId: z.string(),
-    mergeCommit: z.string().nullable(),
-    summary: z.string(),
-    decisionIteration: z.number().nullable(),
-    testIteration: z.number().nullable(),
-    approvalSupersededRejection: z.boolean(),
-  })),
-  ticketsEvicted: z.array(z.object({
-    ticketId: z.string(),
-    reason: z.string(),
-    details: z.string(),
-  })),
-  ticketsSkipped: z.array(z.object({
-    ticketId: z.string(),
-    reason: z.string(),
-  })),
-  summary: z.string(),
-  nextActions: z.string().nullable(),
-});
-
+export const mergeQueueResultSchema = scheduledOutputSchemas.merge_queue;
 export type MergeQueueResult = z.infer<typeof mergeQueueResultSchema>;
 
 export type AgenticMergeQueueTicket = {
@@ -46,17 +27,17 @@ export type AgenticMergeQueueTicket = {
 };
 
 export type AgenticMergeQueueProps = {
-  ctx: SmithersCtx<any>;
-  outputs: any;
+  ctx: SmithersCtx<ScheduledOutputs>;
+  outputs: ScheduledOutputs;
   tickets: AgenticMergeQueueTicket[];
-  agent: any;
-  fallbackAgent?: any;
+  agent: AgentLike | AgentLike[];
+  fallbackAgent?: AgentLike;
   postLandChecks: string[];
   preLandChecks: string[];
   repoRoot: string;
   baseBranch?: string;
   maxSpeculativeDepth?: number;
-  output: any;
+  output: typeof scheduledOutputSchemas.merge_queue;
   /** Override the Task node ID (default: "agentic-merge-queue") */
   nodeId?: string;
   /** Branch prefix for unit branches (default: "ticket/") */
@@ -276,7 +257,7 @@ export function AgenticMergeQueue({
       output={output}
       agent={agent}
       fallbackAgent={fallbackAgent}
-      retries={MERGE_QUEUE_RETRIES}
+      retries={MERGE_QUEUE_RETRY_POLICY.retries}
       meta={{ retryPolicy: MERGE_QUEUE_RETRY_POLICY }}
     >
       {prompt}
