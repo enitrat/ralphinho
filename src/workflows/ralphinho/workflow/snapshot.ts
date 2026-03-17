@@ -4,8 +4,8 @@ import {
   buildOutputSnapshot,
   type MergeQueueRow,
   type OutputSnapshot,
-  type FinalReviewRow,
   type ImplementRow,
+  type ReviewLoopResultRow,
   type ReviewFixRow,
   type TestRow,
 } from "./state";
@@ -15,7 +15,7 @@ export function buildSnapshot(ctx: SmithersCtx<ScheduledOutputs>): OutputSnapsho
   return buildOutputSnapshot({
     mergeQueueRows: ctxAny.outputs("merge_queue") as MergeQueueRow[],
     testRows: ctxAny.outputs("test") as TestRow[],
-    finalReviewRows: ctxAny.outputs("final_review") as FinalReviewRow[],
+    reviewLoopResultRows: ctxAny.outputs("review_loop_result") as ReviewLoopResultRow[],
     implementRows: ctxAny.outputs("implement") as ImplementRow[],
     reviewFixRows: ctxAny.outputs("review_fix") as ReviewFixRow[],
   });

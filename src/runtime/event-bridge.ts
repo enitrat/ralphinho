@@ -5,19 +5,18 @@ import { dirname, join } from "node:path";
 import { z } from "zod";
 
 import { DISPLAY_STAGES, type StageName } from "../workflows/ralphinho/workflow/contracts";
-import { getDecisionAudit } from "../workflows/ralphinho/workflow/decisions";
 import { scheduledOutputSchemas } from "../workflows/ralphinho/schemas";
 import {
   buildOutputSnapshot,
   extractUnitId,
-  finalReviewRowFromSqlite,
   implementRowFromSqlite,
   parseStringArray,
+  reviewLoopResultRowFromSqlite,
   reviewFixRowFromSqlite,
   testRowFromSqlite,
-  type FinalReviewRow,
   type ImplementRow,
   type OutputSnapshot,
+  type ReviewLoopResultRow,
   type ReviewFixRow,
   type TestRow,
 } from "../workflows/ralphinho/workflow/state";
@@ -247,9 +246,8 @@ export async function pollEventsFromDb(
             ticketId: item.ticketId,
             mergeCommit: item.mergeCommit ?? null,
             summary: item.summary || (row.summary ?? ""),
-            decisionIteration: item.decisionIteration ?? null,
+            reviewLoopIterationCount: item.reviewLoopIterationCount ?? null,
             testIteration: item.testIteration ?? null,
-            approvalSupersededRejection: item.approvalSupersededRejection ?? false,
           })),
           ticketsEvicted: evicted,
         });
@@ -334,8 +332,19 @@ export async function pollEventsFromDb(
       },
     );
 
+    const allReviewLoopResultRows: ReviewLoopResultRow[] = queryRows(
+      db,
+      "SELECT node_id, iteration_count, code_severity, prd_severity, passed, exhausted FROM review_loop_result WHERE run_id = ? ORDER BY iteration ASC",
+      [runId],
+      (row) => {
+        const mapped = reviewLoopResultRowFromSqlite(row as Record<string, unknown>);
+        if (!mapped || !parseNodeId(mapped.nodeId)) return null;
+        return mapped;
+      },
+    );
+
     const unitIds = new Set<string>();
-    for (const row of [...allTestRows, ...allFinalReviewRows, ...allImplementRows, ...allReviewFixRows]) {
+    for (const row of [...allTestRows, ...allFinalReviewRows, ...allReviewLoopResultRows, ...allImplementRows, ...allReviewFixRows]) {
       if (row.nodeId) {
         const uid = extractUnitId(row.nodeId);
         if (uid) unitIds.add(uid);
@@ -345,6 +354,7 @@ export async function pollEventsFromDb(
       mergeQueueRows,
       testRows: allTestRows,
       finalReviewRows: allFinalReviewRows,
+      reviewLoopResultRows: allReviewLoopResultRows,
       implementRows: allImplementRows,
       reviewFixRows: allReviewFixRows,
     });

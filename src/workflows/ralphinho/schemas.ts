@@ -180,9 +180,8 @@ export const scheduledOutputSchemas = {
       ticketId: z.string(),
       mergeCommit: z.string().nullable(),
       summary: z.string(),
-      decisionIteration: z.number().nullable(),
+      reviewLoopIterationCount: z.number().nullable(),
       testIteration: z.number().nullable(),
-      approvalSupersededRejection: z.boolean(),
     })),
     ticketsEvicted: z.array(z.object({
       ticketId: z.string(),

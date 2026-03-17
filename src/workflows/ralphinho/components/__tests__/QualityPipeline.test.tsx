@@ -12,6 +12,7 @@ import {
   type QualityPipelineAgents,
   type ScheduledOutputs,
 } from "../QualityPipeline";
+import { ReviewLoop } from "../ReviewLoop";
 
 function createCtx(latestImpl: (table: string, nodeId: string) => unknown): SmithersCtx<ScheduledOutputs> {
   return {
@@ -71,8 +72,19 @@ function collectTasks(node: React.ReactNode): Record<string, Record<string, unkn
   return tasks;
 }
 
+function collectTopSequenceChildren(node: React.ReactNode): React.ReactElement[] {
+  if (!React.isValidElement(node)) return [];
+  const worktreeChildren = (node.props as { children?: React.ReactNode }).children;
+  if (!React.isValidElement(worktreeChildren)) return [];
+  const sequenceChildren = (worktreeChildren.props as { children?: React.ReactNode }).children;
+  if (Array.isArray(sequenceChildren)) {
+    return sequenceChildren.filter(React.isValidElement) as React.ReactElement[];
+  }
+  return React.isValidElement(sequenceChildren) ? [sequenceChildren] : [];
+}
+
 describe("QualityPipeline stage semantics", () => {
-  test("learnings depends on review-fix and final-review stage is absent", () => {
+  test("learnings depends on review-loop result and final-review stage is absent", () => {
     const unit: WorkUnit = {
       id: "u-learnings",
       name: "Learn unit",
@@ -103,9 +115,55 @@ describe("QualityPipeline stage semantics", () => {
 
     expect(learningsTask).toBeDefined();
     expect((learningsTask.meta as Record<string, unknown>).dependsOn).toEqual([
-      stageNodeId(unit.id, "review-fix"),
+      `${unit.id}:review-loop`,
     ]);
     expect(tasks[`${unit.id}:final-review`]).toBeUndefined();
+  });
+
+  test("large-tier QualityPipeline has no direct review stage tasks", () => {
+    const unit: WorkUnit = {
+      id: "u-large-review-structure",
+      name: "Large unit",
+      rfcSections: ["sec-a"],
+      description: "desc",
+      deps: [],
+      acceptance: ["ac1"],
+      tier: "large",
+    };
+    const workPlan = createWorkPlan(unit);
+    const ctx = createCtx(() => null);
+
+    const element = QualityPipeline({
+      unit,
+      ctx,
+      outputs: scheduledOutputSchemas,
+      agents: {
+        ...createAgents(),
+        learningsExtractor: {} as AgentLike,
+      },
+      workPlan,
+      depSummaries: [],
+      evictionContext: null,
+    });
+
+    const tasks = collectTasks(element);
+    const topChildren = collectTopSequenceChildren(element);
+    const implementIndex = topChildren.findIndex(
+      (child) => (child.props as Record<string, unknown>).id === stageNodeId(unit.id, "implement"),
+    );
+    const reviewLoopIndex = topChildren.findIndex((child) => child.type === ReviewLoop);
+    const learningsIndex = topChildren.findIndex(
+      (child) => (child.props as Record<string, unknown>).id === stageNodeId(unit.id, "learnings"),
+    );
+
+    expect(tasks[stageNodeId(unit.id, "implement")]).toBeDefined();
+    expect(tasks[stageNodeId(unit.id, "test")]).toBeUndefined();
+    expect(tasks[stageNodeId(unit.id, "prd-review")]).toBeUndefined();
+    expect(tasks[stageNodeId(unit.id, "code-review")]).toBeUndefined();
+    expect(tasks[stageNodeId(unit.id, "review-fix")]).toBeUndefined();
+    expect(reviewLoopIndex).toBeGreaterThanOrEqual(0);
+    expect(implementIndex).toBeLessThan(reviewLoopIndex);
+    expect(reviewLoopIndex).toBeLessThan(learningsIndex);
   });
 
   test("applies retry policy semantics and input-matched cache skips for large units", () => {
@@ -180,17 +238,45 @@ describe("QualityPipeline stage semantics", () => {
     const researchTask = tasks[stageNodeId(unit.id, "research")];
     const planTask = tasks[stageNodeId(unit.id, "plan")];
     const implementTask = tasks[stageNodeId(unit.id, "implement")];
-    const testTask = tasks[stageNodeId(unit.id, "test")];
 
     expect(researchTask.skipIf).toBe(true);
     expect(planTask.skipIf).toBe(true);
     expect((researchTask.meta as Record<string, unknown>).retryPolicy).toEqual(STAGE_RETRY_POLICIES["research"]);
     expect((planTask.meta as Record<string, unknown>).retryPolicy).toEqual(STAGE_RETRY_POLICIES["plan"]);
     expect((implementTask.meta as Record<string, unknown>).retryPolicy).toEqual(STAGE_RETRY_POLICIES["implement"]);
-    expect((testTask.meta as Record<string, unknown>).retryPolicy).toEqual(STAGE_RETRY_POLICIES["test"]);
     expect((implementTask.meta as Record<string, unknown>).dependsOn).toEqual([
       stageNodeId(unit.id, "plan"),
     ]);
+  });
+
+  test("small-tier QualityPipeline has no direct review stage tasks", () => {
+    const unit: WorkUnit = {
+      id: "u-small-review-structure",
+      name: "Small unit",
+      rfcSections: [],
+      description: "desc",
+      deps: [],
+      acceptance: ["ac1"],
+      tier: "small",
+    };
+    const workPlan = createWorkPlan(unit);
+    const ctx = createCtx(() => null);
+
+    const element = QualityPipeline({
+      unit,
+      ctx,
+      outputs: scheduledOutputSchemas,
+      agents: createAgents(),
+      workPlan,
+      depSummaries: [],
+      evictionContext: null,
+    });
+
+    const tasks = collectTasks(element);
+    expect(tasks[stageNodeId(unit.id, "test")]).toBeUndefined();
+    expect(tasks[stageNodeId(unit.id, "prd-review")]).toBeUndefined();
+    expect(tasks[stageNodeId(unit.id, "code-review")]).toBeUndefined();
+    expect(tasks[stageNodeId(unit.id, "review-fix")]).toBeUndefined();
   });
 
   test("does not include a plan dependency for small-tier implement stage", () => {

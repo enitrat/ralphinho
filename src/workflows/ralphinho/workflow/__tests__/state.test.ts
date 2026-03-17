@@ -6,11 +6,8 @@ import {
   getEvictionContext,
   getUnitState,
   isUnitEvicted,
-  type FinalReviewRow,
   type OutputSnapshot,
 } from "../state";
-import { getDecisionAudit, isMergeEligible } from "../decisions";
-import type { DecisionAudit } from "../decisions";
 
 function unit(id: string, deps: string[] = []): WorkUnit {
   return {
@@ -29,11 +26,10 @@ function snapshot(overrides: Partial<OutputSnapshot> = {}): OutputSnapshot {
   return {
     mergeQueueRows: rows,
     latestTest: () => null,
-    latestFinalReview: () => null,
+    latestReviewLoopResult: () => null,
     latestImplement: () => null,
     freshTest: () => null,
     testHistory: () => [],
-    finalReviewHistory: () => [],
     implementHistory: () => [],
     reviewFixHistory: () => [],
     isUnitLanded: (unitId) =>
@@ -43,22 +39,14 @@ function snapshot(overrides: Partial<OutputSnapshot> = {}): OutputSnapshot {
   };
 }
 
-function buildAuditMap(s: OutputSnapshot, units: WorkUnit[]): Map<string, DecisionAudit> {
-  return new Map(units.map((u) => [u.id, getDecisionAudit(s, u.id)]));
-}
-
-function finalReview(
-  iteration: number,
-  overrides: Partial<FinalReviewRow> = {},
-): FinalReviewRow {
+function reviewLoopResult(iterationCount: number, passed = true) {
   return {
-    nodeId: "u1:final-review",
-    iteration,
-    readyToMoveOn: false,
-    approved: false,
-    reasoning: "needs work",
-    qualityScore: 0,
-    ...overrides,
+    nodeId: "u1:review-loop-result",
+    iterationCount,
+    codeSeverity: "none" as const,
+    prdSeverity: "none" as const,
+    passed,
+    exhausted: false,
   };
 }
 
@@ -67,7 +55,7 @@ describe("isUnitLanded", () => {
     const s = snapshot({
       mergeQueueRows: [{
         nodeId: "merge-queue",
-        ticketsLanded: [{ ticketId: "u1", mergeCommit: "abc", summary: "ok", decisionIteration: 1, testIteration: 1, approvalSupersededRejection: false }],
+        ticketsLanded: [{ ticketId: "u1", mergeCommit: "abc", summary: "ok", reviewLoopIterationCount: 1, testIteration: 1 }],
         ticketsEvicted: [],
       }],
     });
@@ -99,7 +87,7 @@ describe("isUnitEvicted", () => {
       mergeQueueRows: [
         {
           nodeId: "merge-queue",
-          ticketsLanded: [{ ticketId: "u1", mergeCommit: "abc", summary: "ok", decisionIteration: 1, testIteration: 1, approvalSupersededRejection: false }],
+          ticketsLanded: [{ ticketId: "u1", mergeCommit: "abc", summary: "ok", reviewLoopIterationCount: 1, testIteration: 1 }],
           ticketsEvicted: [],
         },
         {
@@ -138,7 +126,7 @@ describe("getEvictionContext", () => {
     const s = snapshot({
       mergeQueueRows: [{
         nodeId: "merge-queue",
-        ticketsLanded: [{ ticketId: "u1", mergeCommit: "abc", summary: "ok", decisionIteration: 1, testIteration: 1, approvalSupersededRejection: false }],
+        ticketsLanded: [{ ticketId: "u1", mergeCommit: "abc", summary: "ok", reviewLoopIterationCount: 1, testIteration: 1 }],
         ticketsEvicted: [{ ticketId: "u1", reason: "conflict", details: "x" }],
       }],
     });
@@ -152,7 +140,7 @@ describe("getUnitState", () => {
     const s = snapshot({
       mergeQueueRows: [{
         nodeId: "merge-queue",
-        ticketsLanded: [{ ticketId: "u1", mergeCommit: "abc", summary: "ok", decisionIteration: 1, testIteration: 1, approvalSupersededRejection: false }],
+        ticketsLanded: [{ ticketId: "u1", mergeCommit: "abc", summary: "ok", reviewLoopIterationCount: 1, testIteration: 1 }],
         ticketsEvicted: [],
       }],
     });
@@ -169,45 +157,12 @@ describe("getUnitState", () => {
     const s = snapshot({
       mergeQueueRows: [{
         nodeId: "merge-queue",
-        ticketsLanded: [{ ticketId: "dep", mergeCommit: "abc", summary: "ok", decisionIteration: 1, testIteration: 1, approvalSupersededRejection: false }],
+        ticketsLanded: [{ ticketId: "dep", mergeCommit: "abc", summary: "ok", reviewLoopIterationCount: 1, testIteration: 1 }],
         ticketsEvicted: [],
       }],
     });
 
     expect(getUnitState(s, [unit("dep"), unit("u1", ["dep"])], "u1")).toBe("active");
-  });
-});
-
-describe("isMergeEligible", () => {
-  test("returns false when testsPassed is false", () => {
-    const s = snapshot({
-      latestTest: () => ({ nodeId: "u1:test", iteration: 1, testsPassed: false, buildPassed: true }),
-      latestFinalReview: () => finalReview(1, { readyToMoveOn: true, approved: true, reasoning: "ok" }),
-      finalReviewHistory: () => [finalReview(1, { readyToMoveOn: true, approved: true, reasoning: "ok" })],
-    });
-
-    expect(isMergeEligible(s, "u1")).toBe(false);
-  });
-
-  test("returns false when tests pass but final review is not ready", () => {
-    const s = snapshot({
-      latestTest: () => ({ nodeId: "u1:test", iteration: 1, testsPassed: true, buildPassed: false }),
-      latestFinalReview: () => finalReview(1),
-      finalReviewHistory: () => [finalReview(1)],
-    });
-
-    expect(isMergeEligible(s, "u1")).toBe(false);
-  });
-
-  test("returns true only when tests pass and final review is ready", () => {
-    const s = snapshot({
-      latestTest: () => ({ nodeId: "u1:test", iteration: 2, testsPassed: true, buildPassed: false }),
-      testHistory: () => [{ nodeId: "u1:test", iteration: 2, testsPassed: true, buildPassed: false }],
-      latestFinalReview: () => finalReview(2, { readyToMoveOn: true, approved: true, reasoning: "ok" }),
-      finalReviewHistory: () => [finalReview(2, { readyToMoveOn: true, approved: true, reasoning: "ok" })],
-    });
-
-    expect(isMergeEligible(s, "u1")).toBe(true);
   });
 });
 
@@ -241,13 +196,12 @@ describe("buildDepSummaries", () => {
 });
 
 describe("buildMergeTickets", () => {
-  test("includes active, tier-complete units with latest implement outputs", () => {
+  test("includes active units with passed review loop and latest implement outputs", () => {
     const units = [unit("u1")];
     const s = snapshot({
       latestTest: () => ({ nodeId: "u1:test", iteration: 2, testsPassed: true, buildPassed: true }),
       testHistory: () => [{ nodeId: "u1:test", iteration: 2, testsPassed: true, buildPassed: true }],
-      latestFinalReview: () => finalReview(2, { readyToMoveOn: true, approved: true, reasoning: "ok" }),
-      finalReviewHistory: () => [finalReview(2, { readyToMoveOn: true, approved: true, reasoning: "ok" })],
+      latestReviewLoopResult: () => reviewLoopResult(2, true),
       latestImplement: () => ({
         nodeId: "u1:implement",
         iteration: 2,
@@ -266,7 +220,7 @@ describe("buildMergeTickets", () => {
       }],
     });
 
-    expect(buildMergeTickets(s, units, "run-1", 2, buildAuditMap(s, units))).toEqual([
+    expect(buildMergeTickets(s, units, "run-1", 2)).toEqual([
       {
         ticketId: "u1",
         ticketTitle: "u1",
@@ -278,9 +232,8 @@ describe("buildMergeTickets", () => {
         filesCreated: ["created.ts"],
         worktreePath: "/tmp/workflow-wt-run-1-u1",
         eligibilityProof: {
-          decisionIteration: 2,
+          reviewLoopIterationCount: 2,
           testIteration: 2,
-          approvalSupersededRejection: false,
         },
       },
     ]);
@@ -291,16 +244,15 @@ describe("buildMergeTickets", () => {
     const s = snapshot({
       mergeQueueRows: [{
         nodeId: "merge-queue",
-        ticketsLanded: [{ ticketId: "u1", mergeCommit: "abc", summary: "ok", decisionIteration: 1, testIteration: 1, approvalSupersededRejection: false }],
+        ticketsLanded: [{ ticketId: "u1", mergeCommit: "abc", summary: "ok", reviewLoopIterationCount: 1, testIteration: 1 }],
         ticketsEvicted: [],
       }],
       latestTest: () => ({ nodeId: "u1:test", iteration: 1, testsPassed: true, buildPassed: true }),
       testHistory: () => [{ nodeId: "u1:test", iteration: 1, testsPassed: true, buildPassed: true }],
-      latestFinalReview: () => finalReview(1, { readyToMoveOn: true, approved: true, reasoning: "ok" }),
-      finalReviewHistory: () => [finalReview(1, { readyToMoveOn: true, approved: true, reasoning: "ok" })],
+      latestReviewLoopResult: () => reviewLoopResult(1, true),
     });
 
-    expect(buildMergeTickets(s, units, "run-1", 1, buildAuditMap(s, units))).toEqual([]);
+    expect(buildMergeTickets(s, units, "run-1", 1)).toEqual([]);
   });
 
   test("excludes not-ready units with unmet dependencies", () => {
@@ -308,23 +260,21 @@ describe("buildMergeTickets", () => {
     const s = snapshot({
       latestTest: () => ({ nodeId: "u1:test", iteration: 1, testsPassed: true, buildPassed: true }),
       testHistory: () => [{ nodeId: "u1:test", iteration: 1, testsPassed: true, buildPassed: true }],
-      latestFinalReview: () => finalReview(1, { readyToMoveOn: true, approved: true, reasoning: "ok" }),
-      finalReviewHistory: () => [finalReview(1, { readyToMoveOn: true, approved: true, reasoning: "ok" })],
+      latestReviewLoopResult: () => reviewLoopResult(1, true),
     });
 
-    expect(buildMergeTickets(s, units, "run-1", 1, buildAuditMap(s, units))).toEqual([]);
+    expect(buildMergeTickets(s, units, "run-1", 1)).toEqual([]);
   });
 
-  test("excludes units that are not tier complete", () => {
+  test("excludes units without a passing review loop result", () => {
     const units = [unit("u1")];
     const s = snapshot({
       latestTest: () => ({ nodeId: "u1:test", iteration: 1, testsPassed: true, buildPassed: true }),
       testHistory: () => [{ nodeId: "u1:test", iteration: 1, testsPassed: true, buildPassed: true }],
-      latestFinalReview: () => finalReview(1),
-      finalReviewHistory: () => [finalReview(1)],
+      latestReviewLoopResult: () => reviewLoopResult(1, false),
     });
 
-    expect(buildMergeTickets(s, units, "run-1", 1, buildAuditMap(s, units))).toEqual([]);
+    expect(buildMergeTickets(s, units, "run-1", 1)).toEqual([]);
   });
 
   test("requires fresh passing tests for evicted units", () => {
@@ -337,17 +287,16 @@ describe("buildMergeTickets", () => {
       }],
       latestTest: () => ({ nodeId: "u1:test", iteration: 3, testsPassed: true, buildPassed: true }),
       testHistory: () => [{ nodeId: "u1:test", iteration: 3, testsPassed: true, buildPassed: true }],
-      latestFinalReview: () => finalReview(3, { readyToMoveOn: true, approved: true, reasoning: "ok" }),
-      finalReviewHistory: () => [finalReview(3, { readyToMoveOn: true, approved: true, reasoning: "ok" })],
+      latestReviewLoopResult: () => reviewLoopResult(3, true),
       freshTest: () => ({ nodeId: "u1:test", iteration: 3, testsPassed: false, buildPassed: true }),
     });
 
-    expect(buildMergeTickets(s, units, "run-1", 3, buildAuditMap(s, units))).toEqual([]);
+    expect(buildMergeTickets(s, units, "run-1", 3)).toEqual([]);
   });
 
-  test("for evicted units with fresh build failure, requires final review ready", () => {
+  test("for evicted units with fresh build failure, keeps eligibility when review loop passed", () => {
     const units = [unit("u1")];
-    const base = snapshot({
+    const s = snapshot({
       mergeQueueRows: [{
         nodeId: "merge-queue",
         ticketsLanded: [],
@@ -355,6 +304,7 @@ describe("buildMergeTickets", () => {
       }],
       latestTest: () => ({ nodeId: "u1:test", iteration: 3, testsPassed: true, buildPassed: true }),
       testHistory: () => [{ nodeId: "u1:test", iteration: 3, testsPassed: true, buildPassed: true }],
+      latestReviewLoopResult: () => reviewLoopResult(3, true),
       freshTest: () => ({ nodeId: "u1:test", iteration: 3, testsPassed: true, buildPassed: false }),
       latestImplement: () => ({
         nodeId: "u1:implement",
@@ -374,64 +324,6 @@ describe("buildMergeTickets", () => {
       }],
     });
 
-    const notReady = {
-      ...base,
-      latestFinalReview: () => finalReview(3),
-      finalReviewHistory: () => [finalReview(3)],
-    };
-    expect(buildMergeTickets(notReady, units, "run-1", 3, buildAuditMap(notReady, units))).toEqual([]);
-
-    const ready = {
-      ...base,
-      latestFinalReview: () => finalReview(3, { readyToMoveOn: true, approved: true, reasoning: "ok" }),
-      finalReviewHistory: () => [finalReview(3, { readyToMoveOn: true, approved: true, reasoning: "ok" })],
-    };
-    expect(buildMergeTickets(ready, units, "run-1", 3, buildAuditMap(ready, units)).map((t) => t.ticketId)).toEqual(["u1"]);
-  });
-});
-
-describe("decision audits", () => {
-  test("treats approval after rejection without new work as invalidated", () => {
-    const s = snapshot({
-      latestTest: () => ({ nodeId: "u1:test", iteration: 1, testsPassed: true, buildPassed: true }),
-      testHistory: () => [{ nodeId: "u1:test", iteration: 1, testsPassed: true, buildPassed: true }],
-      finalReviewHistory: () => [
-        finalReview(1, { reasoning: "reject" }),
-        finalReview(2, { readyToMoveOn: true, approved: true, reasoning: "schema fixed" }),
-      ],
-      latestFinalReview: () => finalReview(2, { readyToMoveOn: true, approved: true, reasoning: "schema fixed" }),
-    });
-
-    const audit = getDecisionAudit(s, "u1");
-    expect(audit.status).toBe("invalidated");
-    expect(audit.finalDecision?.approvalOnlyCorrectedFormatting).toBe(true);
-    expect(isMergeEligible(s, "u1")).toBe(false);
-  });
-
-  test("requires landed plus approved durable decision for semantic completion", () => {
-    const s = snapshot({
-      mergeQueueRows: [{
-        nodeId: "merge-queue",
-        ticketsLanded: [{ ticketId: "u1", mergeCommit: "abc", summary: "ok", decisionIteration: 2, testIteration: 2, approvalSupersededRejection: true }],
-        ticketsEvicted: [],
-      }],
-      latestTest: () => ({ nodeId: "u1:test", iteration: 2, testsPassed: true, buildPassed: true }),
-      testHistory: () => [
-        { nodeId: "u1:test", iteration: 1, testsPassed: false, buildPassed: false },
-        { nodeId: "u1:test", iteration: 2, testsPassed: true, buildPassed: true },
-      ],
-      implementHistory: () => [{ nodeId: "u1:implement", iteration: 2, whatWasDone: "fixed", filesCreated: [], filesModified: [], believesComplete: true }],
-      reviewFixHistory: () => [{ nodeId: "u1:review-fix", iteration: 2, summary: "fixed", allIssuesResolved: true, buildPassed: true, testsPassed: true }],
-      finalReviewHistory: () => [
-        finalReview(1, { reasoning: "reject" }),
-        finalReview(2, { readyToMoveOn: true, approved: true, reasoning: "approved" }),
-      ],
-      latestFinalReview: () => finalReview(2, { readyToMoveOn: true, approved: true, reasoning: "approved" }),
-      latestImplement: () => ({ nodeId: "u1:implement", iteration: 2, whatWasDone: "fixed", filesCreated: [], filesModified: [], believesComplete: true }),
-      isUnitLanded: () => true,
-    });
-
-    expect(getDecisionAudit(s, "u1").status).toBe("approved");
-    expect(getDecisionAudit(s, "u1").semanticallyComplete).toBe(true);
+    expect(buildMergeTickets(s, units, "run-1", 3).map((t) => t.ticketId)).toEqual(["u1"]);
   });
 });

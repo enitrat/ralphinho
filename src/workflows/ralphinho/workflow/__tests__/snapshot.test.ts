@@ -15,11 +15,11 @@ describe("buildSnapshot", () => {
     const ctx = makeCtx({
       merge_queue: [{
         nodeId: "merge-queue",
-        ticketsLanded: [{ ticketId: "u1", mergeCommit: "abc", summary: "ok", decisionIteration: 1, testIteration: 1, approvalSupersededRejection: false }],
+        ticketsLanded: [{ ticketId: "u1", mergeCommit: "abc", summary: "ok", reviewLoopIterationCount: 1, testIteration: 1 }],
         ticketsEvicted: [],
       }],
       test: [{ nodeId: "u1:test", iteration: 1, testsPassed: true, buildPassed: true }],
-      final_review: [{ nodeId: "u1:final-review", iteration: 1, readyToMoveOn: true, approved: true, reasoning: "ok" }],
+      review_loop_result: [{ nodeId: "u1:review-loop-result", iterationCount: 1, codeSeverity: "none", prdSeverity: "none", passed: true, exhausted: false }],
       implement: [{ nodeId: "u1:implement", iteration: 1, whatWasDone: "done", believesComplete: true, filesCreated: null, filesModified: ["a.ts"] }],
       review_fix: [{ nodeId: "u1:review-fix", iteration: 1, summary: "fixed", allIssuesResolved: true, buildPassed: true, testsPassed: true }],
     });
@@ -27,7 +27,7 @@ describe("buildSnapshot", () => {
     const snapshot = buildSnapshot(ctx);
     expect(snapshot.mergeQueueRows).toHaveLength(1);
     expect(snapshot.latestTest("u1")).toEqual({ nodeId: "u1:test", iteration: 1, testsPassed: true, buildPassed: true });
-    expect(snapshot.latestFinalReview("u1")).toEqual({ nodeId: "u1:final-review", iteration: 1, readyToMoveOn: true, approved: true, reasoning: "ok" });
+    expect(snapshot.latestReviewLoopResult("u1")).toEqual({ nodeId: "u1:review-loop-result", iterationCount: 1, codeSeverity: "none", prdSeverity: "none", passed: true, exhausted: false });
     expect(snapshot.latestImplement("u1")).toEqual({ nodeId: "u1:implement", iteration: 1, whatWasDone: "done", believesComplete: true, filesCreated: null, filesModified: ["a.ts"] });
   });
 });

@@ -1,5 +1,5 @@
 import React from "react";
-import { Task, Sequence, Parallel, Worktree } from "smithers-orchestrator";
+import { Task, Sequence, Worktree } from "smithers-orchestrator";
 import type { SmithersCtx, AgentLike } from "smithers-orchestrator";
 import type { WorkUnit, WorkPlan } from "../types";
 import { scheduledOutputSchemas } from "../schemas";
@@ -8,12 +8,9 @@ import type { Issue } from "../schemas";
 import ResearchPrompt from "../prompts/Research.mdx";
 import PlanPrompt from "../prompts/Plan.mdx";
 import ImplementPrompt from "../prompts/Implement.mdx";
-import TestPrompt from "../prompts/Test.mdx";
-import PrdReviewPrompt from "../prompts/PrdReview.mdx";
-import CodeReviewPrompt from "../prompts/CodeReview.mdx";
-import ReviewFixPrompt from "../prompts/ReviewFix.mdx";
 import LearningsExtractionPrompt from "../prompts/LearningsExtraction.mdx";
 import { buildUnitWorktreePath } from "./runtimeNames";
+import { ReviewLoop } from "./ReviewLoop";
 import {
   STAGE_RETRY_POLICIES,
   stageNodeId,
@@ -160,10 +157,6 @@ export function QualityPipeline({
 
   const testSuites = buildTestSuites(workPlan);
 
-  const bothApproved =
-    (prdReview?.approved ?? !tierHasStep(tier, "prd-review")) &&
-    (codeReview?.approved ?? false);
-
   const effectiveWorktreePath = worktreePath ?? buildUnitWorktreePath(ctx.runId, uid);
 
   return (
@@ -263,137 +256,27 @@ export function QualityPipeline({
           />
         </Task>
 
-        <Task
-          id={stageNodeId(uid, "test")}
-          output={outputs.test}
-          agent={agents.tester}
-          fallbackAgent={fallbacks?.tester}
-          retries={STAGE_RETRY_POLICIES["test"].retries}
-          meta={{
-            dependsOn: [stageNodeId(uid, "implement")],
-            retryPolicy: STAGE_RETRY_POLICIES["test"],
+        <ReviewLoop
+          unit={unit}
+          ctx={ctx}
+          outputs={outputs}
+          agents={{
+            tester: agents.tester,
+            prdReviewer: agents.prdReviewer,
+            codeReviewer: agents.codeReviewer,
+            reviewFixer: agents.reviewFixer,
           }}
-          // No cache: tests must run against the current implementation state.
-        >
-          <TestPrompt
-            unitId={uid}
-            unitName={unit.name}
-            unitCategory={tier}
-            whatWasDone={impl?.whatWasDone ?? "Unknown"}
-            filesCreated={impl?.filesCreated ?? []}
-            filesModified={impl?.filesModified ?? []}
-            testSuites={testSuites}
-            fixCommitPrefix="fix"
-            branchPrefix={branchPrefix}
-          />
-        </Task>
-
-        <Parallel>
-          {tierHasStep(tier, "prd-review") && (
-            <Task
-              id={stageNodeId(uid, "prd-review")}
-              output={outputs.prd_review}
-              agent={agents.prdReviewer}
-              fallbackAgent={fallbacks?.prdReviewer}
-              retries={STAGE_RETRY_POLICIES["prd-review"].retries}
-              meta={{
-                dependsOn: [stageNodeId(uid, "implement")],
-                retryPolicy: STAGE_RETRY_POLICIES["prd-review"],
-              }}
-              // No cache: review should evaluate latest implementation/test context.
-              continueOnFail
-            >
-              <PrdReviewPrompt
-                unitId={uid}
-                unitName={unit.name}
-                unitCategory={tier}
-                acceptanceCriteria={unit.acceptance}
-                filesCreated={impl?.filesCreated ?? []}
-                filesModified={impl?.filesModified ?? []}
-                testResults={[
-                  { name: "Build", status: test?.buildPassed ? "passed" : "failed" },
-                  { name: "Tests", status: test?.testsPassed ? "passed" : "failed" },
-                ]}
-                failingSummary={test?.failingSummary ?? null}
-                specChecks={[
-                  {
-                    name: "Acceptance criteria",
-                    items: unit.acceptance,
-                  },
-                ]}
-              />
-            </Task>
-          )}
-          {tierHasStep(tier, "code-review") && (
-            <Task
-              id={stageNodeId(uid, "code-review")}
-              output={outputs.code_review}
-              agent={agents.codeReviewer}
-              fallbackAgent={fallbacks?.codeReviewer}
-              retries={STAGE_RETRY_POLICIES["code-review"].retries}
-              meta={{
-                dependsOn: [stageNodeId(uid, "implement")],
-                retryPolicy: STAGE_RETRY_POLICIES["code-review"],
-              }}
-              // No cache: review should evaluate latest implementation/test context.
-              continueOnFail
-            >
-              <CodeReviewPrompt
-                unitId={uid}
-                unitName={unit.name}
-                unitCategory={tier}
-                whatWasDone={impl?.whatWasDone ?? "Unknown"}
-                filesCreated={impl?.filesCreated ?? []}
-                filesModified={impl?.filesModified ?? []}
-                qualityChecks={[
-                  {
-                    name: "Correctness and safety",
-                    items: [
-                      "No regressions in changed paths",
-                      "Error handling covers new edge cases",
-                      "No security issues introduced",
-                    ],
-                  },
-                ]}
-              />
-            </Task>
-          )}
-        </Parallel>
-
-        {tierHasStep(tier, "review-fix") && (
-          <Task
-            id={stageNodeId(uid, "review-fix")}
-            output={outputs.review_fix}
-            agent={agents.reviewFixer}
-            fallbackAgent={fallbacks?.reviewFixer}
-            retries={STAGE_RETRY_POLICIES["review-fix"].retries}
-            meta={{
-              dependsOn: [
-                stageNodeId(uid, "prd-review"),
-                stageNodeId(uid, "code-review"),
-              ],
-              retryPolicy: STAGE_RETRY_POLICIES["review-fix"],
-            }}
-            // No cache: fix output is stateful and tied to current review findings.
-            skipIf={bothApproved}
-          >
-            <ReviewFixPrompt
-              unitId={uid}
-              unitName={unit.name}
-              unitCategory={tier}
-              specSeverity={prdReview?.severity ?? "none"}
-              specFeedback={prdReview?.feedback ?? ""}
-              specIssues={buildIssueList(prdReview?.issues)}
-              codeSeverity={codeReview?.severity ?? "none"}
-              codeFeedback={codeReview?.feedback ?? ""}
-              codeIssues={buildIssueList(codeReview?.issues)}
-              validationCommands={verifyCommands}
-              commitPrefix="fix"
-              emojiPrefixes="fix, refactor, test"
-              branchPrefix={branchPrefix}
-            />
-          </Task>
-        )}
+          fallbacks={fallbacks ? {
+            tester: fallbacks.tester,
+            prdReviewer: fallbacks.prdReviewer,
+            codeReviewer: fallbacks.codeReviewer,
+            reviewFixer: fallbacks.reviewFixer,
+          } : undefined}
+          implOutput={impl}
+          testSuites={testSuites}
+          verifyCommands={verifyCommands}
+          branchPrefix={branchPrefix}
+        />
 
         {tierHasStep(tier, "learnings") && agents.learningsExtractor && (
           <Task
@@ -403,7 +286,7 @@ export function QualityPipeline({
             fallbackAgent={fallbacks?.learningsExtractor}
             retries={STAGE_RETRY_POLICIES["learnings"].retries}
             meta={{
-              dependsOn: [stageNodeId(uid, "review-fix")],
+              dependsOn: [`${uid}:review-loop`],
               retryPolicy: STAGE_RETRY_POLICIES["learnings"],
             }}
             // Cache semantics: learnings are write-once per unit — do not re-extract on subsequent passes.

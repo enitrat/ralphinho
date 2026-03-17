@@ -37,7 +37,6 @@ import {
   getUnitState,
   type UnitState,
 } from "../workflow/state";
-import { type DecisionAudit, getDecisionAudit } from "../workflow/decisions";
 import { buildSnapshot } from "../workflow/snapshot";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -84,27 +83,24 @@ export function ScheduledWorkflow({
   const unitState = (unitId: string): UnitState => getUnitState(snapshot, units, unitId);
   const unitEvictionContext = (unitId: string) => getEvictionContext(snapshot, unitId);
 
-  // ── Decision audit (computed once per unit) ────────────────────
-  const auditMap = new Map<string, DecisionAudit>(
-    units.map((u) => [u.id, getDecisionAudit(snapshot, u.id)]),
-  );
-  const unitAudit = (unitId: string) => auditMap.get(unitId)!;
-  const isSemanticComplete = (unitId: string) => unitAudit(unitId).semanticallyComplete;
-
   // ── Pass tracking ──────────────────────────────────────────────
 
   const passTracker = ctx.latest("pass_tracker", PASS_TRACKER_NODE_ID);
   const currentPass = passTracker?.totalIterations ?? 0;
   const allUnitsLanded = units.every((u) => snapshot.isUnitLanded(u.id));
-  const allUnitsSemanticallyComplete = units.every((u) => isSemanticComplete(u.id));
-  const done = currentPass >= maxPasses || allUnitsLanded || allUnitsSemanticallyComplete;
+  const allUnitsReviewComplete = units.every(
+    (u) => snapshot.isUnitLanded(u.id) || snapshot.latestReviewLoopResult(u.id)?.passed,
+  );
+  const done = currentPass >= maxPasses || allUnitsLanded || allUnitsReviewComplete;
 
   // ── Completion report data ─────────────────────────────────────
 
   const landedIds = units.filter((u) => snapshot.isUnitLanded(u.id)).map((u) => u.id);
-  const semanticallyCompleteIds = units.filter((u) => isSemanticComplete(u.id)).map((u) => u.id);
+  const reviewCompleteIds = units
+    .filter((u) => snapshot.isUnitLanded(u.id) && (snapshot.latestReviewLoopResult(u.id)?.passed ?? false))
+    .map((u) => u.id);
   const failedUnits = buildFailedUnitReport(
-    snapshot, units, auditMap, maxPasses,
+    snapshot, units, maxPasses,
     (key, nodeId) => !!ctx.latest(key as keyof ScheduledOutputs, nodeId),
   );
 
@@ -115,7 +111,6 @@ export function ScheduledWorkflow({
     units,
     ctx.runId,
     ctx.iteration,
-    auditMap,
   );
 
   return (
@@ -135,7 +130,7 @@ export function ScheduledWorkflow({
               if (state !== "active") return null;
 
               // Active + already quality-complete → skip pipeline, enters merge queue
-              if (unitAudit(unit.id).mergeEligible && !unitEvictionContext(unit.id)) return null;
+              if (snapshot.latestReviewLoopResult(unit.id)?.passed && !unitEvictionContext(unit.id)) return null;
 
               return (
                 <QualityPipeline
@@ -200,11 +195,11 @@ export function ScheduledWorkflow({
               unitsRun: units
                 .filter((u) => unitState(u.id) === "active")
                 .map((u) => u.id),
-              unitsComplete: semanticallyCompleteIds,
+              unitsComplete: reviewCompleteIds,
               unitsLanded: units
                 .filter((u) => snapshot.isUnitLanded(u.id))
                 .map((u) => u.id),
-              unitsSemanticallyComplete: semanticallyCompleteIds,
+              unitsSemanticallyComplete: reviewCompleteIds,
               summary: `Pass ${currentPass + 1} of ${maxPasses}. ${units.filter((u) => snapshot.isUnitLanded(u.id)).length}/${units.length} units landed on ${baseBranch}. ${units.filter((u) => unitState(u.id) === "not-ready").length} units waiting on deps.`,
             }}
           </Task>
@@ -216,20 +211,20 @@ export function ScheduledWorkflow({
         {{
           totalUnits: units.length,
           unitsLanded: landedIds,
-          unitsSemanticallyComplete: semanticallyCompleteIds,
+          unitsSemanticallyComplete: reviewCompleteIds,
           unitsFailed: failedUnits,
           passesUsed: currentPass + 1,
           summary:
-            semanticallyCompleteIds.length === units.length
+            reviewCompleteIds.length === units.length
               ? `All ${units.length} units landed and are semantically complete in ${currentPass + 1} pass(es).`
               : landedIds.length === units.length
-                ? `All ${units.length} units landed, but only ${semanticallyCompleteIds.length} are semantically complete after ${currentPass + 1} pass(es).`
-                : `${landedIds.length}/${units.length} units landed and ${semanticallyCompleteIds.length}/${units.length} are semantically complete after ${currentPass + 1} pass(es).`,
+                ? `All ${units.length} units landed, but only ${reviewCompleteIds.length} are semantically complete after ${currentPass + 1} pass(es).`
+                : `${landedIds.length}/${units.length} units landed and ${reviewCompleteIds.length}/${units.length} are semantically complete after ${currentPass + 1} pass(es).`,
           nextSteps:
             failedUnits.length === 0
               ? []
               : [
-                  "Review failed units and their decision history, merge eligibility, and eviction/test context in .ralphinho/workflow.db",
+                  "Review failed units and their review loop result, merge eligibility, and eviction/test context in .ralphinho/workflow.db",
                   "Consider running 'ralphinho run --resume' to retry failed units",
                   ...failedUnits.map(
                     (f) =>
