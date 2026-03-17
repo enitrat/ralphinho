@@ -138,6 +138,22 @@ export const scheduledOutputSchemas = {
     nextSteps: z.array(z.string()),
   }),
 
+  // ── PR Creation Result ──────────────────────────────────────────────
+  pr_creation: z.object({
+    ticketsPushed: z.array(z.object({
+      ticketId: z.string(),
+      branch: z.string(),
+      prUrl: z.string().nullable(),
+      prNumber: z.number().nullable(),
+      summary: z.string(),
+    })),
+    ticketsFailed: z.array(z.object({
+      ticketId: z.string(),
+      reason: z.string(),
+    })),
+    summary: z.string(),
+  }),
+
   // ── Merge Queue Result (per-layer batch) ──────────────────────────
   // Land status is read directly from this output.
   // unitLanded()/unitEvicted() scan ticketsLanded/ticketsEvicted.

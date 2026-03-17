@@ -17,4 +17,6 @@ export type ConsumedTicket = {
   issue: import("smithers-orchestrator/linear").LinearIssue;
   /** Markdown RFC content generated from the ticket */
   rfcContent: string;
+  /** Parsed metadata from improvinho-formatted description */
+  metadata?: import("./parse-issue-metadata").IssueMetadata;
 };

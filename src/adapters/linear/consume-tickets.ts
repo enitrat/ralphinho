@@ -9,8 +9,14 @@
 import { useLinear } from "smithers-orchestrator/linear";
 import type { LinearIssue } from "smithers-orchestrator/linear";
 import type { ConsumedTicket } from "./types";
+import { parseIssueMetadata } from "./parse-issue-metadata";
 
-function issueToRfc(issue: LinearIssue): string {
+export type ConsumedBatch = {
+  tickets: ConsumedTicket[];
+  unparseable: ConsumedTicket[];
+};
+
+export function issueToRfc(issue: LinearIssue): string {
   const lines: string[] = [];
 
   lines.push(`# ${issue.identifier}: ${issue.title}`);
@@ -147,4 +153,57 @@ export async function markTicketDone(opts: {
   lines.push("*Implemented by ralphinho*");
 
   await linear.addComment(opts.issueId, lines.join("\n"));
+}
+
+/**
+ * Fetch all actionable tickets from Linear (unstarted + started),
+ * deduplicate, sort by priority, parse metadata, and split into
+ * parseable tickets vs unparseable ones.
+ */
+export async function consumeAllTickets(opts: {
+  teamId?: string;
+  label: string;
+}): Promise<ConsumedBatch> {
+  const { teamId, label } = opts;
+  const linear = useLinear();
+
+  // 1. Fetch both states in parallel
+  const [unstartedIssues, startedIssues] = await Promise.all([
+    linear.listIssues({ teamId, labels: [label], stateType: "unstarted", limit: 50 }),
+    linear.listIssues({ teamId, labels: [label], stateType: "started", limit: 50 }),
+  ]);
+
+  // 2. Deduplicate by ID
+  const seen = new Set<string>();
+  const allIssues: LinearIssue[] = [];
+  for (const issue of [...unstartedIssues, ...startedIssues]) {
+    if (!seen.has(issue.id)) {
+      seen.add(issue.id);
+      allIssues.push(issue);
+    }
+  }
+
+  // 3. Sort by priority ascending (1=urgent first)
+  allIssues.sort((a, b) => a.priority - b.priority);
+
+  // 4. Parse metadata and split
+  const tickets: ConsumedTicket[] = [];
+  const unparseable: ConsumedTicket[] = [];
+
+  for (const issue of allIssues) {
+    const metadata = parseIssueMetadata(issue.description);
+    const consumed: ConsumedTicket = {
+      issue,
+      rfcContent: issueToRfc(issue),
+      metadata,
+    };
+
+    if (metadata.primaryFile) {
+      tickets.push(consumed);
+    } else {
+      unparseable.push(consumed);
+    }
+  }
+
+  return { tickets, unparseable };
 }

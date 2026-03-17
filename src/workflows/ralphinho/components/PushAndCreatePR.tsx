@@ -1,0 +1,175 @@
+import React from "react";
+import { Task } from "smithers-orchestrator";
+import type { SmithersCtx } from "smithers-orchestrator";
+import { z } from "zod";
+import { PR_CREATION_RETRIES, PR_CREATION_RETRY_POLICY } from "../workflow/contracts";
+
+// ── Schema ───────────────────────────────────────────────────────────
+
+export const prCreationResultSchema = z.object({
+  ticketsPushed: z.array(z.object({
+    ticketId: z.string(),
+    branch: z.string(),
+    prUrl: z.string().nullable(),
+    prNumber: z.number().nullable(),
+    summary: z.string(),
+  })),
+  ticketsFailed: z.array(z.object({
+    ticketId: z.string(),
+    reason: z.string(),
+  })),
+  summary: z.string(),
+});
+
+export type PrCreationResult = z.infer<typeof prCreationResultSchema>;
+
+// ── Ticket type ──────────────────────────────────────────────────────
+
+export type PushAndCreatePRTicket = {
+  ticketId: string;
+  ticketTitle: string;
+  branch: string;
+  worktreePath: string;
+  filesModified: string[];
+  filesCreated: string[];
+};
+
+// ── Props ────────────────────────────────────────────────────────────
+
+export type PushAndCreatePRProps = {
+  ctx: SmithersCtx<any>;
+  tickets: PushAndCreatePRTicket[];
+  agent: any;
+  fallbackAgent?: any;
+  repoRoot: string;
+  baseBranch?: string;
+  branchPrefix?: string;
+  output: any;
+  nodeId?: string;
+};
+
+// ── Prompt builder ───────────────────────────────────────────────────
+
+function buildTicketTable(tickets: PushAndCreatePRTicket[]): string {
+  const header = "| # | Ticket ID | Title | Branch | Files Touched | Worktree |";
+  const separator = "|---|-----------|-------|--------|---------------|----------|";
+  const rows = tickets.map((t, i) => {
+    const allFiles = [...(t.filesModified ?? []), ...(t.filesCreated ?? [])];
+    const fileSummary = allFiles.length > 0
+      ? allFiles.slice(0, 5).join(", ") + (allFiles.length > 5 ? ` (+${allFiles.length - 5} more)` : "")
+      : "(unknown)";
+    return `| ${i + 1} | ${t.ticketId} | ${t.ticketTitle} | ${t.branch} | ${fileSummary} | ${t.worktreePath} |`;
+  });
+
+  return [header, separator, ...rows].join("\n");
+}
+
+function buildPRCreationPrompt(
+  tickets: PushAndCreatePRTicket[],
+  repoRoot: string,
+  baseBranch: string,
+  branchPrefix: string,
+): string {
+  const ticketTable = buildTicketTable(tickets);
+  const ticketIds = tickets.map((t) => t.ticketId).join(", ") || "(none)";
+  const worktreeList = tickets
+    .map((t) => `- \`${t.ticketId}\`: \`${t.worktreePath}\` (branch: \`${t.branch}\`)`)
+    .join("\n");
+
+  return `# PR Creation Coordinator
+
+You are the **PR creation coordinator**. Your job is to push branches and create GitHub pull requests for completed tickets.
+
+## Current Time
+${new Date().toISOString()}
+
+## Repository
+- Root: \`${repoRoot}\`
+- Base branch: \`${baseBranch}\`
+
+## Tickets to Process (${tickets.length} ticket(s))
+
+${ticketTable}
+
+## Worktrees
+
+${worktreeList || "- (none)"}
+
+## Instructions
+
+Process each ticket in order. For each ticket:
+
+1. **Push the branch** — Push the ticket branch to the remote:
+   \`\`\`
+   jj git push --bookmark ${branchPrefix}{ticketId}
+   \`\`\`
+   If the push fails, record the ticket in \`ticketsFailed\` with the reason and continue to the next ticket.
+
+2. **Check for existing PR** — Check if a PR already exists for this branch:
+   \`\`\`
+   gh pr list --head ${branchPrefix}{ticketId} --json number,url
+   \`\`\`
+   If a PR already exists, record its URL and number in \`ticketsPushed\` and move to the next ticket.
+
+3. **Create the PR** — If no PR exists, create one:
+   \`\`\`
+   gh pr create --base ${baseBranch} --head ${branchPrefix}{ticketId} --title "{ticketTitle}" --body "Automated PR for ticket {ticketId}"
+   \`\`\`
+   Record the PR URL and number in \`ticketsPushed\`.
+
+4. **Handle failures** — If PR creation fails (e.g. branch not pushed, permissions), record in \`ticketsFailed\` with the error reason and continue.
+
+## Available Commands
+
+- \`jj git push --bookmark {branch}\` — Push a bookmark/branch to the remote
+- \`gh pr create --base ${baseBranch} --head {branch} --title "..." --body "..."\` — Create a PR
+- \`gh pr list --head {branch} --json number,url\` — Check for existing PRs
+- Ready tickets in this run: ${ticketIds}
+
+## Output Format
+
+Return a JSON object matching this schema:
+- \`ticketsPushed\`: Array of tickets you successfully pushed/created PRs for, with branch, prUrl (nullable if push succeeded but PR creation failed), prNumber (nullable), and summary
+- \`ticketsFailed\`: Array of tickets that failed, with ticketId and reason
+- \`summary\`: One paragraph summarizing what happened this PR creation run`;
+}
+
+// ── Component ────────────────────────────────────────────────────────
+
+export function PushAndCreatePR({
+  tickets,
+  agent,
+  fallbackAgent,
+  repoRoot,
+  baseBranch = "main",
+  branchPrefix = "ticket/",
+  output,
+  nodeId = "pr-creation",
+}: PushAndCreatePRProps) {
+  if (tickets.length === 0) {
+    return (
+      <Task id={nodeId} output={output}>
+        {{
+          ticketsPushed: [],
+          ticketsFailed: [],
+          summary: "No tickets ready for PR creation this iteration.",
+        }}
+      </Task>
+    );
+  }
+
+  const prompt = buildPRCreationPrompt(tickets, repoRoot, baseBranch, branchPrefix);
+
+  return (
+    <Task
+      id={nodeId}
+      output={output}
+      agent={agent}
+      fallbackAgent={fallbackAgent}
+      retries={PR_CREATION_RETRIES}
+      meta={{ retryPolicy: PR_CREATION_RETRY_POLICY }}
+    >
+      {prompt}
+    </Task>
+  );
+}

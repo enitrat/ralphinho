@@ -23,6 +23,7 @@ export const scheduledWorkConfigSchema = baseConfigSchema.extend({
   mode: z.literal("scheduled-work"),
   rfcPath: z.string(),
   baseBranch: z.string().default("main"),
+  landingMode: z.enum(["merge", "pr"]).default("merge"),
   agentOverride: reviewAgentOverrideSchema.nullable().default(null),
 });
 

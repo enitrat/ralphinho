@@ -34,6 +34,7 @@ export type StageRetryPolicy = {
 };
 
 export const MERGE_QUEUE_NODE_ID = "merge-queue" as const;
+export const PR_CREATION_NODE_ID = "pr-creation" as const;
 export const PASS_TRACKER_NODE_ID = "pass-tracker" as const;
 export const COMPLETION_REPORT_NODE_ID = "completion-report" as const;
 
@@ -107,6 +108,12 @@ export const MERGE_QUEUE_RETRY_POLICY: StageRetryPolicy = {
   initialDelayMs: 1_000,
   maxDelayMs: 8_000,
 };
+export const PR_CREATION_RETRY_POLICY: StageRetryPolicy = {
+  kind: "backoff",
+  retries: 2,
+  initialDelayMs: 1_000,
+  maxDelayMs: 8_000,
+};
 
 export const RESEARCH_RETRIES = RESEARCH_RETRY_POLICY.retries;
 export const PLAN_RETRIES = PLAN_RETRY_POLICY.retries;
@@ -116,6 +123,7 @@ export const REVIEW_RETRIES = REVIEW_RETRY_POLICY.retries;
 export const REVIEW_FIX_RETRIES = REVIEW_FIX_RETRY_POLICY.retries;
 export const FINAL_REVIEW_RETRIES = FINAL_REVIEW_RETRY_POLICY.retries;
 export const MERGE_QUEUE_RETRIES = MERGE_QUEUE_RETRY_POLICY.retries;
+export const PR_CREATION_RETRIES = PR_CREATION_RETRY_POLICY.retries;
 
 type ResearchSignatureInput = {
   unitId: string;
