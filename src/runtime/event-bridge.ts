@@ -349,14 +349,20 @@ export async function pollEventsFromDb(
     for (const unitId of unitIds) {
       const result = snapshot.latestReviewLoopResult(unitId);
       if (!result) continue;
+      const status = result.passed ? "approved" : result.exhausted ? "rejected" : "pending";
+      const reasoning = result.passed
+        ? "Review loop passed."
+        : result.exhausted
+          ? "Review loop exhausted without passing."
+          : "Review loop still in progress.";
       events.push({
         type: "final-review-decision",
         timestamp: now + result.iterationCount,
         runId,
         unitId,
         iteration: result.iterationCount,
-        status: result.passed ? "approved" : "rejected",
-        reasoning: result.passed ? "Review loop passed." : "Review loop did not pass.",
+        status,
+        reasoning,
         approvalSupersededRejection: false,
         approvalOnlyCorrectedFormatting: false,
       });
