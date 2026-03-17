@@ -2,14 +2,13 @@ import React from "react";
 
 import {
   createSmithers,
-  ClaudeCodeAgent,
-  CodexAgent,
   type AgentLike,
 } from "smithers-orchestrator";
 
 import { ScheduledWorkflow, type ScheduledWorkflowAgents } from "./components/ScheduledWorkflow";
 import { loadScheduledPreset } from "../../preset-runtime";
 import { scheduledOutputSchemas } from "./schemas";
+import { createAgentFactory } from "../shared/agentFactory";
 
 const { paths, config, workPlan } = loadScheduledPreset();
 
@@ -33,38 +32,19 @@ Complete the assigned task fully before concluding.
 Rely on the task prompt's schema/output instructions; do not invent alternate output wrappers or code-fenced JSON unless the task explicitly asks for them.
 `;
 
-function buildSystemPrompt(role: string): string {
-  return ["# Role: " + role, WORKSPACE_POLICY, EXECUTION_POLICY].join("\n\n");
-}
-
-function createClaude(role: string, model = "claude-sonnet-4-6") {
-  return new ClaudeCodeAgent({
-    model,
-    systemPrompt: buildSystemPrompt(role),
-    cwd: REPO_ROOT,
-    dangerouslySkipPermissions: true,
-    timeoutMs: 60 * 60 * 1000,
-    idleTimeoutMs: 10 * 60 * 1000,
-  });
-}
-
-function createCodex(role: string) {
-  return new CodexAgent({
-    model: "gpt-5.3-codex",
-    systemPrompt: buildSystemPrompt(role),
-    cwd: REPO_ROOT,
-    yolo: true,
-    timeoutMs: 60 * 60 * 1000,
-    idleTimeoutMs: 10 * 60 * 1000,
-  });
-}
+const { createClaude, createCodex } = createAgentFactory({
+  repoRoot: REPO_ROOT,
+  workspacePolicy: WORKSPACE_POLICY,
+  executionPolicy: EXECUTION_POLICY,
+  idleTimeoutMs: 10 * 60 * 1000,
+});
 
 function chooseAgent(
   primary: "sonnet" | "opus" | "codex",
   role: string,
 ): { agent: AgentLike | AgentLike[]; fallback?: AgentLike } {
   const claude = (model?: string) => createClaude(role, model ?? "claude-sonnet-4-6");
-  const codex = () => createCodex(role);
+  const codex = () => createCodex(role, "gpt-5.3-codex");
 
   if (primary === "opus" && HAS_CLAUDE) {
     return {

@@ -1,8 +1,6 @@
 import React from "react";
 
 import {
-  ClaudeCodeAgent,
-  CodexAgent,
   createSmithers,
 } from "smithers-orchestrator";
 
@@ -13,6 +11,7 @@ import {
   type ReviewDiscoveryWorkflowProps,
 } from "./components/ReviewDiscoveryWorkflow";
 import type { ReviewAgentOverride } from "../../config/types";
+import { createAgentFactory } from "../shared/agentFactory";
 
 const { paths, config, reviewPlan } = loadReviewPreset();
 
@@ -31,36 +30,12 @@ Return only the structured output that matches the task schema.
 Keep evidence concrete, scoped, and fast for humans to triage.
 `;
 
-function buildSystemPrompt(role: string): string {
-  return ["# Role: " + role, WORKSPACE_POLICY, EXECUTION_POLICY].join("\n\n");
-}
-
-function createClaude(role: string, model = "claude-sonnet-4-6") {
-  return new ClaudeCodeAgent({
-    model,
-    systemPrompt: buildSystemPrompt(role),
-    cwd: REPO_ROOT,
-    dangerouslySkipPermissions: true,
-    timeoutMs: 60 * 60 * 1000,
-    idleTimeoutMs: 15 * 60 * 1000,
-  });
-}
-
-function createCodex(role: string, model = "gpt-5.4-codex", reasoningEffort?: string) {
-  return new CodexAgent({
-    model,
-    systemPrompt: buildSystemPrompt(role),
-    cwd: REPO_ROOT,
-    yolo: true,
-    timeoutMs: 60 * 60 * 1000,
-    idleTimeoutMs: 15 * 60 * 1000,
-    ...(reasoningEffort && {
-      config: {
-        model_reasoning_effort: reasoningEffort,
-      },
-    }),
-  });
-}
+const { createClaude, createCodex } = createAgentFactory({
+  repoRoot: REPO_ROOT,
+  workspacePolicy: WORKSPACE_POLICY,
+  executionPolicy: EXECUTION_POLICY,
+  idleTimeoutMs: 15 * 60 * 1000,
+});
 
 function createOverrideAgent(
   override: ReviewAgentOverride,
