@@ -27,4 +27,6 @@ export { TIER_STAGES } from "./workflow/contracts";
 export { scheduledOutputSchemas } from "./schemas";
 
 // Domain logic
-export { decomposeRFC, printPlanSummary } from "./decompose";
+export { decomposeRFC } from "./decompose";
+export type { DecomposeOptions } from "./decompose";
+// printPlanSummary moved to src/cli/plan-summary.ts (CLI layer)

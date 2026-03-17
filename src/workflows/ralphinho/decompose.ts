@@ -9,11 +9,15 @@ import { ClaudeCodeAgent } from "smithers-orchestrator";
 import type { RepoConfig } from "../../cli/shared";
 import {
   workPlanSchema,
+  workUnitSchema,
   type WorkPlan,
   type WorkUnit,
   validateDAG,
   computeLayers,
 } from "./types";
+
+/** Default model used when none is specified by the caller. */
+const DEFAULT_MODEL = "claude-sonnet-4-6";
 
 const DECOMPOSE_SYSTEM_PROMPT = `You are a senior software architect decomposing an RFC/PRD into executable work units for an automated AI development pipeline.
 
@@ -86,22 +90,33 @@ ${rfcContent}
 Decompose this RFC into work units. Prefer fewer cohesive units over many granular ones — minimize cross-unit file overlap to avoid merge conflicts. Only add dependencies where there's a real code dependency. Return ONLY the JSON object.`;
 }
 
+export interface DecomposeOptions {
+  /** Model to use for the AI agent. Defaults to DEFAULT_MODEL. */
+  model?: string;
+  /** Absolute path to the repo root. Used as the agent's working directory. */
+  repoRoot?: string;
+}
+
 /**
  * Decompose an RFC into work units using an AI agent.
  */
 export async function decomposeRFC(
   rfcContent: string,
   repoConfig: RepoConfig,
+  options: DecomposeOptions = {},
 ): Promise<{ plan: WorkPlan; layers: WorkUnit[][] }> {
   const prompt = buildDecomposePrompt(rfcContent, repoConfig);
-  const rawResult = await callAI(prompt);
+  const rawResult = await callAI(prompt, {
+    model: options.model ?? DEFAULT_MODEL,
+    repoRoot: options.repoRoot ?? process.cwd(),
+  });
 
   // Parse the JSON response
   let jsonStr = rawResult;
   const fenceMatch = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
   if (fenceMatch) jsonStr = fenceMatch[1];
 
-  let parsed: any;
+  let parsed: unknown;
   try {
     parsed = JSON.parse(jsonStr.trim());
   } catch (e: any) {
@@ -110,9 +125,32 @@ export async function decomposeRFC(
     );
   }
 
-  // Validate units
-  const units: WorkUnit[] = parsed.units;
-  if (!Array.isArray(units) || units.length === 0) {
+  // Validate top-level shape before accessing .units
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    !("units" in parsed) ||
+    !Array.isArray((parsed as { units: unknown }).units)
+  ) {
+    throw new Error(
+      "AI response missing 'units' array.\n\nRaw response:\n" +
+        rawResult.slice(0, 500),
+    );
+  }
+
+  // Validate each unit against the schema before further processing
+  const rawUnits = (parsed as { units: unknown[] }).units;
+  const units: WorkUnit[] = rawUnits.map((u, i) => {
+    const result = workUnitSchema.safeParse(u);
+    if (!result.success) {
+      throw new Error(
+        `Work unit at index ${i} failed validation: ${result.error.message}`,
+      );
+    }
+    return result.data;
+  });
+
+  if (units.length === 0) {
     throw new Error("AI returned no work units");
   }
 
@@ -135,7 +173,7 @@ export async function decomposeRFC(
     units,
   };
 
-  // Validate against schema
+  // Validate against full schema
   workPlanSchema.parse(plan);
 
   const layers = computeLayers(units);
@@ -145,12 +183,20 @@ export async function decomposeRFC(
 
 /**
  * Call AI via ClaudeCodeAgent (wraps the claude CLI).
+ *
+ * NOTE: This uses ClaudeCodeAgent directly rather than the createClaude() factory
+ * from preset.tsx because decomposition runs during `init` — before any Smithers
+ * workflow is configured — so it needs a standalone, short-lived agent with a
+ * decomposition-specific system prompt and shorter timeout (5 min vs 60 min).
  */
-async function callAI(prompt: string): Promise<string> {
+async function callAI(
+  prompt: string,
+  config: { model: string; repoRoot: string },
+): Promise<string> {
   const agent = new ClaudeCodeAgent({
-    model: "claude-sonnet-4-6",
+    model: config.model,
     systemPrompt: DECOMPOSE_SYSTEM_PROMPT,
-    cwd: process.cwd(),
+    cwd: config.repoRoot,
     dangerouslySkipPermissions: true,
     timeoutMs: 5 * 60 * 1000,
   });
@@ -158,35 +204,4 @@ async function callAI(prompt: string): Promise<string> {
   const result = await agent.generate({ prompt });
   if (!result.text.trim()) throw new Error("Empty agent response");
   return result.text;
-}
-
-/**
- * Pretty-print a work plan summary to the console.
- */
-export function printPlanSummary(
-  plan: WorkPlan,
-  layers: WorkUnit[][],
-): void {
-  const tierCounts = { small: 0, large: 0 };
-  for (const u of plan.units) {
-    tierCounts[u.tier]++;
-  }
-
-  console.log(
-    `\n  Generated ${plan.units.length} work units in ${layers.length} parallelizable layers\n`,
-  );
-
-  console.log("  Tiers:");
-  for (const [tier, count] of Object.entries(tierCounts)) {
-    if (count > 0) console.log(`    ${tier}: ${count}`);
-  }
-
-  console.log("\n  Execution layers (units in same layer run in parallel):");
-  for (let i = 0; i < layers.length; i++) {
-    const layer = layers[i];
-    const names = layer.map((u) => u.id).join(", ");
-    console.log(`    Layer ${i}: [${names}]`);
-  }
-
-  console.log();
 }

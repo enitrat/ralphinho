@@ -17,7 +17,8 @@ import {
 } from "./shared";
 import { createSpinner } from "./spinner";
 import { ralphinhoConfigSchema } from "../config/types";
-import { decomposeRFC, printPlanSummary } from "../workflows/ralphinho/decompose";
+import { decomposeRFC } from "../workflows/ralphinho/decompose";
+import { printPlanSummary } from "./plan-summary";
 import type { WorkPlan, WorkUnit } from "../workflows/ralphinho/types";
 import { buildReviewPlan } from "../workflows/improvinho/plan";
 

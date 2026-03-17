@@ -22,7 +22,8 @@ import {
   type ParsedArgs,
 } from "./shared";
 import { createSpinner } from "./spinner";
-import { decomposeRFC, printPlanSummary } from "../workflows/ralphinho/decompose";
+import { decomposeRFC } from "../workflows/ralphinho/decompose";
+import { printPlanSummary } from "./plan-summary";
 import type { WorkPlan, WorkUnit } from "../workflows/ralphinho/types";
 import {
   reviewAgentOverrideSchema,

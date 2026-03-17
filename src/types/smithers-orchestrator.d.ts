@@ -41,8 +41,25 @@ declare module "smithers-orchestrator" {
     children?: React.ReactNode;
   }): React.ReactElement | null;
 
+  export interface ClaudeCodeAgentOptions {
+    /** Model identifier, e.g. "claude-sonnet-4-6" or "claude-opus-4-6". */
+    model: string;
+    /** System prompt prepended to every conversation turn. */
+    systemPrompt?: string;
+    /** Working directory for the agent. */
+    cwd?: string;
+    /** Skip interactive permission prompts (for headless/CI use). */
+    dangerouslySkipPermissions?: boolean;
+    /** Hard timeout for the entire agent run, in milliseconds. */
+    timeoutMs?: number;
+    /** Timeout for idle periods (no output) within a run, in milliseconds. */
+    idleTimeoutMs?: number;
+    /** Additional options passed through to the underlying CLI. */
+    [key: string]: unknown;
+  }
+
   export class ClaudeCodeAgent {
-    constructor(options: Record<string, unknown>);
+    constructor(options: ClaudeCodeAgentOptions);
     generate(options: {
       prompt: string;
       [key: string]: unknown;
