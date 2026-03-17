@@ -4,8 +4,8 @@ import type { WorkUnit } from "../types";
 import type { DepSummary } from "../components/QualityPipeline";
 import type { AgenticMergeQueueTicket } from "../components/AgenticMergeQueue";
 import { buildUnitWorktreePath } from "../components/runtimeNames";
-import { MERGE_QUEUE_NODE_ID } from "./contracts";
-import { getDecisionAudit, isMergeEligible } from "./decisions";
+import { MERGE_QUEUE_NODE_ID, TIER_STAGES, stageNodeId } from "./contracts";
+import type { DecisionAudit } from "./decisions";
 
 export type MergeQueueRow = {
   nodeId: string;
@@ -281,23 +281,87 @@ function latestRow<T>(rows: T[]): T | null {
   return rows.at(-1) ?? null;
 }
 
+export type FailedUnitReport = {
+  unitId: string;
+  lastStage: string;
+  reason: string;
+};
+
+export function buildFailedUnitReport(
+  snapshot: OutputSnapshot,
+  units: WorkUnit[],
+  auditMap: Map<string, DecisionAudit>,
+  maxPasses: number,
+  stageExists: (key: string, nodeId: string) => boolean,
+): FailedUnitReport[] {
+  return units
+    .filter((u) => !auditMap.get(u.id)!.semanticallyComplete)
+    .map((u) => {
+      const state = getUnitState(snapshot, units, u.id);
+      const audit = auditMap.get(u.id)!;
+      const tierStages = TIER_STAGES[u.tier] ?? TIER_STAGES.large;
+      const allStages = [
+        { key: "final_review", stage: "final-review", nodeId: stageNodeId(u.id, "final-review") },
+        { key: "review_fix", stage: "review-fix", nodeId: stageNodeId(u.id, "review-fix") },
+        { key: "code_review", stage: "code-review", nodeId: stageNodeId(u.id, "code-review") },
+        { key: "prd_review", stage: "prd-review", nodeId: stageNodeId(u.id, "prd-review") },
+        { key: "test", stage: "test", nodeId: stageNodeId(u.id, "test") },
+        { key: "implement", stage: "implement", nodeId: stageNodeId(u.id, "implement") },
+        { key: "plan", stage: "plan", nodeId: stageNodeId(u.id, "plan") },
+        { key: "research", stage: "research", nodeId: stageNodeId(u.id, "research") },
+      ] as const;
+      const stages = allStages
+        .filter((s) => tierStages.includes(s.stage as typeof tierStages[number]))
+        .map((s) => ({ key: s.key, stage: s.stage, nodeId: s.nodeId }));
+      let lastStage = state === "not-ready" ? "blocked-by-deps" : "not-started";
+      for (const stage of stages) {
+        if (stageExists(stage.key, stage.nodeId)) {
+          lastStage = stage.stage;
+          break;
+        }
+      }
+      let reason = state === "not-ready"
+        ? `Blocked: dependencies not landed (${(units.find((x) => x.id === u.id)?.deps ?? []).filter((d) => !snapshot.isUnitLanded(d)).join(", ")})`
+        : `Did not complete within ${maxPasses} passes`;
+      const evCtx = getEvictionContext(snapshot, u.id);
+      if (evCtx) reason = `Evicted from merge queue: ${evCtx.slice(0, 200)}`;
+      const testRow = snapshot.latestTest(u.id);
+      if (testRow && !testRow.testsPassed) {
+        reason = `Tests failing: ${testRow.failingSummary ?? "unknown"}`;
+      }
+      if (audit.status === "rejected") {
+        reason = `Final review rejected: ${audit.finalDecision?.reasoning ?? "missing reasoning"}`;
+      }
+      if (audit.status === "invalidated") {
+        reason = audit.finalDecision?.approvalOnlyCorrectedFormatting
+          ? "Final review approval only repaired formatting/schema after a rejection; no new substantive evidence was recorded."
+          : "Final review approval is stale or invalidated.";
+      }
+      if (snapshot.isUnitLanded(u.id) && !auditMap.get(u.id)!.semanticallyComplete) {
+        reason = `Landed without semantic completion: ${reason}`;
+      }
+      return { unitId: u.id, lastStage, reason };
+    });
+}
+
 export function buildMergeTickets(
   snapshot: OutputSnapshot,
   units: WorkUnit[],
   runId: string,
   iteration: number,
+  auditMap: Map<string, DecisionAudit>,
 ): AgenticMergeQueueTicket[] {
   return units
     .filter((unit) => {
       if (snapshot.isUnitLanded(unit.id)) return false;
       if (getUnitState(snapshot, units, unit.id) !== "active") return false;
-      if (!isMergeEligible(snapshot, unit.id)) return false;
+      if (!auditMap.get(unit.id)!.mergeEligible) return false;
 
       if (isUnitEvicted(snapshot, unit.id)) {
         const freshTest = snapshot.freshTest(unit.id, iteration);
         if (!freshTest?.testsPassed) return false;
         // Fresh build failed — fall back to latest test's build status via merge eligibility
-        if (!freshTest.buildPassed) return isMergeEligible(snapshot, unit.id);
+        if (!freshTest.buildPassed) return auditMap.get(unit.id)!.mergeEligible;
       }
 
       return true;
@@ -305,7 +369,7 @@ export function buildMergeTickets(
     .map((unit) => {
       const latestImplement = snapshot.latestImplement(unit.id);
       const latestTest = snapshot.latestTest(unit.id);
-      const audit = getDecisionAudit(snapshot, unit.id);
+      const audit = auditMap.get(unit.id)!;
       return {
         ticketId: unit.id,
         ticketTitle: unit.name,

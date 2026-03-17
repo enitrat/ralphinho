@@ -28,17 +28,16 @@ import {
   MERGE_QUEUE_NODE_ID,
   PASS_TRACKER_NODE_ID,
   PR_CREATION_NODE_ID,
-  stageNodeId,
-  TIER_STAGES,
 } from "../workflow/contracts";
 import {
   buildDepSummaries,
+  buildFailedUnitReport,
   buildMergeTickets,
   getEvictionContext,
   getUnitState,
   type UnitState,
 } from "../workflow/state";
-import { type DecisionAudit, getDecisionAudit, isMergeEligible } from "../workflow/decisions";
+import { type DecisionAudit, getDecisionAudit } from "../workflow/decisions";
 import { buildSnapshot } from "../workflow/snapshot";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -104,54 +103,10 @@ export function ScheduledWorkflow({
 
   const landedIds = units.filter((u) => snapshot.isUnitLanded(u.id)).map((u) => u.id);
   const semanticallyCompleteIds = units.filter((u) => isSemanticComplete(u.id)).map((u) => u.id);
-  const failedUnits = units
-    .filter((u) => !isSemanticComplete(u.id))
-    .map((u) => {
-      const state = unitState(u.id);
-      const audit = unitAudit(u.id);
-      const tierStages = TIER_STAGES[u.tier] ?? TIER_STAGES.large;
-      const allStages = [
-        { key: "final_review", stage: "final-review", nodeId: stageNodeId(u.id, "final-review") },
-        { key: "review_fix", stage: "review-fix", nodeId: stageNodeId(u.id, "review-fix") },
-        { key: "code_review", stage: "code-review", nodeId: stageNodeId(u.id, "code-review") },
-        { key: "prd_review", stage: "prd-review", nodeId: stageNodeId(u.id, "prd-review") },
-        { key: "test", stage: "test", nodeId: stageNodeId(u.id, "test") },
-        { key: "implement", stage: "implement", nodeId: stageNodeId(u.id, "implement") },
-        { key: "plan", stage: "plan", nodeId: stageNodeId(u.id, "plan") },
-        { key: "research", stage: "research", nodeId: stageNodeId(u.id, "research") },
-      ] as const;
-      const stages: Array<{ key: keyof ScheduledOutputs; stage: string; nodeId: string }> = allStages
-        .filter((stage) => tierStages.includes(stage.stage as typeof tierStages[number]))
-        .map((stage) => ({ key: stage.key, stage: stage.stage, nodeId: stage.nodeId }));
-      let lastStage = state === "not-ready" ? "blocked-by-deps" : "not-started";
-      for (const stage of stages) {
-        if (ctx.latest(stage.key, stage.nodeId)) {
-          lastStage = stage.stage;
-          break;
-        }
-      }
-      let reason = state === "not-ready"
-        ? `Blocked: dependencies not landed (${(units.find((x) => x.id === u.id)?.deps ?? []).filter((d) => !snapshot.isUnitLanded(d)).join(", ")})`
-        : `Did not complete within ${maxPasses} passes`;
-      const evCtx = unitEvictionContext(u.id);
-      if (evCtx) reason = `Evicted from merge queue: ${evCtx.slice(0, 200)}`;
-      const testOut = ctx.latest("test", stageNodeId(u.id, "test"));
-      if (testOut && !testOut.testsPassed) {
-        reason = `Tests failing: ${testOut.failingSummary ?? "unknown"}`;
-      }
-      if (audit.status === "rejected") {
-        reason = `Final review rejected: ${audit.finalDecision?.reasoning ?? "missing reasoning"}`;
-      }
-      if (audit.status === "invalidated") {
-        reason = audit.finalDecision?.approvalOnlyCorrectedFormatting
-          ? "Final review approval only repaired formatting/schema after a rejection; no new substantive evidence was recorded."
-          : "Final review approval is stale or invalidated.";
-      }
-      if (snapshot.isUnitLanded(u.id) && !isSemanticComplete(u.id)) {
-        reason = `Landed without semantic completion: ${reason}`;
-      }
-      return { unitId: u.id, lastStage, reason };
-    });
+  const failedUnits = buildFailedUnitReport(
+    snapshot, units, auditMap, maxPasses,
+    (key, nodeId) => !!ctx.latest(key as keyof ScheduledOutputs, nodeId),
+  );
 
   // ── Render ─────────────────────────────────────────────────────
 
@@ -160,6 +115,7 @@ export function ScheduledWorkflow({
     units,
     ctx.runId,
     ctx.iteration,
+    auditMap,
   );
 
   return (
@@ -179,7 +135,7 @@ export function ScheduledWorkflow({
               if (state !== "active") return null;
 
               // Active + already quality-complete → skip pipeline, enters merge queue
-              if (isMergeEligible(snapshot, unit.id) && !unitEvictionContext(unit.id)) return null;
+              if (unitAudit(unit.id).mergeEligible && !unitEvictionContext(unit.id)) return null;
 
               return (
                 <QualityPipeline

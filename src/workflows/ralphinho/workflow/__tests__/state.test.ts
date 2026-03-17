@@ -10,6 +10,7 @@ import {
   type OutputSnapshot,
 } from "../state";
 import { getDecisionAudit, isMergeEligible } from "../decisions";
+import type { DecisionAudit } from "../decisions";
 
 function unit(id: string, deps: string[] = []): WorkUnit {
   return {
@@ -40,6 +41,10 @@ function snapshot(overrides: Partial<OutputSnapshot> = {}): OutputSnapshot {
         && row.ticketsLanded.some((ticket) => ticket.ticketId === unitId)),
     ...overrides,
   };
+}
+
+function buildAuditMap(s: OutputSnapshot, units: WorkUnit[]): Map<string, DecisionAudit> {
+  return new Map(units.map((u) => [u.id, getDecisionAudit(s, u.id)]));
 }
 
 function finalReview(
@@ -261,7 +266,7 @@ describe("buildMergeTickets", () => {
       }],
     });
 
-    expect(buildMergeTickets(s, units, "run-1", 2)).toEqual([
+    expect(buildMergeTickets(s, units, "run-1", 2, buildAuditMap(s, units))).toEqual([
       {
         ticketId: "u1",
         ticketTitle: "u1",
@@ -295,7 +300,7 @@ describe("buildMergeTickets", () => {
       finalReviewHistory: () => [finalReview(1, { readyToMoveOn: true, approved: true, reasoning: "ok" })],
     });
 
-    expect(buildMergeTickets(s, units, "run-1", 1)).toEqual([]);
+    expect(buildMergeTickets(s, units, "run-1", 1, buildAuditMap(s, units))).toEqual([]);
   });
 
   test("excludes not-ready units with unmet dependencies", () => {
@@ -307,7 +312,7 @@ describe("buildMergeTickets", () => {
       finalReviewHistory: () => [finalReview(1, { readyToMoveOn: true, approved: true, reasoning: "ok" })],
     });
 
-    expect(buildMergeTickets(s, units, "run-1", 1)).toEqual([]);
+    expect(buildMergeTickets(s, units, "run-1", 1, buildAuditMap(s, units))).toEqual([]);
   });
 
   test("excludes units that are not tier complete", () => {
@@ -319,7 +324,7 @@ describe("buildMergeTickets", () => {
       finalReviewHistory: () => [finalReview(1)],
     });
 
-    expect(buildMergeTickets(s, units, "run-1", 1)).toEqual([]);
+    expect(buildMergeTickets(s, units, "run-1", 1, buildAuditMap(s, units))).toEqual([]);
   });
 
   test("requires fresh passing tests for evicted units", () => {
@@ -337,7 +342,7 @@ describe("buildMergeTickets", () => {
       freshTest: () => ({ nodeId: "u1:test", iteration: 3, testsPassed: false, buildPassed: true }),
     });
 
-    expect(buildMergeTickets(s, units, "run-1", 3)).toEqual([]);
+    expect(buildMergeTickets(s, units, "run-1", 3, buildAuditMap(s, units))).toEqual([]);
   });
 
   test("for evicted units with fresh build failure, requires final review ready", () => {
@@ -374,14 +379,14 @@ describe("buildMergeTickets", () => {
       latestFinalReview: () => finalReview(3),
       finalReviewHistory: () => [finalReview(3)],
     };
-    expect(buildMergeTickets(notReady, units, "run-1", 3)).toEqual([]);
+    expect(buildMergeTickets(notReady, units, "run-1", 3, buildAuditMap(notReady, units))).toEqual([]);
 
     const ready = {
       ...base,
       latestFinalReview: () => finalReview(3, { readyToMoveOn: true, approved: true, reasoning: "ok" }),
       finalReviewHistory: () => [finalReview(3, { readyToMoveOn: true, approved: true, reasoning: "ok" })],
     };
-    expect(buildMergeTickets(ready, units, "run-1", 3).map((t) => t.ticketId)).toEqual(["u1"]);
+    expect(buildMergeTickets(ready, units, "run-1", 3, buildAuditMap(ready, units)).map((t) => t.ticketId)).toEqual(["u1"]);
   });
 });
 
