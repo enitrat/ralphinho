@@ -74,8 +74,7 @@ function mergeQueueRows(snapshot: OutputSnapshot): MergeQueueRow[] {
 }
 
 export function isUnitLanded(snapshot: OutputSnapshot, unitId: string): boolean {
-  return mergeQueueRows(snapshot)
-    .some((mq) => mq.ticketsLanded.some((ticket) => ticket.ticketId === unitId));
+  return snapshot.isUnitLanded(unitId);
 }
 
 export function isUnitEvicted(snapshot: OutputSnapshot, unitId: string): boolean {
