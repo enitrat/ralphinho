@@ -53,7 +53,7 @@ export function priorityRank(priority: ReviewFinding["priority"]): number {
   }[priority];
 }
 
-function confidenceRank(confidence: ReviewFinding["confidence"]): number {
+export function confidenceRank(confidence: ReviewFinding["confidence"]): number {
   return {
     high: 3,
     medium: 2,
