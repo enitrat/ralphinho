@@ -5,13 +5,12 @@ import {
   buildMergeTickets,
   getEvictionContext,
   getUnitState,
-  isTierComplete,
   isUnitEvicted,
   isUnitLanded,
   type FinalReviewRow,
   type OutputSnapshot,
 } from "../state";
-import { getDecisionAudit, isSemanticallyComplete } from "../decisions";
+import { getDecisionAudit, isMergeEligible, isSemanticallyComplete } from "../decisions";
 
 function unit(id: string, deps: string[] = []): WorkUnit {
   return {
@@ -175,7 +174,7 @@ describe("getUnitState", () => {
   });
 });
 
-describe("isTierComplete", () => {
+describe("isMergeEligible", () => {
   test("returns false when testsPassed is false", () => {
     const s = snapshot({
       latestTest: () => ({ nodeId: "u1:test", testsPassed: false, buildPassed: true }),
@@ -183,7 +182,7 @@ describe("isTierComplete", () => {
       finalReviewHistory: () => [finalReview(1, { readyToMoveOn: true, approved: true, reasoning: "ok" })],
     });
 
-    expect(isTierComplete(s, "u1")).toBe(false);
+    expect(isMergeEligible(s, "u1")).toBe(false);
   });
 
   test("returns false when tests pass but final review is not ready", () => {
@@ -193,7 +192,7 @@ describe("isTierComplete", () => {
       finalReviewHistory: () => [finalReview(1)],
     });
 
-    expect(isTierComplete(s, "u1")).toBe(false);
+    expect(isMergeEligible(s, "u1")).toBe(false);
   });
 
   test("returns true only when tests pass and final review is ready", () => {
@@ -204,7 +203,7 @@ describe("isTierComplete", () => {
       finalReviewHistory: () => [finalReview(2, { readyToMoveOn: true, approved: true, reasoning: "ok" })],
     });
 
-    expect(isTierComplete(s, "u1")).toBe(true);
+    expect(isMergeEligible(s, "u1")).toBe(true);
   });
 });
 
@@ -401,7 +400,7 @@ describe("decision audits", () => {
     const audit = getDecisionAudit(s, "u1");
     expect(audit.status).toBe("invalidated");
     expect(audit.finalDecision?.approvalOnlyCorrectedFormatting).toBe(true);
-    expect(isTierComplete(s, "u1")).toBe(false);
+    expect(isMergeEligible(s, "u1")).toBe(false);
   });
 
   test("requires landed plus approved durable decision for semantic completion", () => {

@@ -36,7 +36,7 @@ type ProjectedFinding = MergedReviewFinding & {
   displayId: string;
 };
 
-function normalizePart(value: string | null | undefined): string {
+export function normalizePart(value: string | null | undefined): string {
   return (value ?? "")
     .trim()
     .toLowerCase()
@@ -44,7 +44,7 @@ function normalizePart(value: string | null | undefined): string {
     .replace(/^-+|-+$/g, "") || "module";
 }
 
-function priorityRank(priority: ReviewFinding["priority"]): number {
+export function priorityRank(priority: ReviewFinding["priority"]): number {
   return {
     critical: 4,
     high: 3,

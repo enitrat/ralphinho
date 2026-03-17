@@ -36,11 +36,10 @@ import {
   buildMergeTickets,
   getEvictionContext,
   getUnitState,
-  isTierComplete,
   isUnitLanded,
   type UnitState,
 } from "../workflow/state";
-import { type DecisionAudit, getDecisionAudit } from "../workflow/decisions";
+import { type DecisionAudit, getDecisionAudit, isMergeEligible } from "../workflow/decisions";
 import { buildSnapshot } from "../workflow/snapshot";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -182,7 +181,7 @@ export function ScheduledWorkflow({
               if (state !== "active") return null;
 
               // Active + already quality-complete → skip pipeline, enters merge queue
-              if (isTierComplete(snapshot, unit.id) && !unitEvictionContext(unit.id)) return null;
+              if (isMergeEligible(snapshot, unit.id) && !unitEvictionContext(unit.id)) return null;
 
               return (
                 <QualityPipeline

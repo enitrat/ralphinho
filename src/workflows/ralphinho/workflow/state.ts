@@ -106,10 +106,6 @@ export function getUnitState(snapshot: OutputSnapshot, units: WorkUnit[], unitId
   return "active";
 }
 
-export function isTierComplete(snapshot: OutputSnapshot, unitId: string): boolean {
-  return isMergeEligible(snapshot, unitId);
-}
-
 export function buildDepSummaries(snapshot: OutputSnapshot, unit: WorkUnit): DepSummary[] {
   return (unit.deps ?? [])
     .map((depId) => {
