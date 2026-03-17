@@ -239,7 +239,9 @@ src/
 | Document | Scope |
 |----------|-------|
 | [CONCEPTS.md](CONCEPTS.md) | Infrastructure: Smithers engine, agent system, jj VCS, worktree isolation, tiers |
-| [IMPROVINHO.md](IMPROVINHO.md) | Improvinho review pipeline: scopes, lenses, finding model, projection |
+| [RALPHINHO.md](RALPHINHO.md) | Spec-driven implementation pipeline: setup, quality pipeline, merge queue, eviction |
+| [IMPROVINHO.md](IMPROVINHO.md) | Review-discovery pipeline: scopes, lenses, finding model, projection |
+| [LINEAR_INTEGRATION.md](LINEAR_INTEGRATION.md) | Optional Linear glue: push findings, consume tickets, batch mode |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Architecture index |
 
 ## License

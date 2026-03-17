@@ -44,7 +44,7 @@ function createClaude(role: string, model = "claude-sonnet-4-6") {
     cwd: REPO_ROOT,
     dangerouslySkipPermissions: true,
     timeoutMs: 60 * 60 * 1000,
-    idleTimeoutMs: 5 * 60 * 1000,
+    idleTimeoutMs: 10 * 60 * 1000,
   });
 }
 
@@ -55,7 +55,7 @@ function createCodex(role: string) {
     cwd: REPO_ROOT,
     yolo: true,
     timeoutMs: 60 * 60 * 1000,
-    idleTimeoutMs: 5 * 60 * 1000,
+    idleTimeoutMs: 10 * 60 * 1000,
   });
 }
 
