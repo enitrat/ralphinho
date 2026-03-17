@@ -8,9 +8,7 @@ export type StageName =
   | "review-fix"
   | "learnings";
 
-type LegacyStageName = "final-review";
-
-export function stageNodeId(unitId: string, stage: StageName | LegacyStageName): string {
+export function stageNodeId(unitId: string, stage: StageName): string {
   return `${unitId}:${stage}`;
 }
 
@@ -77,7 +75,6 @@ const BACKOFF_RETRY_POLICY: StageRetryPolicy = {
 
 export type RetryPolicyStage =
   | StageName
-  | "final-review"
   | "merge-queue"
   | "pr-creation";
 
@@ -89,7 +86,6 @@ export const STAGE_RETRY_POLICIES: Record<RetryPolicyStage, StageRetryPolicy> = 
   "prd-review": FAIL_FAST_RETRY_POLICY,
   "code-review": FAIL_FAST_RETRY_POLICY,
   "review-fix": FAIL_FAST_RETRY_POLICY,
-  "final-review": FAIL_FAST_RETRY_POLICY,
   learnings: FAIL_FAST_RETRY_POLICY,
   "merge-queue": BACKOFF_RETRY_POLICY,
   "pr-creation": BACKOFF_RETRY_POLICY,

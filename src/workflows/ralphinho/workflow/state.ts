@@ -301,7 +301,6 @@ export function buildFailedUnitReport(
       const audit = auditMap.get(u.id)!;
       const tierStages = TIER_STAGES[u.tier] ?? TIER_STAGES.large;
       const allStages = [
-        { key: "final_review", stage: "final-review", nodeId: stageNodeId(u.id, "final-review") },
         { key: "review_fix", stage: "review-fix", nodeId: stageNodeId(u.id, "review-fix") },
         { key: "code_review", stage: "code-review", nodeId: stageNodeId(u.id, "code-review") },
         { key: "prd_review", stage: "prd-review", nodeId: stageNodeId(u.id, "prd-review") },

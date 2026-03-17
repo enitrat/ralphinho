@@ -22,6 +22,10 @@ describe("retry policy semantics", () => {
     expect(STAGE_RETRY_POLICIES["implement"].kind).toBe("fail-fast");
     expect(STAGE_RETRY_POLICIES["test"].kind).toBe("fail-fast");
   });
+
+  test("does not expose a retry policy for removed final-review stage", () => {
+    expect("final-review" in STAGE_RETRY_POLICIES).toBe(false);
+  });
 });
 
 describe("stage contracts", () => {
