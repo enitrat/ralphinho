@@ -88,33 +88,10 @@ describe("groupByFileOverlap", () => {
     expect(groups[1]!.tickets).toHaveLength(1);
   });
 
-  test("transitive conflict groups A, B, C together", () => {
-    // A→file1, B→file1+file2 (via separate tickets), C→file2
-    // But wait — each ticket has ONE primaryFile. Transitivity happens
-    // when tickets share a file with the same intermediate ticket.
-    // Actually re-reading the plan: union-find unions ticket indices
-    // when they share a primaryFile. So A(file1) and B(file1) are unioned.
-    // B(file1) and C(file2) are NOT unioned unless B also touches file2.
-    //
-    // For transitive: we need ticket B that touches file1, and ticket C
-    // that also touches file1 AND there's a ticket D touching file2...
-    // Actually, simpler: The transitivity test in the plan says:
-    // "If ticket A touches file1, B touches file1+file2, C touches file2"
-    // But each ticket only has ONE primaryFile. So the plan's transitive
-    // example works when B is actually TWO tickets (one on file1, one on file2).
-    //
-    // For the union-find: tickets on the same file get unioned.
-    // Transitivity: if A and B share file1, and B and C share file2...
-    // but B can only have ONE primaryFile. So true transitivity requires
-    // a ticket that acts as a bridge.
-    //
-    // Let me test: A(file1), B(file1), C(file1) — trivial same group.
-    // Real transitive test isn't possible with single-file tickets UNLESS
-    // the code also considers other metadata. But the plan says future
-    // multi-file awareness. For now, tickets can only share via primaryFile.
-    //
-    // Still, let's verify the union-find works for the simple case:
-    // 3 tickets all on file1 → 1 group.
+  test("three tickets sharing the same file are grouped together", () => {
+    // NOTE: true transitivity (A↔B via file1, B↔C via file2) requires
+    // multi-file awareness. With single primaryFile, all tickets here
+    // share the same file directly.
     const tickets = [
       buildTicket({ id: "a", identifier: "IMP-0001", primaryFile: "src/file1.ts" }),
       buildTicket({ id: "b", identifier: "IMP-0002", primaryFile: "src/file1.ts" }),
