@@ -1,0 +1,68 @@
+LEARNINGS EXTRACTION — Unit: {props.unitId}
+
+Title: {props.unitName}
+Category: {props.unitCategory}
+
+Your job is to extract **generalizable patterns** from this unit's review cycle that would help future implementations avoid the same issues.
+
+## Review Cycle Context
+
+{props.codeReviewFeedback ? `### Code Review Feedback\nSeverity: ${props.codeReviewSeverity}\n${props.codeReviewFeedback}` : 'No code review feedback.'}
+
+{props.codeReviewIssues && props.codeReviewIssues.length > 0
+  ? `### Code Review Issues\n${props.codeReviewIssues.map((issue, i) => `${i + 1}. ${issue}`).join('\n')}`
+  : ''}
+
+{props.prdReviewFeedback ? `### PRD Review Feedback\nSeverity: ${props.prdReviewSeverity}\n${props.prdReviewFeedback}` : ''}
+
+{props.reviewFixSummary ? `### Review Fix Summary\n${props.reviewFixSummary}` : ''}
+
+{props.reviewFixFalsePositives && props.reviewFixFalsePositives.length > 0
+  ? `### False Positives (issues that were NOT real)\n${props.reviewFixFalsePositives.map((fp, i) => `${i + 1}. ${fp}`).join('\n')}`
+  : ''}
+
+{props.finalReviewReasoning ? `### Final Review\nApproved: ${props.finalReviewApproved}\nReasoning: ${props.finalReviewReasoning}` : ''}
+
+## What to Extract
+
+Focus on patterns that are **generalizable across units**, not unit-specific details.
+
+**Good learnings:**
+- "Tests that only verify type exports are waste — the compiler handles this" (category: testing)
+- "Functions in src/utils/ already handle path normalization — check before writing your own" (category: code-quality)
+- "Error paths in API handlers consistently miss logging" (category: error-handling)
+
+**Bad learnings (too specific, skip these):**
+- "Fixed a typo in line 42 of foo.ts"
+- "Added missing import for Bar"
+
+## Steps
+
+1. Read the review feedback above
+2. Identify patterns that a future implementer should know BEFORE writing code
+3. For each pattern, classify its category and whether it's likely one-off or recurring
+4. Write the learnings file to {props.learningsFilePath}
+5. Return the structured output
+
+## File Format
+
+Write {props.learningsFilePath} as markdown:
+
+```markdown
+# Learnings: {props.unitName}
+
+## Patterns
+
+### [category] Pattern title
+Description of the pattern and why it matters.
+Example: concrete code or file reference if applicable.
+Frequency: one-off | recurring
+```
+
+## Commit
+
+After writing the learnings file:
+1. `jj describe -m "📝 docs(learnings): extract patterns for {props.unitId}"`
+2. `jj new`
+3. {`jj bookmark set ${props.branchPrefix || "unit/"}${props.unitId} -r @`}
+4. {`jj git push --bookmark ${props.branchPrefix || "unit/"}${props.unitId}`}

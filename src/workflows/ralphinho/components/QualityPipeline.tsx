@@ -12,6 +12,7 @@ import PrdReviewPrompt from "../prompts/PrdReview.mdx";
 import CodeReviewPrompt from "../prompts/CodeReview.mdx";
 import ReviewFixPrompt from "../prompts/ReviewFix.mdx";
 import FinalReviewPrompt from "../prompts/FinalReview.mdx";
+import LearningsExtractionPrompt from "../prompts/LearningsExtraction.mdx";
 import { buildUnitWorktreePath } from "./runtimeNames";
 import {
   buildPlanInputSignature,
@@ -20,6 +21,8 @@ import {
   FINAL_REVIEW_RETRY_POLICY,
   IMPLEMENT_RETRIES,
   IMPLEMENT_RETRY_POLICY,
+  LEARNINGS_RETRIES,
+  LEARNINGS_RETRY_POLICY,
   PLAN_RETRIES,
   PLAN_RETRY_POLICY,
   RESEARCH_RETRIES,
@@ -52,6 +55,7 @@ export type QualityPipelineAgents = {
   codeReviewer: AgentLike | AgentLike[];
   reviewFixer: AgentLike | AgentLike[];
   finalReviewer: AgentLike | AgentLike[];
+  learningsExtractor?: AgentLike | AgentLike[];
 };
 
 /** Single fallback agents per role (used with Task's fallbackAgent prop). */
@@ -143,6 +147,7 @@ export function QualityPipeline({
   const codeReview = ctx.latest("code_review", stageNodeId(uid, "code-review"));
   const reviewFix = ctx.latest("review_fix", stageNodeId(uid, "review-fix"));
   const finalReview = ctx.latest("final_review", stageNodeId(uid, "final-review"));
+  const learnings = ctx.latest("learnings", stageNodeId(uid, "learnings"));
 
   const combinedReviewFeedback = buildReviewFeedback([
     finalReview?.reasoning ? `Final review feedback:\n${finalReview.reasoning}` : null,
@@ -448,6 +453,44 @@ export function QualityPipeline({
               codeSeverity={codeReview?.severity ?? null}
               codeApproved={codeReview?.approved ?? null}
               issuesResolved={reviewFix?.allIssuesResolved ?? null}
+            />
+          </Task>
+        )}
+
+        {tierHasStep(tier, "learnings") && agents.learningsExtractor && (
+          <Task
+            id={stageNodeId(uid, "learnings")}
+            output={outputs.learnings}
+            agent={agents.learningsExtractor}
+            fallbackAgent={fallbacks?.learningsExtractor}
+            retries={LEARNINGS_RETRIES}
+            meta={{
+              dependsOn: [stageNodeId(uid, "final-review")],
+              retryPolicy: LEARNINGS_RETRY_POLICY,
+            }}
+            // Cache semantics: learnings are write-once per unit — do not re-extract on subsequent passes.
+            skipIf={learnings != null}
+            continueOnFail
+          >
+            <LearningsExtractionPrompt
+              unitId={uid}
+              unitName={unit.name}
+              unitCategory={tier}
+              codeReviewSeverity={codeReview?.severity ?? "none"}
+              codeReviewFeedback={codeReview?.feedback ?? null}
+              codeReviewIssues={buildIssueList(codeReview?.issues)}
+              prdReviewSeverity={prdReview?.severity ?? "none"}
+              prdReviewFeedback={prdReview?.feedback ?? null}
+              reviewFixSummary={reviewFix?.summary ?? null}
+              reviewFixFalsePositives={
+                reviewFix?.falsePositives?.map(
+                  (fp) => `${fp.issue}: ${fp.reasoning}`,
+                ) ?? []
+              }
+              finalReviewApproved={finalReview?.approved ?? false}
+              finalReviewReasoning={finalReview?.reasoning ?? null}
+              learningsFilePath={learnings?.learningsFilePath ?? `docs/learnings/${uid}.md`}
+              branchPrefix={branchPrefix}
             />
           </Task>
         )}

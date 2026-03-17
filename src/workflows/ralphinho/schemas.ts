@@ -111,6 +111,30 @@ export const scheduledOutputSchemas = {
       .nullable(),
   }),
 
+  // ── Learnings Extraction ────────────────────────────────────────────
+  learnings: z.object({
+    learningsFilePath: z.string(),
+    patterns: z.array(
+      z.object({
+        pattern: z.string(),
+        category: z.enum([
+          "code-quality",
+          "testing",
+          "architecture",
+          "error-handling",
+          "performance",
+          "security",
+          "naming",
+          "other",
+        ]),
+        description: z.string(),
+        example: z.string().nullable(),
+        frequency: z.enum(["one-off", "recurring"]),
+      }),
+    ),
+    summary: z.string(),
+  }),
+
   // ── Pass Tracker ──────────────────────────────────────────────────
   pass_tracker: z.object({
     totalIterations: z.number(),

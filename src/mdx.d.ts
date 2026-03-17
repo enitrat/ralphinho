@@ -64,6 +64,27 @@ declare module "*/prompts/FinalReview.mdx" {
   export default Component;
 }
 
+declare module "*/prompts/LearningsExtraction.mdx" {
+  interface LearningsExtractionPromptProps {
+    branchPrefix?: any;
+    codeReviewFeedback?: any;
+    codeReviewIssues?: any;
+    codeReviewSeverity?: any;
+    finalReviewApproved?: any;
+    finalReviewReasoning?: any;
+    learningsFilePath: any;
+    prdReviewFeedback?: any;
+    prdReviewSeverity?: any;
+    reviewFixFalsePositives?: any;
+    reviewFixSummary?: any;
+    unitCategory: any;
+    unitId: any;
+    unitName: any;
+  }
+  const Component: import("react").FC<LearningsExtractionPromptProps>;
+  export default Component;
+}
+
 declare module "*/prompts/Implement.mdx" {
   interface ImplementPromptProps {
     acceptanceCriteria?: any;

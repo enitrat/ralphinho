@@ -8,7 +8,8 @@ export type StageName =
   | "prd-review"
   | "code-review"
   | "review-fix"
-  | "final-review";
+  | "final-review"
+  | "learnings";
 
 export type StageTableName =
   | "research"
@@ -18,7 +19,8 @@ export type StageTableName =
   | "prd_review"
   | "code_review"
   | "review_fix"
-  | "final_review";
+  | "final_review"
+  | "learnings";
 
 export function stageNodeId(unitId: string, stage: StageName): string {
   return `${unitId}:${stage}`;
@@ -45,6 +47,7 @@ export const TIER_STAGES: Record<ScheduledTier, readonly StageName[]> = {
     "code-review",
     "review-fix",
     "final-review",
+    "learnings",
   ],
   large: [
     "research",
@@ -55,6 +58,7 @@ export const TIER_STAGES: Record<ScheduledTier, readonly StageName[]> = {
     "code-review",
     "review-fix",
     "final-review",
+    "learnings",
   ],
 };
 
@@ -67,6 +71,7 @@ export const DISPLAY_STAGES = [
   { key: "code-review", abbr: "V", table: "code_review" as StageTableName },
   { key: "review-fix", abbr: "F", table: "review_fix" as StageTableName },
   { key: "final-review", abbr: "G", table: "final_review" as StageTableName },
+  { key: "learnings", abbr: "L", table: "learnings" as StageTableName },
 ] as const;
 
 // Smithers semantics: retries=N means N+1 total attempts.
@@ -102,6 +107,10 @@ export const FINAL_REVIEW_RETRY_POLICY: StageRetryPolicy = {
   kind: "fail-fast",
   retries: 1,
 };
+export const LEARNINGS_RETRY_POLICY: StageRetryPolicy = {
+  kind: "fail-fast",
+  retries: 1,
+};
 export const MERGE_QUEUE_RETRY_POLICY: StageRetryPolicy = {
   kind: "backoff",
   retries: 2,
@@ -122,6 +131,7 @@ export const TEST_RETRIES = TEST_RETRY_POLICY.retries;
 export const REVIEW_RETRIES = REVIEW_RETRY_POLICY.retries;
 export const REVIEW_FIX_RETRIES = REVIEW_FIX_RETRY_POLICY.retries;
 export const FINAL_REVIEW_RETRIES = FINAL_REVIEW_RETRY_POLICY.retries;
+export const LEARNINGS_RETRIES = LEARNINGS_RETRY_POLICY.retries;
 export const MERGE_QUEUE_RETRIES = MERGE_QUEUE_RETRY_POLICY.retries;
 export const PR_CREATION_RETRIES = PR_CREATION_RETRY_POLICY.retries;
 
