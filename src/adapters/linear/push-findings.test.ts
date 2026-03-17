@@ -8,6 +8,7 @@ import type { MergedReviewFinding } from "../../workflows/improvinho/projection"
 
 function buildMergedFinding(overrides: Partial<MergedReviewFinding> = {}): MergedReviewFinding {
   return {
+    id: "finding-1",
     mergeKey: "bug:src-auth-login-ts:handle-login:null-session",
     kind: "bug",
     priority: "high",
@@ -17,6 +18,7 @@ function buildMergedFinding(overrides: Partial<MergedReviewFinding> = {}): Merge
     primaryFile: "src/auth/login.ts",
     lineRefs: ["src/auth/login.ts:14", "src/auth/login.ts:18"],
     symbol: "handleLogin",
+    pattern: "null-check-before-access",
     suggestedDiff: "- const id = session.user.id\n+ if (!session) return null\n+ const id = session.user.id",
     acceptIf: "Session can actually be null at runtime",
     dismissIf: "Type system guarantees non-null session",

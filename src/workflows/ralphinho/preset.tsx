@@ -60,7 +60,7 @@ function createCodex(role: string) {
 }
 
 function chooseAgent(
-  primary: "claude" | "codex" | "opus",
+  primary: "sonnet" | "opus" | "codex",
   role: string,
 ): { agent: AgentLike | AgentLike[]; fallback?: AgentLike } {
   const claude = (model?: string) => createClaude(role, model ?? "claude-sonnet-4-6");
@@ -72,7 +72,7 @@ function chooseAgent(
       fallback: HAS_CODEX ? codex() : undefined,
     };
   }
-  if (primary === "claude" && HAS_CLAUDE) {
+  if (primary === "sonnet" && HAS_CLAUDE) {
     return {
       agent: claude(),
       fallback: HAS_CODEX ? codex() : undefined,
@@ -91,11 +91,11 @@ function chooseAgent(
 }
 
 const roles = {
-  researcher: chooseAgent(AGENT_OVERRIDE ?? "claude", "Researcher — Gather context from codebase for implementation"),
+  researcher: chooseAgent(AGENT_OVERRIDE ?? "sonnet", "Researcher — Gather context from codebase for implementation"),
   planner: chooseAgent(AGENT_OVERRIDE ?? "opus", "Planner — Create implementation plan from RFC section and context"),
   implementer: chooseAgent(AGENT_OVERRIDE ?? "codex", "Implementer — Write code following the plan"),
-  tester: chooseAgent(AGENT_OVERRIDE ?? "claude", "Tester — Run tests and validate implementation"),
-  prdReviewer: chooseAgent(AGENT_OVERRIDE ?? "claude", "PRD Reviewer — Verify implementation matches RFC specification"),
+  tester: chooseAgent(AGENT_OVERRIDE ?? "sonnet", "Tester — Run tests and validate implementation"),
+  prdReviewer: chooseAgent(AGENT_OVERRIDE ?? "sonnet", "PRD Reviewer — Verify implementation matches RFC specification"),
   codeReviewer: chooseAgent(AGENT_OVERRIDE ?? "opus", "Code Reviewer — Check code quality, conventions, security"),
   reviewFixer: chooseAgent(AGENT_OVERRIDE ?? "codex", "ReviewFixer — Fix issues found in code review"),
   finalReviewer: chooseAgent(AGENT_OVERRIDE ?? "opus", "Final Reviewer — Decide if unit is complete"),
