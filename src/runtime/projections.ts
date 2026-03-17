@@ -1,6 +1,7 @@
 import { DISPLAY_STAGES, TIER_STAGES, stageNodeId } from "../workflows/ralphinho/workflow/contracts";
-import type { DecisionStatus } from "../workflows/ralphinho/workflow/decisions";
 import type { SmithersEvent } from "./events";
+
+type DecisionStatus = "pending" | "rejected" | "approved" | "invalidated";
 
 export type WorkflowPhase =
   | "starting"

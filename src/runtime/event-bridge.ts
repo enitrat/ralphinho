@@ -288,17 +288,6 @@ export async function pollEventsFromDb(
       // merge_queue may not be initialized yet.
     }
 
-    const allFinalReviewRows: FinalReviewRow[] = queryRows(
-      db,
-      "SELECT node_id, iteration, ready_to_move_on, approved, reasoning, quality_score FROM final_review WHERE run_id = ? ORDER BY iteration ASC",
-      [runId],
-      (row) => {
-        const mapped = finalReviewRowFromSqlite(row as Record<string, unknown>);
-        if (!mapped || !parseNodeId(mapped.nodeId)) return null;
-        return mapped;
-      },
-    );
-
     const allImplementRows: ImplementRow[] = queryRows(
       db,
       "SELECT node_id, iteration, what_was_done, files_created, files_modified, believes_complete, summary FROM implement WHERE run_id = ? ORDER BY iteration ASC",
@@ -344,7 +333,7 @@ export async function pollEventsFromDb(
     );
 
     const unitIds = new Set<string>();
-    for (const row of [...allTestRows, ...allFinalReviewRows, ...allReviewLoopResultRows, ...allImplementRows, ...allReviewFixRows]) {
+    for (const row of [...allTestRows, ...allReviewLoopResultRows, ...allImplementRows, ...allReviewFixRows]) {
       if (row.nodeId) {
         const uid = extractUnitId(row.nodeId);
         if (uid) unitIds.add(uid);
@@ -353,24 +342,23 @@ export async function pollEventsFromDb(
     const snapshot = buildOutputSnapshot({
       mergeQueueRows,
       testRows: allTestRows,
-      finalReviewRows: allFinalReviewRows,
       reviewLoopResultRows: allReviewLoopResultRows,
       implementRows: allImplementRows,
       reviewFixRows: allReviewFixRows,
     });
     for (const unitId of unitIds) {
-      const audit = getDecisionAudit(snapshot, unitId);
-      if (!audit.finalDecision) continue;
+      const result = snapshot.latestReviewLoopResult(unitId);
+      if (!result) continue;
       events.push({
         type: "final-review-decision",
-        timestamp: now + audit.finalDecision.iteration,
+        timestamp: now + result.iterationCount,
         runId,
         unitId,
-        iteration: audit.finalDecision.iteration,
-        status: audit.finalDecision.status,
-        reasoning: audit.finalDecision.reasoning,
-        approvalSupersededRejection: audit.finalDecision.approvalSupersededRejection,
-        approvalOnlyCorrectedFormatting: audit.finalDecision.approvalOnlyCorrectedFormatting,
+        iteration: result.iterationCount,
+        status: result.passed ? "approved" : "rejected",
+        reasoning: result.passed ? "Review loop passed." : "Review loop did not pass.",
+        approvalSupersededRejection: false,
+        approvalOnlyCorrectedFormatting: false,
       });
     }
 
