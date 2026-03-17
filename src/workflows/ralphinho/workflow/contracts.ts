@@ -77,43 +77,21 @@ const BACKOFF_RETRY_POLICY: StageRetryPolicy = {
   maxDelayMs: 8_000,
 };
 
-export const RESEARCH_RETRY_POLICY: StageRetryPolicy = BACKOFF_RETRY_POLICY;
-export const PLAN_RETRY_POLICY: StageRetryPolicy = BACKOFF_RETRY_POLICY;
-export const IMPLEMENT_RETRY_POLICY: StageRetryPolicy = FAIL_FAST_RETRY_POLICY;
-export const TEST_RETRY_POLICY: StageRetryPolicy = FAIL_FAST_RETRY_POLICY;
-export const REVIEW_RETRY_POLICY: StageRetryPolicy = FAIL_FAST_RETRY_POLICY;
-export const REVIEW_FIX_RETRY_POLICY: StageRetryPolicy = FAIL_FAST_RETRY_POLICY;
-export const FINAL_REVIEW_RETRY_POLICY: StageRetryPolicy = FAIL_FAST_RETRY_POLICY;
-export const LEARNINGS_RETRY_POLICY: StageRetryPolicy = FAIL_FAST_RETRY_POLICY;
-export const MERGE_QUEUE_RETRY_POLICY: StageRetryPolicy = BACKOFF_RETRY_POLICY;
-export const PR_CREATION_RETRY_POLICY: StageRetryPolicy = BACKOFF_RETRY_POLICY;
+export type RetryPolicyStage =
+  | StageName
+  | "merge-queue"
+  | "pr-creation";
 
-type ResearchSignatureInput = {
-  unitId: string;
-  unitName: string;
-  unitDescription: string;
-  unitCategory: string;
-  rfcSource: string;
-  rfcSections: string[];
-  referencePaths: string[];
-  evictionContext: string | null;
+export const STAGE_RETRY_POLICIES: Record<RetryPolicyStage, StageRetryPolicy> = {
+  research: BACKOFF_RETRY_POLICY,
+  plan: BACKOFF_RETRY_POLICY,
+  implement: FAIL_FAST_RETRY_POLICY,
+  test: FAIL_FAST_RETRY_POLICY,
+  "prd-review": FAIL_FAST_RETRY_POLICY,
+  "code-review": FAIL_FAST_RETRY_POLICY,
+  "review-fix": FAIL_FAST_RETRY_POLICY,
+  "final-review": FAIL_FAST_RETRY_POLICY,
+  learnings: FAIL_FAST_RETRY_POLICY,
+  "merge-queue": BACKOFF_RETRY_POLICY,
+  "pr-creation": BACKOFF_RETRY_POLICY,
 };
-
-type PlanSignatureInput = {
-  unitId: string;
-  unitName: string;
-  unitDescription: string;
-  unitCategory: string;
-  acceptanceCriteria: string[];
-  contextFilePath: string;
-  researchSummary: string | undefined;
-  evictionContext: string | null;
-};
-
-export function buildResearchInputSignature(input: ResearchSignatureInput): string {
-  return JSON.stringify(input);
-}
-
-export function buildPlanInputSignature(input: PlanSignatureInput): string {
-  return JSON.stringify(input);
-}

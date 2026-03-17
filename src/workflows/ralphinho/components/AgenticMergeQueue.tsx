@@ -5,6 +5,7 @@ import type { z } from "zod";
 import { scheduledOutputSchemas } from "../schemas";
 import { MERGE_QUEUE_RETRY_POLICY } from "../workflow/contracts";
 import type { ScheduledOutputs } from "./QualityPipeline";
+import { buildFileSummary, buildMarkdownTable, type MarkdownColumn } from "./markdownTableUtils";
 
 export const mergeQueueResultSchema = scheduledOutputSchemas.merge_queue;
 export type MergeQueueResult = z.infer<typeof mergeQueueResultSchema>;

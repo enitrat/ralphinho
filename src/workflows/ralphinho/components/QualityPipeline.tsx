@@ -16,17 +16,8 @@ import FinalReviewPrompt from "../prompts/FinalReview.mdx";
 import LearningsExtractionPrompt from "../prompts/LearningsExtraction.mdx";
 import { buildUnitWorktreePath } from "./runtimeNames";
 import {
-  buildPlanInputSignature,
-  buildResearchInputSignature,
-  FINAL_REVIEW_RETRY_POLICY,
-  IMPLEMENT_RETRY_POLICY,
-  LEARNINGS_RETRY_POLICY,
-  PLAN_RETRY_POLICY,
-  RESEARCH_RETRY_POLICY,
-  REVIEW_FIX_RETRY_POLICY,
-  REVIEW_RETRY_POLICY,
+  STAGE_RETRY_POLICIES,
   stageNodeId,
-  TEST_RETRY_POLICY,
   TIER_STAGES,
 } from "../workflow/contracts";
 import type { ScheduledTier, StageName } from "../workflow/contracts";
@@ -145,7 +136,7 @@ export function QualityPipeline({
     ...Object.values(workPlan.repo.buildCmds),
     ...Object.values(workPlan.repo.testCmds),
   ];
-  const researchInputSignature = buildResearchInputSignature({
+  const researchInputSignature = JSON.stringify({
     unitId: uid,
     unitName: unit.name,
     unitDescription: unit.description,
@@ -159,7 +150,7 @@ export function QualityPipeline({
     ? research.findings.join("\n")
     : undefined;
   const expectedContextFilePath = `docs/research/${uid}.md`;
-  const planInputSignature = buildPlanInputSignature({
+  const planInputSignature = JSON.stringify({
     unitId: uid,
     unitName: unit.name,
     unitDescription: unit.description,
@@ -188,8 +179,8 @@ export function QualityPipeline({
             output={outputs.research}
             agent={agents.researcher}
             fallbackAgent={fallbacks?.researcher}
-            retries={RESEARCH_RETRY_POLICY.retries}
-            meta={{ retryPolicy: RESEARCH_RETRY_POLICY }}
+            retries={STAGE_RETRY_POLICIES["research"].retries}
+            meta={{ retryPolicy: STAGE_RETRY_POLICIES["research"] }}
             // Cache semantics: reuse only when the prior output matches current inputs.
             skipIf={research?.inputSignature === researchInputSignature}
           >
@@ -217,10 +208,10 @@ export function QualityPipeline({
             output={outputs.plan}
             agent={agents.planner}
             fallbackAgent={fallbacks?.planner}
-            retries={PLAN_RETRY_POLICY.retries}
+            retries={STAGE_RETRY_POLICIES["plan"].retries}
             meta={{
               dependsOn: [stageNodeId(uid, "research")],
-              retryPolicy: PLAN_RETRY_POLICY,
+              retryPolicy: STAGE_RETRY_POLICIES["plan"],
             }}
             // Cache semantics: reuse only when the prior output matches current inputs.
             skipIf={plan?.inputSignature === planInputSignature}
@@ -248,8 +239,8 @@ export function QualityPipeline({
           output={outputs.implement}
           agent={agents.implementer}
           fallbackAgent={fallbacks?.implementer}
-          retries={IMPLEMENT_RETRY_POLICY.retries}
-          meta={{ dependsOn: implementDependsOn, retryPolicy: IMPLEMENT_RETRY_POLICY }}
+          retries={STAGE_RETRY_POLICIES["implement"].retries}
+          meta={{ dependsOn: implementDependsOn, retryPolicy: STAGE_RETRY_POLICIES["implement"] }}
           // No cache: implementation must re-run against latest review context.
         >
           <ImplementPrompt
@@ -281,10 +272,10 @@ export function QualityPipeline({
           output={outputs.test}
           agent={agents.tester}
           fallbackAgent={fallbacks?.tester}
-          retries={TEST_RETRY_POLICY.retries}
+          retries={STAGE_RETRY_POLICIES["test"].retries}
           meta={{
             dependsOn: [stageNodeId(uid, "implement")],
-            retryPolicy: TEST_RETRY_POLICY,
+            retryPolicy: STAGE_RETRY_POLICIES["test"],
           }}
           // No cache: tests must run against the current implementation state.
         >
@@ -308,10 +299,10 @@ export function QualityPipeline({
               output={outputs.prd_review}
               agent={agents.prdReviewer}
               fallbackAgent={fallbacks?.prdReviewer}
-              retries={REVIEW_RETRY_POLICY.retries}
+              retries={STAGE_RETRY_POLICIES["prd-review"].retries}
               meta={{
                 dependsOn: [stageNodeId(uid, "implement")],
-                retryPolicy: REVIEW_RETRY_POLICY,
+                retryPolicy: STAGE_RETRY_POLICIES["prd-review"],
               }}
               // No cache: review should evaluate latest implementation/test context.
               continueOnFail
@@ -379,13 +370,13 @@ export function QualityPipeline({
             output={outputs.review_fix}
             agent={agents.reviewFixer}
             fallbackAgent={fallbacks?.reviewFixer}
-            retries={REVIEW_FIX_RETRY_POLICY.retries}
+            retries={STAGE_RETRY_POLICIES["review-fix"].retries}
             meta={{
               dependsOn: [
                 stageNodeId(uid, "prd-review"),
                 stageNodeId(uid, "code-review"),
               ],
-              retryPolicy: REVIEW_FIX_RETRY_POLICY,
+              retryPolicy: STAGE_RETRY_POLICIES["review-fix"],
             }}
             // No cache: fix output is stateful and tied to current review findings.
             skipIf={bothApproved}

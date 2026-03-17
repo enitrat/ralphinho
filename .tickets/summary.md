@@ -4,203 +4,205 @@
 No findings.
 
 ## High (3)
-### IMP-0001 - event-bridge.ts repeats an identical DB-poll → parseNodeId → Boolean-coerce → push-into-array pattern 5 times across 150+ lines
-- Kind: simplification
-- Confidence: high
-- Seen by: refactor-hunter
-- Scopes: src
-- Support count: 1
-- Files: src/runtime/event-bridge.ts, src/runtime/event-bridge.ts:166-237, src/runtime/event-bridge.ts:244-346
-- Evidence: Lines 244-346 contain five try/catch blocks querying final_review, implement, test, review_fix tables. Each block: (1) db.query with run_id filter, (2) iterate rows, (3) call parseNodeId to filter, (4) Boolean-coerce fields, (5) push into a typed array. The only variance is column names and field mappings. This is a textbook extract-and-parameterize target. Similarly, lines 166-237 repeat the parseObjectArray → filter → map → events.push pattern 3 times for ticketsLanded/ticketsEvicted/ticketsSkipped.
-- Accept if: Each of the 5 DB polling blocks follows the same structural pattern with only column-name and type differences.
-- Dismiss if: The blocks have meaningfully different error-handling or recovery logic beyond the generic try/catch swallow.
-
-```diff
-Extract a generic helper:
-
-```ts
-function queryRows<T>(db: Database, sql: string, runId: string, mapper: (row: any) => T | null): T[] {
-  try {
-    return db.query(sql).all(runId)
-      .map(mapper)
-      .filter((r): r is T => r !== null);
-  } catch { return []; }
-}
-```
-
-Then each table becomes a one-liner mapper call instead of a 20-line try/catch block.
-```
-
-### IMP-0002 - 10+ database query results cast via `as Array<T>` with no runtime validation—if the DB schema drifts, data silently mismatches the typed shape
-- Kind: bug
-- Confidence: high
-- Seen by: type-system-purist
-- Scopes: src
-- Support count: 1
-- Files: src/runtime/event-bridge.ts, event-bridge.ts:124, event-bridge.ts:146, event-bridge.ts:170, event-bridge.ts:247, event-bridge.ts:273, event-bridge.ts:301, event-bridge.ts:92
-- Evidence: event-bridge.ts:92 `.all(runId) as Array<{ node_id: string; state: string; ... }>`, line 124 `.all() as Array<{ job_type: string; ... }>`, line 146 `.all(runId) as Array<{ node_id: string; ... }>`, lines 170, 247, 273, 301 all repeat the pattern. bun:sqlite's `.all()` returns `unknown[]`, so the cast silently asserts schema correctness.
-- Accept if: Database schema is not contractually locked and may evolve independently of TypeScript types
-- Dismiss if: Schema is auto-generated from a single source of truth that guarantees alignment with the TS types
-
-```diff
-Introduce a thin row-validation helper (e.g., Zod schema or manual check) and replace `as Array<T>` with `schema.parse(rows)`. Alternatively, use a type-safe query builder.
-```
-
-### IMP-0003 - events.ts defines 12 Zod schemas AND 12 hand-written TypeScript interfaces that duplicate the exact same shape — ~140 lines of pure duplication
-- Kind: simplification
-- Confidence: high
-- Seen by: refactor-hunter
-- Scopes: src
-- Support count: 1
-- Files: src/runtime/events.ts, src/runtime/events.ts:10-159, src/runtime/events.ts:163-286
-- Evidence: Each Zod variant (e.g., `nodeStartedSchema`) has an exactly matching interface (e.g., `NodeStartedEvent`). The interfaces add zero information beyond what `z.infer<typeof nodeStartedSchema>` provides. The file even acknowledges the mismatch in its `parseEvent` comment: "Zod 4's discriminatedUnion type inference ... doesn't exactly match our hand-written interfaces." This is a symptom, not a justification — fix the inference gap instead of maintaining two parallel definitions. The Zod schemas are the source of truth at runtime; the interfaces only exist to paper over a type-level wrinkle.
-- Accept if: The hand-written interfaces exist solely to duplicate Zod schema shapes and provide no additional type narrowing or documentation beyond what z.infer would give.
-- Dismiss if: There is a concrete Zod 4 type-level bug that makes z.infer produce incorrect types for nullable/transform fields AND fixing that bug is blocked.
-
-```diff
-Replace all hand-written interfaces with `z.infer<>` types:
-
-```diff
--export interface NodeStartedEvent {
--  type: "node-started";
--  timestamp: number;
--  ...
--}
-+export type NodeStartedEvent = z.infer<typeof nodeStartedSchema>;
-```
-
-Repeat for all 12 variants. If Zod 4's discriminatedUnion inference is the issue, add a single `as SmithersEvent` cast in `parseEvent` or use a mapped type over the schema array.
-```
-
-## Medium (6)
-### IMP-0004 - Redundant `String(unit.id)` after `typeof unit?.id === 'string'` filter already narrowed the type
-- Kind: simplification
-- Confidence: high
-- Seen by: type-system-purist
-- Scopes: src
-- Support count: 1
-- Files: src/runtime/event-bridge.ts, event-bridge.ts:70-72
-- Evidence: event-bridge.ts:70-72: `.filter((unit) => typeof unit?.id === "string").map((unit) => ({ id: String(unit.id), ...`. The filter guarantees `unit.id` is a string, making `String()` a no-op coercion that distrusts the preceding type narrowing.
-- Accept if: The filter and map operate on the same narrowed type without intermediate mutation
-- Dismiss if: The array element type is `Record<string, unknown>` so TS doesn't carry the narrowing into `.map()`
-
-```diff
-Replace `String(unit.id)` with `unit.id` since the filter already proved it's a string. Same for `String(item.ticketId)` at line 184.
-```
-
-### IMP-0005 - `Boolean()` coercions on fields already typed as `boolean` in the `as Array<T>` cast duplicate the type assertion
-- Kind: simplification
-- Confidence: high
-- Seen by: type-system-purist
-- Scopes: src
-- Support count: 1
-- Files: src/runtime/event-bridge.ts, event-bridge.ts:260, event-bridge.ts:261, event-bridge.ts:290, event-bridge.ts:313, event-bridge.ts:314
-- Evidence: event-bridge.ts:260 `readyToMoveOn: Boolean(row.ready_to_move_on)`, line 261 `approved: Boolean(row.approved)`, line 290 `believesComplete: Boolean(row.believes_complete)`, lines 313-314 `testsPassed: Boolean(row.tests_passed)`, `buildPassed: Boolean(row.build_passed)`. The cast at lines 247-254 already declares these fields as `boolean`.
-- Accept if: SQLite returns 0/1 integers for booleans, so the cast lies and `Boolean()` is the real coercion—in that case fix the cast type to `number` instead
-- Dismiss if: The ORM or driver genuinely returns JS booleans for these columns
-
-```diff
-Either remove `Boolean()` wrappers (trust the cast) or remove the `boolean` type from the cast and keep `Boolean()` as the single source of truth. Don't do both.
-```
-
-### IMP-0006 - The two preset files (ralphinho/preset.tsx and improvinho/preset.tsx) duplicate createClaude, buildSystemPrompt, WORKSPACE_POLICY, and EXECUTION_POLICY with only minor parameter differences
-- Kind: simplification
-- Confidence: high
-- Seen by: refactor-hunter
-- Scopes: src
-- Support count: 1
-- Files: src/workflows/ralphinho/preset.tsx, src/workflows/improvinho/preset.tsx:22-63, src/workflows/ralphinho/preset.tsx:24-60
-- Evidence: ralphinho/preset.tsx:24-48 defines WORKSPACE_POLICY, EXECUTION_POLICY, buildSystemPrompt, createClaude. improvinho/preset.tsx:22-47 defines the same four symbols with near-identical implementations. The only differences: (1) WORKSPACE_POLICY text differs, (2) idleTimeoutMs is 10min vs 15min, (3) improvinho's createCodex accepts an optional reasoningEffort. The core pattern — build system prompt from role + policies, construct ClaudeCodeAgent/CodexAgent with standard options — is duplicated wholesale. The upstream Smithers library doesn't provide this factory; it's this project's own boilerplate.
-- Accept if: The two preset files share the same agent construction pattern and the differences (policy text, timeout) are parameterizable.
-- Dismiss if: The presets are intentionally decoupled to allow independent evolution and the duplication is a deliberate trade-off.
-
-```diff
-Extract a shared `createAgentFactory(options: { workspacePolicy: string; executionPolicy: string; repoRoot: string; idleTimeoutMs: number })` that returns `{ createClaude, createCodex, buildSystemPrompt }`. Each preset calls it with its specific policies.
-```
-
-### IMP-0007 - 6 of 8 retry policy constants in contracts.ts are byte-identical objects ({ kind: 'fail-fast', retries: 1 }), and the other 2 are also identical to each other
-- Kind: simplification
-- Confidence: high
-- Seen by: refactor-hunter
-- Scopes: src
-- Support count: 1
-- Files: src/workflows/ralphinho/workflow/contracts.ts, src/workflows/ralphinho/workflow/contracts.ts:68-115
-- Evidence: IMPLEMENT_RETRY_POLICY, TEST_RETRY_POLICY, REVIEW_RETRY_POLICY, REVIEW_FIX_RETRY_POLICY, FINAL_REVIEW_RETRY_POLICY, LEARNINGS_RETRY_POLICY all equal `{ kind: 'fail-fast', retries: 1 }`. RESEARCH_RETRY_POLICY, PLAN_RETRY_POLICY, MERGE_QUEUE_RETRY_POLICY, PR_CREATION_RETRY_POLICY all equal `{ kind: 'backoff', retries: 2, initialDelayMs: 1_000, maxDelayMs: 8_000 }`. That's 10 named constants for 2 distinct values. Each consumer references its own constant (e.g., `IMPLEMENT_RETRY_POLICY.retries`), making it look like there's per-stage tuning when there isn't.
-- Accept if: All 6 fail-fast policies and all 4 backoff policies are meant to share the same values and the per-stage naming is only for future divergence.
-- Dismiss if: Per-stage tuning is planned and the identical values are a temporary coincidence.
-
-```diff
-Replace with two shared constants and per-stage aliases if naming matters:
-
-```diff
--export const IMPLEMENT_RETRY_POLICY: StageRetryPolicy = { kind: 'fail-fast', retries: 1 };
--export const TEST_RETRY_POLICY: StageRetryPolicy = { kind: 'fail-fast', retries: 1 };
--...
-+const FAIL_FAST: StageRetryPolicy = { kind: 'fail-fast', retries: 1 };
-+const BACKOFF: StageRetryPolicy = { kind: 'backoff', retries: 2, initialDelayMs: 1_000, maxDelayMs: 8_000 };
-+export const IMPLEMENT_RETRY_POLICY = FAIL_FAST;
-+export const TEST_RETRY_POLICY = FAIL_FAST;
-```
-```
-
-### IMP-0008 - `as unknown as X` double-cast bypasses Smithers generic type resolution; boundary cast is isolated but untestable
+### IMP-0001 - event-bridge.ts duplicates the entire row-type system and parsing logic from workflow/state.ts and workflow/snapshot.ts to read the same underlying data from SQLite
 - Kind: architecture
 - Confidence: high
+- Seen by: app-logic-architecture
+- Scopes: src
+- Support count: 1
+- Files: src/runtime/event-bridge.ts, src/runtime/event-bridge.ts:332-410, src/runtime/event-bridge.ts:49-83, src/workflows/ralphinho/workflow/state.ts:8-55
+- Evidence: event-bridge.ts (lines 49-83) defines its own Zod schemas for final_review, implement, test, and review_fix rows, then manually maps snake_case columns to camelCase types (lines 332-410). These produce exactly the same FinalReviewRow, ImplementRow, TestRow, ReviewFixRow types already defined in workflow/state.ts (lines 21-55). event-bridge then calls buildOutputSnapshot and getDecisionAudit from the workflow layer (lines 419-440), proving both modules need the same domain types. The difference is only the entry point: ctx.outputs() vs raw SQLite. A single 'fromSqliteRow' adapter per type in workflow/state.ts would let event-bridge reuse the canonical types without reimplementing Zod schemas and manual mapping for every table.
+- Accept if: Confirm that event-bridge.ts and workflow/state.ts model the same domain rows, and that adding a fromSqliteRow factory per type in state.ts would eliminate the parallel schema definitions in event-bridge.ts.
+- Dismiss if: The monitor's read-only polling has deliberately different validation tolerance (e.g. accepting partial rows) that would conflict with the workflow layer's strict requirements.
+
+### IMP-0002 - snapshot.ts hand-rolls ~70 lines of row validators that duplicate Smithers' Zod write-path validation
+- Kind: simplification
+- Confidence: high
 - Seen by: type-system-purist
 - Scopes: src
 - Support count: 1
-- Files: src/workflows/ralphinho/workflow/snapshot.ts, snapshot.ts:39, snapshot.ts:50-53
-- Evidence: snapshot.ts:39 `(ctx as unknown as { outputs: (t: string) => unknown[] }).outputs(table)` — documented workaround for Smithers' complex generics. Lines 50-53 then cast the `unknown[]` results directly to typed row arrays (`as TestRow[]`, `as FinalReviewRow[]`, etc.) without validation.
-- Accept if: Smithers generic types are genuinely unresolvable and there's no upstream fix available
-- Dismiss if: Smithers types can be fixed upstream to expose `outputs()` in a resolvable way
+- Files: src/workflows/ralphinho/workflow/snapshot.ts, src/workflows/ralphinho/schemas.ts:53-114, src/workflows/ralphinho/workflow/snapshot.ts:116-118, src/workflows/ralphinho/workflow/snapshot.ts:38-40, src/workflows/ralphinho/workflow/snapshot.ts:48-112
+- Evidence: Smithers validates all output via Zod before writing to SQLite (smithers/src/db/output.ts:126-140, `validateOutput` calls `createInsertSchema(table).safeParse(payload)`). When `ctx.outputs(table)` is called, rows have already passed Zod validation. Yet snapshot.ts:48-112 builds `requireObject`, `requireBoolean`, `requireString`, `validateTestRow`, `validateFinalReviewRow`, `validateImplementRow`, `validateReviewFixRow` — all re-checking the same fields (e.g. `testsPassed` is boolean, `reasoning` is string) that the Zod schemas in `schemas.ts` already guarantee. The comment at line 120-122 says these guard against 'schema drift', but schema drift would require updating the Zod schemas in schemas.ts anyway — the validators can't catch a mismatch the Zod schemas don't encode. The `runtimeOutputs()` function at line 38-40 casts `ctx` to `unknown` to call `.outputs(table)` as untyped, then manually validates every row — directly distrusting the typed SmithersCtx<ScheduledOutputs> contract.
+- Accept if: Smithers validates output via Zod on the write path and ctx.outputs() returns those same rows. The hand-rolled validators are provably redundant.
+- Dismiss if: There is a known scenario where Smithers writes rows that bypass Zod validation, making the validators a genuine second line of defense.
 
 ```diff
-Add runtime validation after the boundary cast: validate rows with Zod schemas or a lightweight assertion before assigning to typed arrays. Keep the single `as unknown as X` but don't chain it with further unvalidated casts.
+- function runtimeOutputs(ctx: SmithersCtx<ScheduledOutputs>, table: string): unknown[] {
+-   return (ctx as unknown as { outputs: (t: string) => unknown[] }).outputs(table);
+- }
++ // Use ctx.outputs directly — Smithers validates on write.
++ // Cast the ctx.outputs call properly via the typed interface.
+
+- const testRows = runtimeOutputs(ctx, "test").map(validateTestRow);
++ const testRows = ctx.outputs("test") as TestRow[];
+  // (repeat for finalReview, implement, reviewFix)
+  // Delete requireObject, requireBoolean, requireString, validate*Row (~65 lines)
 ```
 
-### IMP-0009 - isUnitLanded exists as both a standalone function and an OutputSnapshot method with divergent implementations that do the same thing
+### IMP-0003 - snapshot.ts contains ~65 lines of hand-rolled runtime validators that duplicate the Zod schema guarantees already enforced by Smithers at write time
+- Kind: simplification
+- Confidence: high
+- Seen by: refactor-hunter, app-logic-architecture
+- Scopes: src
+- Support count: 2
+- Files: src/workflows/ralphinho/workflow/snapshot.ts, src/workflows/ralphinho/schemas.ts:43-113, src/workflows/ralphinho/schemas.ts:43-114, src/workflows/ralphinho/workflow/snapshot.ts:13-112, src/workflows/ralphinho/workflow/snapshot.ts:48-112
+- Evidence: The Zod schemas in schemas.ts (lines 43-114) define `implement` with `believesComplete: z.boolean()`, `whatWasDone: z.string()`, etc. Smithers validates these schemas when tasks write output. Yet snapshot.ts (lines 48-112) re-validates the same fields with `requireBoolean(r, 'believesComplete', 'implement')`, `requireString(r, 'whatWasDone', 'implement')`, etc. The `normalizeMergeQueueRow` (lines 13-31) similarly re-checks what the merge_queue Zod schema already enforces. This is 65+ lines of defensive code protecting against states that the framework prevents.
+- Accept if: Smithers validates output against the Zod schema before persisting rows, which it does (createSmithers auto-generates tables from schemas and validates on write).
+- Dismiss if: There is a concrete runtime path where rows bypass Zod validation (e.g. manual DB inserts or schema migration gaps).
+
+```diff
+Replace the validate* functions and normalizeMergeQueueRow with simple casts:
+
+- function validateTestRow(row: unknown): TestRow { ... }
++ // Smithers validates via Zod at write time; cast is safe here.
++ const testRows = runtimeOutputs(ctx, 'test') as TestRow[];
+
+Same pattern for finalReviewRows, implementRows, reviewFixRows, mergeQueueRows.
+```
+
+## Medium (7)
+### IMP-0004 - event-bridge.ts manually typeof-checks every field of parsed merge_queue JSON instead of reusing existing Zod schemas
+- Kind: simplification
+- Confidence: high
+- Seen by: type-system-purist
+- Scopes: src
+- Support count: 1
+- Files: src/runtime/event-bridge.ts, src/runtime/event-bridge.ts:270-326, src/runtime/event-bridge.ts:97-126, src/workflows/ralphinho/schemas.ts:187-206
+- Evidence: In event-bridge.ts:270-326, after Zod-validating merge_queue rows (line 263-268), the inner JSON strings (tickets_landed, tickets_evicted, tickets_skipped) are parsed via `parseObjectArray` and then each object's fields are individually typeof-checked: `typeof item.ticketId === 'string'` (line 275), `typeof item.mergeCommit === 'string'` (line 278), `typeof item.summary === 'string'` (line 279), `typeof item.decisionIteration === 'number'` (line 280), etc. The merge_queue Zod schema in schemas.ts:187-206 already defines the exact shapes of these inner objects (ticketsLanded, ticketsEvicted, ticketsSkipped). The event-bridge could parse the inner JSON with `.parse()` on the existing schema instead of ~50 lines of manual typeof guards with fallback defaults that silently convert invalid data.
+- Accept if: The merge_queue Zod schema in schemas.ts accurately describes the shape of the inner JSON objects. Using z.array(ticketLandedSchema).safeParse() would replace ~50 lines of manual typeof checks.
+- Dismiss if: The inner JSON format in SQLite intentionally diverges from the Zod schema (e.g., different field names or types), making reuse impossible.
+
+### IMP-0005 - Near-duplicate markdown table builders in AgenticMergeQueue and PushAndCreatePR
 - Kind: simplification
 - Confidence: high
 - Seen by: refactor-hunter
 - Scopes: src
 - Support count: 1
-- Files: src/workflows/ralphinho/workflow/state.ts, src/workflows/ralphinho/workflow/state.ts:151-155, src/workflows/ralphinho/workflow/state.ts:76-79
-- Evidence: state.ts:76 defines `export function isUnitLanded(snapshot, unitId)` which calls `mergeQueueRows(snapshot)` (a local helper that filters by MERGE_QUEUE_NODE_ID). state.ts:151 defines `snapshot.isUnitLanded = (id) => input.mergeQueueRows.some(row => row.nodeId === MERGE_QUEUE_NODE_ID && ...)`. These are two implementations of the same logic. The standalone function is used in ScheduledWorkflow.tsx:86 and throughout state.ts. The snapshot method is used in decisions.ts:157. Having both creates a risk of behavioral divergence and forces readers to verify they're equivalent.
-- Accept if: Both implementations produce identical results for all inputs and no caller needs the standalone signature for a reason beyond historical accident.
-- Dismiss if: The standalone function is needed in contexts where an OutputSnapshot hasn't been built yet.
+- Files: src/workflows/ralphinho/components/AgenticMergeQueue.tsx, src/workflows/ralphinho/components/AgenticMergeQueue.tsx:54-70, src/workflows/ralphinho/components/PushAndCreatePR.tsx:41-53
+- Evidence: AgenticMergeQueue.tsx `buildQueueStatusTable` (lines 54-70) and PushAndCreatePR.tsx `buildTicketTable` (lines 41-53) both: (1) build a markdown table header with | # | Ticket ID | Title | ... |, (2) iterate tickets mapping to table rows, (3) compute a fileSummary by spreading filesModified + filesCreated and slicing to 5 entries with a (+N more) suffix. The only difference is AgenticMergeQueue adds Category/Priority columns and sorts by priority. This is textbook copy-paste-modify.
+- Accept if: Both functions will continue to evolve together (same ticket concept).
+- Dismiss if: The two prompt formats are expected to diverge significantly.
 
 ```diff
-Remove the standalone function and have callers use `snapshot.isUnitLanded(unitId)` directly, or implement the standalone as `return snapshot.isUnitLanded(unitId)` — a one-liner delegating to the canonical implementation.
+Extract a shared `buildTicketMarkdownTable` into a shared utility (e.g. `components/runtimeNames.ts` or a new `components/prompt-utils.ts`) that accepts a column definition and ticket array. Both components call it with their specific columns.
+```
+
+### IMP-0006 - ScheduledWorkflow component inlines ~50 lines of failure-reason computation that belongs in the workflow domain layer
+- Kind: architecture
+- Confidence: high
+- Seen by: app-logic-architecture
+- Scopes: src
+- Support count: 1
+- Files: src/workflows/ralphinho/components/ScheduledWorkflow.tsx, src/workflows/ralphinho/components/ScheduledWorkflow.tsx:109-156, src/workflows/ralphinho/workflow/state.ts:185-227
+- Evidence: ScheduledWorkflow.tsx lines 109-156 build a failedUnits array with complex logic: iterating all stages in reverse to find the last completed stage, computing eviction context, checking test status, checking decision audit status, and handling edge cases like 'landed without semantic completion'. This is pure domain logic with no JSX involvement — it doesn't reference React, components, or rendering. The workflow/ directory already has the right abstractions: decisions.ts has getDecisionAudit, state.ts has getUnitState/getEvictionContext. This failure-reason computation should be a function like buildFailedUnitReport(snapshot, units, ctx, maxPasses) in state.ts or a new workflow/reports.ts, consistent with how buildMergeTickets already lives in state.ts.
+- Accept if: The failure-reason computation (lines 109-156) uses no React or JSX APIs and could be extracted to the workflow/ layer without changing the component's behavior.
+
+### IMP-0007 - getFinalDecision and isSemanticallyComplete are exported but never called from production code — dead exports
+- Kind: simplification
+- Confidence: high
+- Seen by: refactor-hunter
+- Scopes: src
+- Support count: 1
+- Files: src/workflows/ralphinho/workflow/decisions.ts, src/workflows/ralphinho/workflow/decisions.ts:161-171
+- Evidence: grep for `getFinalDecision(` across src/ returns only the definition at decisions.ts:161. grep for `isSemanticallyComplete(` returns the definition at decisions.ts:169 and a test at state.test.ts:430. Neither function is imported or called by any production module (ScheduledWorkflow.tsx, state.ts, etc.). The ScheduledWorkflow computes `isSemanticComplete` inline via `unitAudit(unitId).semanticallyComplete` (line 95), bypassing `isSemanticallyComplete`. Similarly, `getFinalDecision` is unused — callers use `getDecisionAudit` directly.
+- Accept if: No external consumers import these functions (check package exports).
+- Dismiss if: These are part of a public API consumed by downstream packages.
+
+```diff
+Delete `getFinalDecision` (lines 161-163) and `isSemanticallyComplete` (lines 169-171). Update the test that calls `isSemanticallyComplete` to call `getDecisionAudit(...).semanticallyComplete` directly.
+```
+
+### IMP-0008 - isMergeEligible and isSemanticallyComplete are convenience wrappers that recompute the full decision audit, causing redundant work when callers already have or could share the audit
+- Kind: simplification
+- Confidence: high
+- Seen by: app-logic-architecture
+- Scopes: src
+- Support count: 1
+- Files: src/workflows/ralphinho/workflow/decisions.ts, src/workflows/ralphinho/components/ScheduledWorkflow.tsx:91-93, src/workflows/ralphinho/workflow/decisions.ts:161-171, src/workflows/ralphinho/workflow/state.ts:195-209
+- Evidence: In buildMergeTickets (state.ts:209), getDecisionAudit is called for every unit to build eligibilityProof. But the caller ScheduledWorkflow.tsx:91-93 already builds an auditMap with getDecisionAudit for every unit. And buildMergeTickets also calls isMergeEligible (state.ts:195) which calls getDecisionAudit again internally (decisions.ts:165-166). So for each merge-eligible unit, the full audit derivation (deriveDurableDecisionHistory, history scanning) runs 2-3 times per render. decisions.ts exports isMergeEligible/isSemanticallyComplete/getFinalDecision (lines 161-171) as standalone functions that each independently call getDecisionAudit — they are convenience wrappers that encourage callers to recompute rather than share the audit object.
+- Accept if: getDecisionAudit is called multiple times per unit per render cycle via both direct calls and the convenience wrappers.
+- Dismiss if: The audit computation is trivially cheap (few rows per unit) and the codebase intentionally favors readability of standalone functions over performance.
+
+```diff
+Either (a) make buildMergeTickets accept the pre-computed auditMap, or (b) replace the standalone wrappers with methods on DecisionAudit so callers naturally reuse the already-computed object: audit.mergeEligible (already a field) instead of isMergeEligible(snapshot, unitId).
+```
+
+### IMP-0009 - isUnitLanded in state.ts is a pure pass-through that adds no logic over snapshot.isUnitLanded
+- Kind: simplification
+- Confidence: high
+- Seen by: refactor-hunter
+- Scopes: src
+- Support count: 1
+- Files: src/workflows/ralphinho/workflow/state.ts, src/workflows/ralphinho/workflow/state.ts:83-85
+- Evidence: state.ts lines 83-85:
+```
+export function isUnitLanded(snapshot: OutputSnapshot, unitId: string): boolean {
+  return snapshot.isUnitLanded(unitId);
+}
+```
+This wrapper adds zero logic — it just forwards to the snapshot method. All 6 call sites (state.ts:88, 94, 104, 108, 193 and ScheduledWorkflow.tsx:86) could call `snapshot.isUnitLanded(unitId)` directly. The wrapper creates indirection without benefit.
+- Accept if: No downstream consumers rely on the two-arg signature as a public API.
+- Dismiss if: The function is intentionally an API boundary for testability (snapshot is hard to mock but plain functions aren't).
+
+```diff
+Delete the `isUnitLanded` function export. Replace internal call sites with `snapshot.isUnitLanded(unitId)`. For ScheduledWorkflow.tsx, change `isUnitLanded(snapshot, unitId)` to `snapshot.isUnitLanded(unitId)` — the lambda on line 86 already captures `snapshot`.
+```
+
+### IMP-0010 - Row types declare nodeId/iteration as optional despite Smithers always providing them, causing pervasive `?? 0` silent fallbacks
+- Kind: simplification
+- Confidence: high
+- Seen by: type-system-purist
+- Scopes: src
+- Support count: 1
+- Files: src/workflows/ralphinho/workflow/state.ts, src/workflows/ralphinho/workflow/decisions.ts:36, src/workflows/ralphinho/workflow/decisions.ts:41, src/workflows/ralphinho/workflow/decisions.ts:54, src/workflows/ralphinho/workflow/decisions.ts:58, src/workflows/ralphinho/workflow/decisions.ts:75, src/workflows/ralphinho/workflow/state.ts:21-55
+- Evidence: state.ts:21-55 declares `nodeId?: string` and `iteration?: number` on TestRow, FinalReviewRow, ImplementRow, ReviewFixRow. But Smithers' context.ts:65-68 and 94-103 always attaches nodeId and iteration to every row (it's how `latest()` and `resolveRow()` filter). In decisions.ts, every use of iteration does `row.iteration ?? 0`: lines 36, 41, 54, 58, 75. These fallbacks silently produce wrong iteration=0 values instead of failing if the invariant ever breaks. The types should reflect the runtime guarantee (required fields), not distrust it. The optional typing propagates distrust through the entire decision audit pipeline.
+- Accept if: Smithers always provides nodeId and iteration on every output row (verified in smithers/src/context.ts:65-67 and 94-96). Making these required is correct.
+- Dismiss if: There is a code path where these rows are constructed without Smithers (e.g., in tests or the event-bridge) that legitimately omits nodeId/iteration.
+
+```diff
+- export type TestRow = {
+-   nodeId?: string;
+-   iteration?: number;
++ export type TestRow = {
++   nodeId: string;
++   iteration: number;
+    testsPassed: boolean;
+    buildPassed: boolean;
+    failingSummary?: string | null;
+  };
+  // (same change for FinalReviewRow, ImplementRow, ReviewFixRow)
+  // Then remove all `?? 0` fallbacks in decisions.ts
 ```
 
 ## Low (2)
-### IMP-0010 - `as any` cast to assign `captureWrite` to `process.stdout.write` bypasses function signature checking
+### IMP-0011 - buildResearchInputSignature and buildPlanInputSignature are trivial JSON.stringify wrappers that add no logic beyond type-constraining the argument
 - Kind: simplification
 - Confidence: high
-- Seen by: type-system-purist
+- Seen by: refactor-hunter
 - Scopes: src
 - Support count: 1
-- Files: src/advanced-monitor-ui.ts, advanced-monitor-ui.ts:269, advanced-monitor-ui.ts:270
-- Evidence: advanced-monitor-ui.ts:269-270: `process.stdout.write = captureWrite as any; process.stderr.write = captureWrite as any;` — `captureWrite` returns `true` but the actual `write` signature has multiple overloads. The `as any` silently drops the overload contract.
-- Accept if: The function genuinely doesn't satisfy all overloads and the mismatch would cause a type error
-- Dismiss if: The function handles all overloads correctly and just needs the right type annotation
-
-```diff
-Type `captureWrite` to match `typeof process.stdout.write` using the correct Node.js overload signature, or use a typed wrapper that satisfies the contract.
+- Files: src/workflows/ralphinho/workflow/contracts.ts, src/workflows/ralphinho/workflow/contracts.ts:91-119
+- Evidence: contracts.ts lines 113-118:
 ```
+export function buildResearchInputSignature(input: ResearchSignatureInput): string {
+  return JSON.stringify(input);
+}
+export function buildPlanInputSignature(input: PlanSignatureInput): string {
+  return JSON.stringify(input);
+}
+```
+Both functions are `JSON.stringify` with a typed parameter. The types `ResearchSignatureInput` and `PlanSignatureInput` (lines 91-111) are only used here and never referenced elsewhere. The type constraint could be achieved inline at the call site with a `satisfies` expression or just by passing the correct literal object.
+- Accept if: You want to reduce indirection and the signature format never needs to change from JSON.stringify.
+- Dismiss if: You plan to switch to a hash-based signature (like improvinho uses sha1) and want a single place to change it.
 
-### IMP-0011 - Zod `safeParse` result cast `as SmithersEvent` distrusts Zod's own type inference
+### IMP-0012 - Ten individually named retry policy exports could collapse into a single STAGE_RETRY_POLICIES map
 - Kind: simplification
-- Confidence: high
-- Seen by: type-system-purist
+- Confidence: medium
+- Seen by: refactor-hunter
 - Scopes: src
 - Support count: 1
-- Files: src/runtime/events.ts, events.ts:293-299
-- Evidence: events.ts:299 `return result.success ? (result.data as SmithersEvent) : null;` — comment at lines 293-295 explains Zod 4's discriminatedUnion inference doesn't match hand-written interfaces. The cast papers over a type-system gap between two sources of truth.
-- Accept if: The hand-written interface and Zod schema have structurally diverged and unifying them is non-trivial
-- Dismiss if: The cast is a temporary workaround until Zod 4 fixes discriminatedUnion inference
-
-```diff
-Derive `SmithersEvent` from Zod's `z.infer<typeof smithersEventSchema>` instead of hand-writing the interface. This makes Zod the single source of truth and eliminates the cast.
-```
+- Files: src/workflows/ralphinho/workflow/contracts.ts, src/workflows/ralphinho/workflow/contracts.ts:68-89
+- Evidence: contracts.ts lines 80-89 exports 10 constants: RESEARCH_RETRY_POLICY, PLAN_RETRY_POLICY, IMPLEMENT_RETRY_POLICY, TEST_RETRY_POLICY, REVIEW_RETRY_POLICY, REVIEW_FIX_RETRY_POLICY, FINAL_REVIEW_RETRY_POLICY, LEARNINGS_RETRY_POLICY, MERGE_QUEUE_RETRY_POLICY, PR_CREATION_RETRY_POLICY. Each is assigned either FAIL_FAST_RETRY_POLICY or BACKOFF_RETRY_POLICY. A single `Record<StageName | 'merge-queue' | 'pr-creation', StageRetryPolicy>` map would remove 10 export lines and make the mapping explicit.
+- Accept if: You want to reduce the export surface and make the stage→policy mapping scannable in one place.
+- Dismiss if: Individual exports are preferred for tree-shaking or for import clarity at call sites.
 
