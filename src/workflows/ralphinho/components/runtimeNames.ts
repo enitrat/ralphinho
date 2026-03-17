@@ -1,3 +1,9 @@
+/**
+ * Similar to `normalizePart` in improvinho/projection.ts but intentionally separate:
+ * - Preserves dots and underscores (`[^a-z0-9._-]`) for filesystem-safe run IDs,
+ *   whereas `normalizePart` strips everything non-alphanumeric for merge-key slugs.
+ * - Falls back to "run" instead of "module".
+ */
 function sanitizeSegment(value: string): string {
   return value
     .toLowerCase()
