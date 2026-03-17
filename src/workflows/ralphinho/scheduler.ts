@@ -127,7 +127,7 @@ export function groupToWorkPlan(
         description: ticket.rfcContent,
         deps: prevId ? [prevId] : [],
         acceptance: [
-          "Implement the changes described in the issue",
+          `${ticket.issue.identifier}: ${ticket.issue.title} is fully implemented`,
           "All existing tests pass",
           "Add tests for new behavior where appropriate",
         ],

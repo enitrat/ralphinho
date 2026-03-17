@@ -238,6 +238,7 @@ describe("groupToWorkPlan", () => {
     expect(unit.tier).toBe("small");
     expect(unit.rfcSections).toEqual([]);
     expect(unit.acceptance).toBeArrayOfSize(3);
+    expect(unit.acceptance[0]).toBe("IMP-0001: Do the thing is fully implemented");
   });
 });
 
