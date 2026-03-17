@@ -6,10 +6,11 @@ export type StageName =
   | "prd-review"
   | "code-review"
   | "review-fix"
-  | "final-review"
   | "learnings";
 
-export function stageNodeId(unitId: string, stage: StageName): string {
+type LegacyStageName = "final-review";
+
+export function stageNodeId(unitId: string, stage: StageName | LegacyStageName): string {
   return `${unitId}:${stage}`;
 }
 
@@ -33,7 +34,6 @@ const _TIER_STAGES = {
     "test",
     "code-review",
     "review-fix",
-    "final-review",
     "learnings",
   ],
   large: [
@@ -44,7 +44,6 @@ const _TIER_STAGES = {
     "prd-review",
     "code-review",
     "review-fix",
-    "final-review",
     "learnings",
   ],
 } as const;
@@ -60,7 +59,6 @@ export const DISPLAY_STAGES = [
   { key: "prd-review", abbr: "D", table: "prd_review" },
   { key: "code-review", abbr: "V", table: "code_review" },
   { key: "review-fix", abbr: "F", table: "review_fix" },
-  { key: "final-review", abbr: "G", table: "final_review" },
   { key: "learnings", abbr: "L", table: "learnings" },
 ] as const;
 
@@ -79,6 +77,7 @@ const BACKOFF_RETRY_POLICY: StageRetryPolicy = {
 
 export type RetryPolicyStage =
   | StageName
+  | "final-review"
   | "merge-queue"
   | "pr-creation";
 

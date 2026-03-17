@@ -96,21 +96,13 @@ export const scheduledOutputSchemas = {
     testsPassed: z.boolean(),
   }),
 
-  // ── Final Review (the gate) ───────────────────────────────────────
-  final_review: z.object({
-    readyToMoveOn: z.boolean(),
-    reasoning: z.string(),
-    approved: z.boolean(),
-    qualityScore: z.number(),
-    remainingIssues: z
-      .array(
-        z.object({
-          severity: z.enum(["critical", "major", "minor"]),
-          description: z.string(),
-          file: z.string().nullable(),
-        }),
-      )
-      .nullable(),
+  // ── Review Loop Result ────────────────────────────────────────────
+  review_loop_result: z.object({
+    iterationCount: z.number(),
+    codeSeverity: z.enum(["critical", "major", "minor", "none"]),
+    prdSeverity: z.enum(["critical", "major", "minor", "none"]),
+    passed: z.boolean(),
+    exhausted: z.boolean(),
   }),
 
   // ── Learnings Extraction ────────────────────────────────────────────

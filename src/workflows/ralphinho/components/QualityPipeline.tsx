@@ -1,6 +1,7 @@
 import React from "react";
 import { Task, Sequence, Parallel, Worktree } from "smithers-orchestrator";
 import type { SmithersCtx, AgentLike } from "smithers-orchestrator";
+import { z } from "zod";
 import type { WorkUnit, WorkPlan } from "../types";
 import { scheduledOutputSchemas } from "../schemas";
 import type { Issue } from "../schemas";
@@ -23,6 +24,22 @@ import {
 import type { ScheduledTier, StageName } from "../workflow/contracts";
 
 export type ScheduledOutputs = typeof scheduledOutputSchemas;
+
+const legacyFinalReviewOutputSchema = z.object({
+  readyToMoveOn: z.boolean(),
+  reasoning: z.string(),
+  approved: z.boolean(),
+  qualityScore: z.number(),
+  remainingIssues: z
+    .array(
+      z.object({
+        severity: z.enum(["critical", "major", "minor"]),
+        description: z.string(),
+        file: z.string().nullable(),
+      }),
+    )
+    .nullable(),
+});
 
 export type DepSummary = {
   id: string;
@@ -63,7 +80,7 @@ export type QualityPipelineProps = {
   worktreePath?: string;
 };
 
-function tierHasStep(tier: ScheduledTier, step: StageName): boolean {
+function tierHasStep(tier: ScheduledTier, step: string): boolean {
   return (TIER_STAGES[tier] as readonly string[]).includes(step);
 }
 
@@ -402,7 +419,7 @@ export function QualityPipeline({
         {tierHasStep(tier, "final-review") && (
           <Task
             id={stageNodeId(uid, "final-review")}
-            output={outputs.final_review}
+            output={legacyFinalReviewOutputSchema}
             agent={agents.finalReviewer}
             fallbackAgent={fallbacks?.finalReviewer}
             retries={STAGE_RETRY_POLICIES["final-review"].retries}

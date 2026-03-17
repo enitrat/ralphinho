@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
+  TIER_STAGES,
   STAGE_RETRY_POLICIES,
   stageNodeId,
 } from "../contracts";
+import { scheduledOutputSchemas } from "../../schemas";
 
 describe("stageNodeId", () => {
   test("builds stable node ids", () => {
@@ -19,6 +21,36 @@ describe("retry policy semantics", () => {
   test("uses fail-fast policy for implement and test", () => {
     expect(STAGE_RETRY_POLICIES["implement"].kind).toBe("fail-fast");
     expect(STAGE_RETRY_POLICIES["test"].kind).toBe("fail-fast");
+  });
+});
+
+describe("stage contracts", () => {
+  test("small and large tier stages do not include final-review", () => {
+    expect(TIER_STAGES.small).not.toContain("final-review");
+    expect(TIER_STAGES.large).not.toContain("final-review");
+  });
+});
+
+describe("scheduled output schemas", () => {
+  test("removes final_review and adds review_loop_result", () => {
+    expect("final_review" in scheduledOutputSchemas).toBe(false);
+    expect("review_loop_result" in scheduledOutputSchemas).toBe(true);
+  });
+
+  test("review_loop_result validates expected fields", () => {
+    const parsed = scheduledOutputSchemas.review_loop_result.parse({
+      iterationCount: 2,
+      codeSeverity: "minor",
+      prdSeverity: "none",
+      passed: true,
+      exhausted: false,
+    });
+
+    expect(parsed.iterationCount).toBe(2);
+    expect(parsed.codeSeverity).toBe("minor");
+    expect(parsed.prdSeverity).toBe("none");
+    expect(parsed.passed).toBe(true);
+    expect(parsed.exhausted).toBe(false);
   });
 });
 
