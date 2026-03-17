@@ -334,10 +334,10 @@ export function QualityPipeline({
               output={outputs.code_review}
               agent={agents.codeReviewer}
               fallbackAgent={fallbacks?.codeReviewer}
-              retries={REVIEW_RETRY_POLICY.retries}
+              retries={STAGE_RETRY_POLICIES["code-review"].retries}
               meta={{
                 dependsOn: [stageNodeId(uid, "implement")],
-                retryPolicy: REVIEW_RETRY_POLICY,
+                retryPolicy: STAGE_RETRY_POLICIES["code-review"],
               }}
               // No cache: review should evaluate latest implementation/test context.
               continueOnFail
@@ -405,10 +405,10 @@ export function QualityPipeline({
             output={outputs.final_review}
             agent={agents.finalReviewer}
             fallbackAgent={fallbacks?.finalReviewer}
-            retries={FINAL_REVIEW_RETRY_POLICY.retries}
+            retries={STAGE_RETRY_POLICIES["final-review"].retries}
             meta={{
               dependsOn: [stageNodeId(uid, "review-fix")],
-              retryPolicy: FINAL_REVIEW_RETRY_POLICY,
+              retryPolicy: STAGE_RETRY_POLICIES["final-review"],
             }}
             // No cache: final gate should always evaluate latest stage artifacts.
           >
@@ -440,10 +440,10 @@ export function QualityPipeline({
             output={outputs.learnings}
             agent={agents.learningsExtractor}
             fallbackAgent={fallbacks?.learningsExtractor}
-            retries={LEARNINGS_RETRY_POLICY.retries}
+            retries={STAGE_RETRY_POLICIES["learnings"].retries}
             meta={{
               dependsOn: [stageNodeId(uid, "final-review")],
-              retryPolicy: LEARNINGS_RETRY_POLICY,
+              retryPolicy: STAGE_RETRY_POLICIES["learnings"],
             }}
             // Cache semantics: learnings are write-once per unit — do not re-extract on subsequent passes.
             skipIf={learnings != null}

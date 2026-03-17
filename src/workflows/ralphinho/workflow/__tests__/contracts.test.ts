@@ -1,11 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
-  IMPLEMENT_RETRY_POLICY,
-  PLAN_RETRY_POLICY,
-  RESEARCH_RETRY_POLICY,
-  TEST_RETRY_POLICY,
-  buildPlanInputSignature,
-  buildResearchInputSignature,
+  STAGE_RETRY_POLICIES,
   stageNodeId,
 } from "../contracts";
 
@@ -17,19 +12,19 @@ describe("stageNodeId", () => {
 
 describe("retry policy semantics", () => {
   test("uses backoff policy for research and plan", () => {
-    expect(RESEARCH_RETRY_POLICY.kind).toBe("backoff");
-    expect(PLAN_RETRY_POLICY.kind).toBe("backoff");
+    expect(STAGE_RETRY_POLICIES["research"].kind).toBe("backoff");
+    expect(STAGE_RETRY_POLICIES["plan"].kind).toBe("backoff");
   });
 
   test("uses fail-fast policy for implement and test", () => {
-    expect(IMPLEMENT_RETRY_POLICY.kind).toBe("fail-fast");
-    expect(TEST_RETRY_POLICY.kind).toBe("fail-fast");
+    expect(STAGE_RETRY_POLICIES["implement"].kind).toBe("fail-fast");
+    expect(STAGE_RETRY_POLICIES["test"].kind).toBe("fail-fast");
   });
 });
 
 describe("input signatures", () => {
   test("research signature changes when research inputs change", () => {
-    const a = buildResearchInputSignature({
+    const a = JSON.stringify({
       unitId: "u1",
       unitName: "Unit",
       unitDescription: "Desc",
@@ -39,7 +34,7 @@ describe("input signatures", () => {
       referencePaths: ["docs/rfc.md"],
       evictionContext: null,
     });
-    const b = buildResearchInputSignature({
+    const b = JSON.stringify({
       unitId: "u1",
       unitName: "Unit",
       unitDescription: "Desc",
@@ -53,7 +48,7 @@ describe("input signatures", () => {
   });
 
   test("plan signature changes when plan inputs change", () => {
-    const a = buildPlanInputSignature({
+    const a = JSON.stringify({
       unitId: "u1",
       unitName: "Unit",
       unitDescription: "Desc",
@@ -63,7 +58,7 @@ describe("input signatures", () => {
       researchSummary: "summary",
       evictionContext: null,
     });
-    const b = buildPlanInputSignature({
+    const b = JSON.stringify({
       unitId: "u1",
       unitName: "Unit",
       unitDescription: "Desc",

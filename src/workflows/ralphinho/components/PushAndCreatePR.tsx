@@ -3,8 +3,9 @@ import { Task } from "smithers-orchestrator";
 import type { SmithersCtx, AgentLike } from "smithers-orchestrator";
 import type { z } from "zod";
 import { scheduledOutputSchemas } from "../schemas";
-import { PR_CREATION_RETRY_POLICY } from "../workflow/contracts";
+import { STAGE_RETRY_POLICIES } from "../workflow/contracts";
 import type { ScheduledOutputs } from "./QualityPipeline";
+import { buildFileSummary, buildMarkdownTable, type MarkdownColumn } from "./markdownTableUtils";
 
 // ── Schema ───────────────────────────────────────────────────────────
 
@@ -39,17 +40,16 @@ export type PushAndCreatePRProps = {
 // ── Prompt builder ───────────────────────────────────────────────────
 
 function buildTicketTable(tickets: PushAndCreatePRTicket[]): string {
-  const header = "| # | Ticket ID | Title | Branch | Files Touched | Worktree |";
-  const separator = "|---|-----------|-------|--------|---------------|----------|";
-  const rows = tickets.map((t, i) => {
-    const allFiles = [...(t.filesModified ?? []), ...(t.filesCreated ?? [])];
-    const fileSummary = allFiles.length > 0
-      ? allFiles.slice(0, 5).join(", ") + (allFiles.length > 5 ? ` (+${allFiles.length - 5} more)` : "")
-      : "(unknown)";
-    return `| ${i + 1} | ${t.ticketId} | ${t.ticketTitle} | ${t.branch} | ${fileSummary} | ${t.worktreePath} |`;
-  });
+  const columns: MarkdownColumn<PushAndCreatePRTicket>[] = [
+    { header: "#", separator: "---", cell: (_t, i) => String(i + 1) },
+    { header: "Ticket ID", separator: "-----------", cell: (t) => t.ticketId },
+    { header: "Title", separator: "-----", cell: (t) => t.ticketTitle },
+    { header: "Branch", separator: "--------", cell: (t) => t.branch },
+    { header: "Files Touched", separator: "---------------", cell: (t) => buildFileSummary(t) },
+    { header: "Worktree", separator: "----------", cell: (t) => t.worktreePath },
+  ];
 
-  return [header, separator, ...rows].join("\n");
+  return buildMarkdownTable(columns, tickets);
 }
 
 function buildPRCreationPrompt(
@@ -154,8 +154,8 @@ export function PushAndCreatePR({
       output={output}
       agent={agent}
       fallbackAgent={fallbackAgent}
-      retries={PR_CREATION_RETRY_POLICY.retries}
-      meta={{ retryPolicy: PR_CREATION_RETRY_POLICY }}
+      retries={STAGE_RETRY_POLICIES["pr-creation"].retries}
+      meta={{ retryPolicy: STAGE_RETRY_POLICIES["pr-creation"] }}
     >
       {prompt}
     </Task>

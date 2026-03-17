@@ -4,12 +4,7 @@ import type { AgentLike, SmithersCtx } from "smithers-orchestrator";
 import { scheduledOutputSchemas } from "../../schemas";
 import type { WorkPlan, WorkUnit } from "../../types";
 import {
-  IMPLEMENT_RETRY_POLICY,
-  PLAN_RETRY_POLICY,
-  RESEARCH_RETRY_POLICY,
-  TEST_RETRY_POLICY,
-  buildPlanInputSignature,
-  buildResearchInputSignature,
+  STAGE_RETRY_POLICIES,
   stageNodeId,
 } from "../../workflow/contracts";
 import {
@@ -90,7 +85,7 @@ describe("QualityPipeline stage semantics", () => {
     };
     const workPlan = createWorkPlan(unit);
 
-    const researchSig = buildResearchInputSignature({
+    const researchSig = JSON.stringify({
       unitId: unit.id,
       unitName: unit.name,
       unitDescription: unit.description,
@@ -101,7 +96,7 @@ describe("QualityPipeline stage semantics", () => {
       evictionContext: null,
     });
 
-    const planSig = buildPlanInputSignature({
+    const planSig = JSON.stringify({
       unitId: unit.id,
       unitName: unit.name,
       unitDescription: unit.description,
@@ -154,10 +149,10 @@ describe("QualityPipeline stage semantics", () => {
 
     expect(researchTask.skipIf).toBe(true);
     expect(planTask.skipIf).toBe(true);
-    expect((researchTask.meta as Record<string, unknown>).retryPolicy).toEqual(RESEARCH_RETRY_POLICY);
-    expect((planTask.meta as Record<string, unknown>).retryPolicy).toEqual(PLAN_RETRY_POLICY);
-    expect((implementTask.meta as Record<string, unknown>).retryPolicy).toEqual(IMPLEMENT_RETRY_POLICY);
-    expect((testTask.meta as Record<string, unknown>).retryPolicy).toEqual(TEST_RETRY_POLICY);
+    expect((researchTask.meta as Record<string, unknown>).retryPolicy).toEqual(STAGE_RETRY_POLICIES["research"]);
+    expect((planTask.meta as Record<string, unknown>).retryPolicy).toEqual(STAGE_RETRY_POLICIES["plan"]);
+    expect((implementTask.meta as Record<string, unknown>).retryPolicy).toEqual(STAGE_RETRY_POLICIES["implement"]);
+    expect((testTask.meta as Record<string, unknown>).retryPolicy).toEqual(STAGE_RETRY_POLICIES["test"]);
     expect((implementTask.meta as Record<string, unknown>).dependsOn).toEqual([
       stageNodeId(unit.id, "plan"),
     ]);

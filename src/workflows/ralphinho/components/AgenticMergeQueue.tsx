@@ -3,7 +3,7 @@ import { Task } from "smithers-orchestrator";
 import type { SmithersCtx, AgentLike } from "smithers-orchestrator";
 import type { z } from "zod";
 import { scheduledOutputSchemas } from "../schemas";
-import { MERGE_QUEUE_RETRY_POLICY } from "../workflow/contracts";
+import { STAGE_RETRY_POLICIES } from "../workflow/contracts";
 import type { ScheduledOutputs } from "./QualityPipeline";
 import { buildFileSummary, buildMarkdownTable, type MarkdownColumn } from "./markdownTableUtils";
 
@@ -57,17 +57,17 @@ function buildQueueStatusTable(tickets: AgenticMergeQueueTicket[]): string {
     (a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority],
   );
 
-  const header = "| # | Ticket ID | Title | Category | Priority | Files Touched | Worktree |";
-  const separator = "|---|-----------|-------|----------|----------|---------------|----------|";
-  const rows = sorted.map(
-    (t, i) => {
-      const allFiles = [...(t.filesModified ?? []), ...(t.filesCreated ?? [])];
-      const fileSummary = allFiles.length > 0 ? allFiles.slice(0, 5).join(", ") + (allFiles.length > 5 ? ` (+${allFiles.length - 5} more)` : "") : "(unknown)";
-      return `| ${i + 1} | ${t.ticketId} | ${t.ticketTitle} | ${t.ticketCategory} | ${t.priority} | ${fileSummary} | ${t.worktreePath} |`;
-    },
-  );
+  const columns: MarkdownColumn<AgenticMergeQueueTicket>[] = [
+    { header: "#", separator: "---", cell: (_t, i) => String(i + 1) },
+    { header: "Ticket ID", separator: "-----------", cell: (t) => t.ticketId },
+    { header: "Title", separator: "-----", cell: (t) => t.ticketTitle },
+    { header: "Category", separator: "----------", cell: (t) => t.ticketCategory },
+    { header: "Priority", separator: "----------", cell: (t) => t.priority },
+    { header: "Files Touched", separator: "---------------", cell: (t) => buildFileSummary(t) },
+    { header: "Worktree", separator: "----------", cell: (t) => t.worktreePath },
+  ];
 
-  return [header, separator, ...rows].join("\n");
+  return buildMarkdownTable(columns, sorted);
 }
 
 function buildFileOverlapAnalysis(tickets: AgenticMergeQueueTicket[]): string {
@@ -258,8 +258,8 @@ export function AgenticMergeQueue({
       output={output}
       agent={agent}
       fallbackAgent={fallbackAgent}
-      retries={MERGE_QUEUE_RETRY_POLICY.retries}
-      meta={{ retryPolicy: MERGE_QUEUE_RETRY_POLICY }}
+      retries={STAGE_RETRY_POLICIES["merge-queue"].retries}
+      meta={{ retryPolicy: STAGE_RETRY_POLICIES["merge-queue"] }}
     >
       {prompt}
     </Task>
