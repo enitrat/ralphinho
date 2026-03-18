@@ -145,7 +145,7 @@ export function QualityPipeline({
   const effectiveWorktreePath = worktreePath ?? buildUnitWorktreePath(ctx.runId, uid);
 
   return (
-    <Worktree path={effectiveWorktreePath} branch={`${branchPrefix}${uid}`}>
+    <Worktree path={effectiveWorktreePath} branch={`${branchPrefix}${uid}`} baseBranch={workPlan.baseBranch}>
       <Sequence>
         {tierHasStep(tier, "research") && (
           <Task

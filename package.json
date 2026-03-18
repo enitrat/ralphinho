@@ -46,7 +46,7 @@
     "cli": "bun run src/cli/ralphinho.ts"
   },
   "peerDependencies": {
-    "smithers-orchestrator": "github:jjhub-ai/smithers#3dd13e4"
+    "smithers-orchestrator": "github:enitrat/smithers#chore/support-loop"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
