@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ConsumedTicket } from "../../adapters/linear/types";
-import type { LinearIssue } from "smithers-orchestrator/linear";
+import type { LinearIssue } from "../../linear/types";
 import { slugify } from "../../cli/shared";
 import {
   groupByFileOverlap,

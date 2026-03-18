@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import React from "react";
-import { Parallel, Ralph, Sequence, Task } from "smithers-orchestrator";
+import { Parallel, Loop, Sequence, Task } from "smithers-orchestrator";
 import type { AgentLike, SmithersCtx } from "smithers-orchestrator";
 import type { Issue } from "../schemas";
 import type { WorkUnit } from "../types";
@@ -114,8 +114,7 @@ export function ReviewLoop({
     && codeSeverity !== "major"
     && prdSeverity !== "critical"
     && prdSeverity !== "major";
-  const exhausted = iterationCount >= maxReviewPasses && !exitConditionMet;
-  const done = exitConditionMet || exhausted;
+  const done = reviewLoopResult?.passed === true || reviewLoopResult?.exhausted === true;
 
   const nextIterationCount = iterationCount + 1;
   const nextExhausted = nextIterationCount >= maxReviewPasses && !exitConditionMet;
@@ -126,7 +125,13 @@ export function ReviewLoop({
 
   return (
     <Sequence>
-      <Ralph until={done} maxIterations={maxReviewPasses} onMaxReached="return-last">
+      {/* Terminate only from the persisted review-loop_result row.
+          If we stop the loop based on live review severities, Smithers can re-render
+          after test/review tasks complete and exit the loop before the terminal
+          review-loop_result Task writes { passed, exhausted }. That leaves clean units
+          without a persisted completion signal, so merge eligibility and outer-loop
+          completion both fail to observe them. */}
+      <Loop id={`${uid}:review-loop`} until={done} maxIterations={maxReviewPasses} onMaxReached="return-last">
         <Sequence>
           <Task
             id={stageNodeId(uid, "test")}
@@ -266,7 +271,7 @@ export function ReviewLoop({
             }}
           </Task>
         </Sequence>
-      </Ralph>
+      </Loop>
 
       <Task
         id={`${uid}:review-backlog`}

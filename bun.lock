@@ -5,8 +5,10 @@
     "": {
       "name": "super-ralph",
       "dependencies": {
+        "@linear/sdk": "^78.0.0",
         "@opentui/core": "^0.1.81",
         "better-sqlite3": "^11.0.0",
+        "effect": "3.19.19",
       },
       "devDependencies": {
         "@types/better-sqlite3": "^7.6.13",
@@ -19,7 +21,7 @@
         "unist-util-visit": "^5.1.0",
       },
       "peerDependencies": {
-        "smithers-orchestrator": "github:jjhub-ai/smithers#41bdde95c22b6b7239efa6e69dcbea11176f2253",
+        "smithers-orchestrator": "github:jjhub-ai/smithers#3dd13e4",
       },
     },
   },
@@ -176,7 +178,7 @@
 
     "@jimp/utils": ["@jimp/utils@1.6.0", "", { "dependencies": { "@jimp/types": "1.6.0", "tinycolor2": "^1.6.0" } }, "sha512-gqFTGEosKbOkYF/WFj26jMHOI5OH2jeP1MmC/zbK6BF6VJBf8rIC5898dPfSzZEbSA0wbbV5slbntWVc5PKLFA=="],
 
-    "@linear/sdk": ["@linear/sdk@76.0.0", "", { "dependencies": { "@graphql-typed-document-node/core": "^3.2.0" } }, "sha512-Xt0x5Kl6qBoWhGFypb8ykyP+c5kT7scmRPs1uJidSPOaRgkMJ/4y41QpmZCWCBUMmZtf/O0VktgQio6rLXT94w=="],
+    "@linear/sdk": ["@linear/sdk@78.0.0", "", { "dependencies": { "@graphql-typed-document-node/core": "^3.2.0" } }, "sha512-5b5LikiZSmolJxvYt3vM4u6SM+2MDEbDgr+4V1xBT1EBypIpVaFHP11S6lxK9PmHsj9uQC83sUHX1UujbXsJww=="],
 
     "@mdx-js/esbuild": ["@mdx-js/esbuild@3.1.1", "", { "dependencies": { "@mdx-js/mdx": "^3.0.0", "@types/unist": "^3.0.0", "source-map": "^0.7.0", "vfile": "^6.0.0", "vfile-message": "^4.0.0" }, "peerDependencies": { "esbuild": ">=0.14.0" } }, "sha512-NS35VhTdvKNj5/B1JSD5W3kN1R0WDHgk+zCWq+tSChQw5L2Bgeiz7yyZPFrc5LWuPVOxE1xMbJr82bO9VVzmfQ=="],
 
@@ -858,7 +860,7 @@
 
     "simple-xml-to-json": ["simple-xml-to-json@1.2.3", "", {}, "sha512-kWJDCr9EWtZ+/EYYM5MareWj2cRnZGF93YDNpH4jQiHB+hBIZnfPFSQiVMzZOdk+zXWqTZ/9fTeQNu2DqeiudA=="],
 
-    "smithers-orchestrator": ["smithers-orchestrator@github:jjhub-ai/smithers#41bdde9", { "dependencies": { "@ai-sdk/anthropic": "^3.0.36", "@ai-sdk/openai": "^3.0.41", "@effect/opentelemetry": "^0.61.0", "@effect/platform": "^0.94.5", "@effect/platform-bun": "^0.87.1", "@effect/sql": "^0.49.0", "@linear/sdk": "^76.0.0", "@mdx-js/esbuild": "^3.1.1", "@opentelemetry/api": "^1.9.0", "@opentelemetry/exporter-metrics-otlp-http": "^0.213.0", "@opentelemetry/exporter-trace-otlp-http": "^0.213.0", "@opentelemetry/resources": "^2.6.0", "@opentelemetry/sdk-logs": "^0.213.0", "@opentelemetry/sdk-metrics": "^2.6.0", "@opentelemetry/sdk-trace-base": "^2.6.0", "@opentelemetry/sdk-trace-node": "^2.6.0", "@opentelemetry/semantic-conventions": "^1.40.0", "@toon-format/toon": "^2.1.0", "@types/react-dom": "^19.2.3", "@types/react-reconciler": "^0.28.9", "ai": "^6.0.69", "diff": "^5.2.0", "drizzle-orm": "^0.45.1", "drizzle-zod": "^0.8.3", "effect": "^3.19.19", "incur": "^0.3.3", "react": "^19.2.4", "react-dom": "^19.2.4", "react-reconciler": "^0.31.0", "zod": "^4.3.6" }, "peerDependencies": { "typescript": "^5" }, "bin": { "smithers": "src/cli/index.ts" } }, "jjhub-ai-smithers-41bdde9", "sha512-FVaM6K6XrTpWpdGG8c2bMjCReQ3QHMGtuN9BhNEaFyS2mGX2pJeRNC3b2SRJe5LdVTTykmPEPO9hwg7AbDfCTQ=="],
+    "smithers-orchestrator": ["smithers-orchestrator@github:jjhub-ai/smithers#3dd13e4", { "dependencies": { "@ai-sdk/anthropic": "^3.0.36", "@ai-sdk/openai": "^3.0.41", "@effect/opentelemetry": "^0.61.0", "@effect/platform": "^0.94.5", "@effect/platform-bun": "^0.87.1", "@effect/sql": "^0.49.0", "@mdx-js/esbuild": "^3.1.1", "@opentelemetry/api": "^1.9.0", "@opentelemetry/exporter-metrics-otlp-http": "^0.213.0", "@opentelemetry/exporter-trace-otlp-http": "^0.213.0", "@opentelemetry/resources": "^2.6.0", "@opentelemetry/sdk-logs": "^0.213.0", "@opentelemetry/sdk-metrics": "^2.6.0", "@opentelemetry/sdk-trace-base": "^2.6.0", "@opentelemetry/sdk-trace-node": "^2.6.0", "@opentelemetry/semantic-conventions": "^1.40.0", "@toon-format/toon": "^2.1.0", "@types/react-dom": "^19.2.3", "@types/react-reconciler": "^0.28.9", "ai": "^6.0.69", "diff": "^5.2.0", "drizzle-orm": "^0.45.1", "drizzle-zod": "^0.8.3", "effect": "^3.19.19", "incur": "^0.3.3", "react": "^19.2.4", "react-dom": "^19.2.4", "react-reconciler": "^0.31.0", "zod": "^4.3.6" }, "peerDependencies": { "typescript": "^5" }, "bin": { "smithers": "src/cli/index.ts" } }, "jjhub-ai-smithers-3dd13e4", "sha512-z70HY6cHPSY1F2Z0ekdS9xqvXKmmOi7V4thWwdcFfyzFVmFsFBblwlS4WZXFpvWQQgLakOy6QIe/uUr3BCZwpg=="],
 
     "source-map": ["source-map@0.7.6", "", {}, "sha512-i5uvt8C3ikiWeNZSVZNWcfZPItFQOsYTUAOkcUPGd8DqDy1uOUikjt5dG+uRlwyvR108Fb9DOd4GvXfT0N2/uQ=="],
 

@@ -3,6 +3,8 @@
  * Core Linear types (LinearIssue, LinearTeam, etc.) come from smithers-orchestrator/linear.
  */
 
+import { LinearIssue } from "../../linear";
+
 export type PushFindingsResult = {
   created: {
     findingDisplayId: string;
@@ -14,7 +16,7 @@ export type PushFindingsResult = {
 };
 
 export type ConsumedTicket = {
-  issue: import("smithers-orchestrator/linear").LinearIssue;
+  issue: LinearIssue;
   /** Markdown RFC content generated from the ticket */
   rfcContent: string;
   /** Parsed metadata from improvinho-formatted description */

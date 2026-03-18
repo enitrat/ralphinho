@@ -95,7 +95,7 @@ export function QualityPipeline({
   const uid = unit.id;
   const tier = unit.tier;
 
-  // In Ralph loops, cross-stage reads must use latest() to see prior iterations.
+  // In Loop loops, cross-stage reads must use latest() to see prior iterations.
   const research = ctx.latest("research", stageNodeId(uid, "research"));
   const plan = ctx.latest("plan", stageNodeId(uid, "plan"));
   const impl = ctx.latest("implement", stageNodeId(uid, "implement"));

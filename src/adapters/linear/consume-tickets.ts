@@ -6,8 +6,8 @@
  * and provides helpers to update the ticket after completion.
  */
 
-import { useLinear } from "smithers-orchestrator/linear";
-import type { LinearIssue } from "smithers-orchestrator/linear";
+import { useLinear } from "../../linear/useLinear";
+import type { LinearIssue } from "../../linear/types";
 import type { ConsumedTicket } from "./types";
 import { parseIssueMetadata } from "./parse-issue-metadata";
 

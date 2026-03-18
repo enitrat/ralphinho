@@ -11,7 +11,8 @@ import {
   resolveLatestReviewRunId,
   type MergedReviewFinding,
 } from "../../workflows/improvinho/projection";
-import { getLinearClient, useLinear } from "smithers-orchestrator/linear";
+import { getLinearClient } from "../../linear/client";
+import { useLinear } from "../../linear/useLinear";
 import type { PushFindingsResult } from "./types";
 
 const PRIORITY_MAP: Record<string, number> = {

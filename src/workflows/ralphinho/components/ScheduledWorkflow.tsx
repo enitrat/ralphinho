@@ -15,7 +15,7 @@
  */
 
 import React from "react";
-import { Ralph, Sequence, Parallel, Task } from "smithers-orchestrator";
+import { Sequence, Parallel, Task, Loop } from "smithers-orchestrator";
 import type { SmithersCtx } from "smithers-orchestrator";
 import type { AgentLike } from "smithers-orchestrator";
 import type { WorkPlan } from "../types";
@@ -91,7 +91,10 @@ export function ScheduledWorkflow({
   const allUnitsReviewComplete = units.every(
     (u) => snapshot.isUnitLanded(u.id) || snapshot.latestReviewLoopResult(u.id)?.passed,
   );
-  const done = currentPass >= maxPasses || allUnitsLanded || allUnitsReviewComplete;
+  // In merge mode, review-complete units still need the merge queue to advance the
+  // base branch and persist landing/accounting state. Only PR mode may terminate on
+  // review completion alone because landing happens outside this workflow.
+  const done = currentPass >= maxPasses || allUnitsLanded || (landingMode === "pr" && allUnitsReviewComplete);
 
   // ── Completion report data ─────────────────────────────────────
 
@@ -115,7 +118,8 @@ export function ScheduledWorkflow({
 
   return (
     <Sequence>
-      <Ralph
+      <Loop
+        id="outer-ralph-loop"
         until={done}
         maxIterations={maxPasses * units.length * 20}
         onMaxReached="return-last"
@@ -134,6 +138,7 @@ export function ScheduledWorkflow({
 
               return (
                 <QualityPipeline
+                  key={unit.id}
                   unit={unit}
                   ctx={ctx}
                   outputs={outputs}
@@ -204,7 +209,7 @@ export function ScheduledWorkflow({
             }}
           </Task>
         </Sequence>
-      </Ralph>
+      </Loop>
 
       {/* Completion report (compute task — no agent needed) */}
       <Task id={COMPLETION_REPORT_NODE_ID} output={outputs.completion_report}>

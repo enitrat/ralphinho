@@ -8,12 +8,36 @@ import { ScheduledWorkflow, type ScheduledWorkflowAgents } from "../ScheduledWor
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-function createCtx(latestImpl?: (table: string, nodeId: string) => unknown): SmithersCtx<ScheduledOutputs> {
+function createCtx(opts?: {
+  latestImpl?: (table: string, nodeId: string) => unknown;
+  outputsByTable?: Record<string, unknown[]>;
+}): SmithersCtx<ScheduledOutputs> {
+  const outputsByTable = opts?.outputsByTable ?? {};
+  const latestImpl = opts?.latestImpl ?? ((table: string, nodeId: string) => {
+    const rows = outputsByTable[table] ?? [];
+    let best: any = null;
+    let bestIteration = -Infinity;
+    for (const row of rows) {
+      if (!row || (row as { nodeId?: string }).nodeId !== nodeId) continue;
+      const iteration = Number((row as { iteration?: number }).iteration ?? 0);
+      if (best == null || iteration >= bestIteration) {
+        best = row;
+        bestIteration = iteration;
+      }
+    }
+    return best;
+  });
+
+  const outputsFn = ((table: string) => outputsByTable[table] ?? []) as ((table: string) => unknown[]) & Record<string, unknown[]>;
+  for (const [table, rows] of Object.entries(outputsByTable)) {
+    outputsFn[table] = rows;
+  }
+
   return {
     runId: "run-1",
     iteration: 0,
-    latest: latestImpl ?? (() => null),
-    outputs: () => [],
+    latest: latestImpl,
+    outputs: outputsFn,
   } as unknown as SmithersCtx<ScheduledOutputs>;
 }
 
@@ -91,6 +115,12 @@ function findComponentsByName(
   return found;
 }
 
+function findLoop(node: React.ReactNode): Record<string, unknown> | null {
+  const matches = findComponentsByName(node, ["Loop"]);
+  const outer = matches.find((match) => match.props.id === "outer-ralph-loop");
+  return outer?.props ?? null;
+}
+
 // ── Tests ────────────────────────────────────────────────────────────
 
 describe("ScheduledWorkflow landingMode", () => {
@@ -151,5 +181,67 @@ describe("ScheduledWorkflow landingMode", () => {
     const names = components.map((c) => c.name);
     expect(names).toContain("PushAndCreatePR");
     expect(names).not.toContain("AgenticMergeQueue");
+  });
+
+  test("merge mode does not finish outer loop on review completion alone", () => {
+    const workPlan = createWorkPlan();
+    const element = ScheduledWorkflow({
+      ctx: createCtx({
+        outputsByTable: {
+          review_loop_result: [
+            {
+              nodeId: "u-1:review-loop",
+              iteration: 0,
+              iterationCount: 1,
+              codeSeverity: "none",
+              prdSeverity: "none",
+              passed: true,
+              exhausted: false,
+            },
+          ],
+        },
+      }),
+      outputs: scheduledOutputSchemas,
+      workPlan,
+      repoRoot: "/repo",
+      maxConcurrency: 1,
+      agents: createAgents(),
+      landingMode: "merge",
+    });
+
+    const loop = findLoop(element);
+    expect(loop).not.toBeNull();
+    expect(loop?.until).toBe(false);
+  });
+
+  test("pr mode may finish outer loop on review completion alone", () => {
+    const workPlan = createWorkPlan();
+    const element = ScheduledWorkflow({
+      ctx: createCtx({
+        outputsByTable: {
+          review_loop_result: [
+            {
+              nodeId: "u-1:review-loop",
+              iteration: 0,
+              iterationCount: 1,
+              codeSeverity: "none",
+              prdSeverity: "none",
+              passed: true,
+              exhausted: false,
+            },
+          ],
+        },
+      }),
+      outputs: scheduledOutputSchemas,
+      workPlan,
+      repoRoot: "/repo",
+      maxConcurrency: 1,
+      agents: createAgents(),
+      landingMode: "pr",
+    });
+
+    const loop = findLoop(element);
+    expect(loop).not.toBeNull();
+    expect(loop?.until).toBe(true);
   });
 });

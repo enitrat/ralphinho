@@ -106,7 +106,7 @@ describe("ReviewLoop", () => {
     expect((ralph?.props as Record<string, unknown>).maxIterations).toBe(3);
   });
 
-  test("exits loop when non-blocking severities are reached after at least one review", () => {
+  test("keeps loop active until a clean review result is persisted", () => {
     const unit = createUnit("large");
     const ctx = createCtx(createLatestMap([
       ["code_review", `${unit.id}:code-review`, { severity: "minor", issues: null, feedback: "ok" }],
@@ -127,17 +127,47 @@ describe("ReviewLoop", () => {
 
     const tasks = collectTasks(element);
     expect(tasks[`${unit.id}:review-fix`].skipIf).toBe(true);
+    expect(tasks[`${unit.id}:review-loop`].children).toEqual({
+      iterationCount: 2,
+      codeSeverity: "minor",
+      prdSeverity: "none",
+      passed: true,
+      exhausted: false,
+    });
+
+    const ralph = findRalph(element);
+    expect((ralph?.props as Record<string, unknown>).until).toBe(false);
+  });
+
+  test("exits loop when a passing review result was already persisted", () => {
+    const unit = createUnit("large");
+    const ctx = createCtx(createLatestMap([
+      ["code_review", `${unit.id}:code-review`, { severity: "minor", issues: null, feedback: "ok" }],
+      ["prd_review", `${unit.id}:prd-review`, { severity: "none", issues: null, feedback: "ok" }],
+      ["review_loop_result", `${unit.id}:review-loop`, { iterationCount: 1, passed: true, exhausted: false }],
+    ]));
+
+    const element = ReviewLoop({
+      unit,
+      ctx,
+      outputs: scheduledOutputSchemas,
+      agents: createAgents(),
+      implOutput: null,
+      testSuites: [],
+      verifyCommands: [],
+      maxReviewPasses: 3,
+    });
 
     const ralph = findRalph(element);
     expect((ralph?.props as Record<string, unknown>).until).toBe(true);
   });
 
-  test("marks loop as exhausted when maxReviewPasses is reached without passing severities", () => {
+  test("exits loop when an exhausted review result was already persisted", () => {
     const unit = createUnit("large");
     const ctx = createCtx(createLatestMap([
       ["code_review", `${unit.id}:code-review`, { severity: "major", issues: null, feedback: "blocked" }],
       ["prd_review", `${unit.id}:prd-review`, { severity: "none", issues: null, feedback: "ok" }],
-      ["review_loop_result", `${unit.id}:review-loop`, { iterationCount: 3 }],
+      ["review_loop_result", `${unit.id}:review-loop`, { iterationCount: 3, passed: false, exhausted: true }],
     ]));
 
     const element = ReviewLoop({

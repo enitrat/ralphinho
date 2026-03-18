@@ -1,5 +1,5 @@
 import { describe, expect, test, mock, beforeEach } from "bun:test";
-import type { LinearIssue } from "smithers-orchestrator/linear";
+import type { LinearIssue } from "../../linear/types";
 import { parseIssueMetadata } from "./parse-issue-metadata";
 
 /**
@@ -15,7 +15,7 @@ import { parseIssueMetadata } from "./parse-issue-metadata";
 
 let mockListIssues: ReturnType<typeof mock>;
 
-mock.module("smithers-orchestrator/linear", () => ({
+mock.module("../../linear/useLinear", () => ({
   useLinear: () => ({
     listIssues: mockListIssues,
   }),
