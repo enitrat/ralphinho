@@ -52,7 +52,6 @@ export type ScheduledWorkflowProps = {
   repoRoot: string;
   maxConcurrency: number;
   maxPasses?: number;
-  baseBranch?: string;
   landingMode?: "merge" | "pr";
   agents: ScheduledWorkflowAgents;
   fallbacks?: QualityPipelineFallbacks & { mergeQueue?: AgentLike };
@@ -67,11 +66,11 @@ export function ScheduledWorkflow({
   repoRoot,
   maxConcurrency,
   maxPasses = 9,
-  baseBranch = "main",
   landingMode = "merge",
   agents,
   fallbacks,
 }: ScheduledWorkflowProps) {
+  const baseBranch = workPlan.baseBranch;
   const units = workPlan.units;
   const unitBranchPrefix = buildUnitBranchPrefix(ctx.runId, "unit/");
   const buildChecks = Object.values(workPlan.repo.buildCmds);

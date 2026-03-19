@@ -67,6 +67,10 @@ export function loadScheduledPreset(env: NodeJS.ProcessEnv = process.env): {
     loadJsonFile<WorkPlan>(paths.planPath, "work plan"),
   );
 
+  // Inject baseBranch from config into the work plan so that Worktree
+  // components receive it without every consumer having to merge manually.
+  workPlan.baseBranch = config.baseBranch;
+
   return {
     paths,
     config,

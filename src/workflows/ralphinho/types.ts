@@ -45,6 +45,8 @@ export const workPlanSchema = z.object({
   }),
   /** The work units with their dependency graph */
   units: z.array(workUnitSchema),
+  /** Base branch for worktree sync and landing (injected from config at load time) */
+  baseBranch: z.string().default("main"),
 });
 
 export type WorkPlan = z.infer<typeof workPlanSchema>;
