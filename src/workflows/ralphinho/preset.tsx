@@ -45,22 +45,26 @@ function chooseAgent(
   const claude = (model?: string) => createClaude(role, model ?? "claude-sonnet-4-6");
   const codex = () => createCodex(role, "gpt-5.3-codex");
 
+  // When the user explicitly overrides the agent, don't set a fallback —
+  // retries should use the same agent the user requested.
+  const suppressFallback = !!AGENT_OVERRIDE;
+
   if (primary === "opus" && HAS_CLAUDE) {
     return {
       agent: claude("claude-opus-4-6"),
-      fallback: HAS_CODEX ? codex() : undefined,
+      fallback: !suppressFallback && HAS_CODEX ? codex() : undefined,
     };
   }
   if (primary === "sonnet" && HAS_CLAUDE) {
     return {
       agent: claude(),
-      fallback: HAS_CODEX ? codex() : undefined,
+      fallback: !suppressFallback && HAS_CODEX ? codex() : undefined,
     };
   }
   if (primary === "codex" && HAS_CODEX) {
     return {
       agent: codex(),
-      fallback: HAS_CLAUDE ? claude() : undefined,
+      fallback: !suppressFallback && HAS_CLAUDE ? claude() : undefined,
     };
   }
   if (HAS_CLAUDE) {

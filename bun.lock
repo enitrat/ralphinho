@@ -21,7 +21,7 @@
         "unist-util-visit": "^5.1.0",
       },
       "peerDependencies": {
-        "smithers-orchestrator": "github:jjhub-ai/smithers#3dd13e4",
+        "smithers-orchestrator": "github:jjhub-ai/smithers#main",
       },
     },
   },
@@ -860,7 +860,7 @@
 
     "simple-xml-to-json": ["simple-xml-to-json@1.2.3", "", {}, "sha512-kWJDCr9EWtZ+/EYYM5MareWj2cRnZGF93YDNpH4jQiHB+hBIZnfPFSQiVMzZOdk+zXWqTZ/9fTeQNu2DqeiudA=="],
 
-    "smithers-orchestrator": ["smithers-orchestrator@github:jjhub-ai/smithers#3dd13e4", { "dependencies": { "@ai-sdk/anthropic": "^3.0.36", "@ai-sdk/openai": "^3.0.41", "@effect/opentelemetry": "^0.61.0", "@effect/platform": "^0.94.5", "@effect/platform-bun": "^0.87.1", "@effect/sql": "^0.49.0", "@mdx-js/esbuild": "^3.1.1", "@opentelemetry/api": "^1.9.0", "@opentelemetry/exporter-metrics-otlp-http": "^0.213.0", "@opentelemetry/exporter-trace-otlp-http": "^0.213.0", "@opentelemetry/resources": "^2.6.0", "@opentelemetry/sdk-logs": "^0.213.0", "@opentelemetry/sdk-metrics": "^2.6.0", "@opentelemetry/sdk-trace-base": "^2.6.0", "@opentelemetry/sdk-trace-node": "^2.6.0", "@opentelemetry/semantic-conventions": "^1.40.0", "@toon-format/toon": "^2.1.0", "@types/react-dom": "^19.2.3", "@types/react-reconciler": "^0.28.9", "ai": "^6.0.69", "diff": "^5.2.0", "drizzle-orm": "^0.45.1", "drizzle-zod": "^0.8.3", "effect": "^3.19.19", "incur": "^0.3.3", "react": "^19.2.4", "react-dom": "^19.2.4", "react-reconciler": "^0.31.0", "zod": "^4.3.6" }, "peerDependencies": { "typescript": "^5" }, "bin": { "smithers": "src/cli/index.ts" } }, "jjhub-ai-smithers-3dd13e4", "sha512-z70HY6cHPSY1F2Z0ekdS9xqvXKmmOi7V4thWwdcFfyzFVmFsFBblwlS4WZXFpvWQQgLakOy6QIe/uUr3BCZwpg=="],
+    "smithers-orchestrator": ["smithers-orchestrator@github:jjhub-ai/smithers#dfa37df", { "dependencies": { "@ai-sdk/anthropic": "^3.0.36", "@ai-sdk/openai": "^3.0.41", "@effect/opentelemetry": "^0.61.0", "@effect/platform": "^0.94.5", "@effect/platform-bun": "^0.87.1", "@effect/sql": "^0.49.0", "@mdx-js/esbuild": "^3.1.1", "@opentelemetry/api": "^1.9.0", "@opentelemetry/exporter-metrics-otlp-http": "^0.213.0", "@opentelemetry/exporter-trace-otlp-http": "^0.213.0", "@opentelemetry/resources": "^2.6.0", "@opentelemetry/sdk-logs": "^0.213.0", "@opentelemetry/sdk-metrics": "^2.6.0", "@opentelemetry/sdk-trace-base": "^2.6.0", "@opentelemetry/sdk-trace-node": "^2.6.0", "@opentelemetry/semantic-conventions": "^1.40.0", "@toon-format/toon": "^2.1.0", "@types/react-dom": "^19.2.3", "@types/react-reconciler": "^0.28.9", "ai": "^6.0.69", "diff": "^5.2.0", "drizzle-orm": "^0.45.1", "drizzle-zod": "^0.8.3", "effect": "^3.19.19", "incur": "^0.3.3", "react": "^19.2.4", "react-dom": "^19.2.4", "react-reconciler": "^0.31.0", "zod": "^4.3.6" }, "peerDependencies": { "typescript": "^5" }, "bin": { "smithers": "src/cli/index.ts" } }, "jjhub-ai-smithers-dfa37df", "sha512-wmWnOdBwr8YMIb4RoKdTzEMvKnuOEk/7yimEfheWJNkp8KWNHMiBde9i4DvbaWrfneMGmZSvWMBPDXdTjRI4yw=="],
 
     "source-map": ["source-map@0.7.6", "", {}, "sha512-i5uvt8C3ikiWeNZSVZNWcfZPItFQOsYTUAOkcUPGd8DqDy1uOUikjt5dG+uRlwyvR108Fb9DOd4GvXfT0N2/uQ=="],
 
