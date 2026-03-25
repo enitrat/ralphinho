@@ -198,7 +198,11 @@ async function callAI(
     systemPrompt: DECOMPOSE_SYSTEM_PROMPT,
     cwd: config.repoRoot,
     dangerouslySkipPermissions: true,
-    timeoutMs: 5 * 60 * 1000,
+    timeoutMs: 15 * 60 * 1000,
+    idleTimeoutMs: 15 * 60 * 1000,
+    env:{
+      CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
+    }
   });
 
   const result = await agent.generate({ prompt });
