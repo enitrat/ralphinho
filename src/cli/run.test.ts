@@ -372,9 +372,9 @@ describe("runBatchFromLinear", () => {
   });
 });
 
-// ── skip-diagnostics tests ────────────────────────────────────────────
+// ── diagnostics integration tests ────────────────────────────────────
 
-describe("runWorkflow --skip-diagnostics", () => {
+describe("runWorkflow diagnostics integration", () => {
   let repoRoot: string;
   let ralphDir: string;
 
@@ -480,5 +480,47 @@ describe("runWorkflow --skip-diagnostics", () => {
     // Without skip-diagnostics, the underlying smithers diagnostics should be called
     expect(mockGetDiagnosticStrategy).toHaveBeenCalled();
     expect(mockRunDiagnostics).toHaveBeenCalled();
+  });
+
+  test("exits with non-zero code when api_key_valid fails (AC3)", async () => {
+    // Make diagnostics report api_key_valid=fail
+    mockRunDiagnostics.mockResolvedValue({
+      agentId: "claude-code",
+      command: "claude",
+      timestamp: new Date().toISOString(),
+      checks: [
+        { id: "cli_installed", status: "pass", message: "found", durationMs: 1 },
+        { id: "api_key_valid", status: "fail", message: "ANTHROPIC_API_KEY missing", durationMs: 1 },
+      ],
+      durationMs: 2,
+    } as any);
+
+    const origOut = process.stdout.write;
+    const origErr = process.stderr.write;
+    const logs: string[] = [];
+    process.stdout.write = ((chunk: any) => { logs.push(String(chunk)); return true; }) as any;
+    process.stderr.write = ((chunk: any) => { logs.push(String(chunk)); return true; }) as any;
+
+    // Mock process.exit to capture exit code instead of actually exiting
+    const origExit = process.exit;
+    let exitCode: number | undefined;
+    process.exit = ((code: number) => { exitCode = code; }) as any;
+
+    try {
+      await runWorkflow({
+        flags: { force: true },
+        repoRoot,
+      });
+    } finally {
+      process.stdout.write = origOut;
+      process.stderr.write = origErr;
+      process.exit = origExit;
+    }
+
+    // Should exit with code 1
+    expect(exitCode).toBe(1);
+    // Should mention the failing agent name in the error message
+    const allLogs = logs.join("\n");
+    expect(allLogs).toContain("claude-code");
   });
 });
