@@ -8,6 +8,13 @@ import { ScheduledWorkflow, type ScheduledWorkflowAgents } from "../ScheduledWor
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
+const BASE_PROPS = {
+  repoRoot: "/repo",
+  maxConcurrency: 1,
+  dbPath: "/repo/.ralphinho/workflow.db",
+  prompt: "test prompt",
+} as const;
+
 function createCtx(opts?: {
   latestImpl?: (table: string, nodeId: string) => unknown;
   outputsByTable?: Record<string, unknown[]>;
@@ -80,7 +87,6 @@ function createAgents(): ScheduledWorkflowAgents {
 
 /**
  * Walk the React element tree and collect component display names and their props.
- * We look for components named "AgenticMergeQueue" or "PushAndCreatePR".
  */
 function findComponentsByName(
   node: React.ReactNode,
@@ -124,15 +130,83 @@ function findLoop(node: React.ReactNode): Record<string, unknown> | null {
 
 // ── Tests ────────────────────────────────────────────────────────────
 
+describe("ScheduledWorkflow Monitor embed", () => {
+  const savedEnv = process.env.SUPER_RALPH_SKIP_MONITOR;
+  const savedIsTTY = process.stdout.isTTY;
+
+  function cleanup() {
+    if (savedEnv === undefined) delete process.env.SUPER_RALPH_SKIP_MONITOR;
+    else process.env.SUPER_RALPH_SKIP_MONITOR = savedEnv;
+    Object.defineProperty(process.stdout, "isTTY", { value: savedIsTTY, writable: true, configurable: true });
+  }
+
+  test("renders Monitor when SUPER_RALPH_SKIP_MONITOR is unset and stdout is a TTY", () => {
+    delete process.env.SUPER_RALPH_SKIP_MONITOR;
+    Object.defineProperty(process.stdout, "isTTY", { value: true, writable: true, configurable: true });
+
+    const element = ScheduledWorkflow({
+      ctx: createCtx(),
+      outputs: scheduledOutputSchemas,
+      workPlan: createWorkPlan(),
+      agents: createAgents(),
+      ...BASE_PROPS,
+    });
+
+    const monitors = findComponentsByName(element, ["Monitor"]);
+    expect(monitors).toHaveLength(1);
+    expect(monitors[0]!.props.dbPath).toBe("/repo/.ralphinho/workflow.db");
+    expect(monitors[0]!.props.runId).toBe("run-1");
+    expect(monitors[0]!.props.prompt).toBe("test prompt");
+    expect(monitors[0]!.props.repoRoot).toBe("/repo");
+
+    cleanup();
+  });
+
+  test("does not render Monitor when SUPER_RALPH_SKIP_MONITOR=1", () => {
+    process.env.SUPER_RALPH_SKIP_MONITOR = "1";
+    Object.defineProperty(process.stdout, "isTTY", { value: true, writable: true, configurable: true });
+
+    const element = ScheduledWorkflow({
+      ctx: createCtx(),
+      outputs: scheduledOutputSchemas,
+      workPlan: createWorkPlan(),
+      agents: createAgents(),
+      ...BASE_PROPS,
+    });
+
+    const monitors = findComponentsByName(element, ["Monitor"]);
+    expect(monitors).toHaveLength(0);
+
+    cleanup();
+  });
+
+  test("does not render Monitor when stdout is not a TTY", () => {
+    delete process.env.SUPER_RALPH_SKIP_MONITOR;
+    Object.defineProperty(process.stdout, "isTTY", { value: undefined, writable: true, configurable: true });
+
+    const element = ScheduledWorkflow({
+      ctx: createCtx(),
+      outputs: scheduledOutputSchemas,
+      workPlan: createWorkPlan(),
+      agents: createAgents(),
+      ...BASE_PROPS,
+    });
+
+    const monitors = findComponentsByName(element, ["Monitor"]);
+    expect(monitors).toHaveLength(0);
+
+    cleanup();
+  });
+});
+
 describe("ScheduledWorkflow landingMode", () => {
   test("renders AgenticMergeQueue when landingMode is omitted (backward compat)", () => {
     const element = ScheduledWorkflow({
       ctx: createCtx(),
       outputs: scheduledOutputSchemas,
       workPlan: createWorkPlan(),
-      repoRoot: "/repo",
-      maxConcurrency: 1,
       agents: createAgents(),
+      ...BASE_PROPS,
     });
 
     const components = findComponentsByName(element, [
@@ -149,10 +223,9 @@ describe("ScheduledWorkflow landingMode", () => {
       ctx: createCtx(),
       outputs: scheduledOutputSchemas,
       workPlan: createWorkPlan(),
-      repoRoot: "/repo",
-      maxConcurrency: 1,
       agents: createAgents(),
       landingMode: "merge",
+      ...BASE_PROPS,
     });
 
     const components = findComponentsByName(element, [
@@ -169,10 +242,9 @@ describe("ScheduledWorkflow landingMode", () => {
       ctx: createCtx(),
       outputs: scheduledOutputSchemas,
       workPlan: createWorkPlan(),
-      repoRoot: "/repo",
-      maxConcurrency: 1,
       agents: createAgents(),
       landingMode: "pr",
+      ...BASE_PROPS,
     });
 
     const components = findComponentsByName(element, [
@@ -204,10 +276,9 @@ describe("ScheduledWorkflow landingMode", () => {
       }),
       outputs: scheduledOutputSchemas,
       workPlan,
-      repoRoot: "/repo",
-      maxConcurrency: 1,
       agents: createAgents(),
       landingMode: "merge",
+      ...BASE_PROPS,
     });
 
     const loop = findLoop(element);
@@ -235,10 +306,9 @@ describe("ScheduledWorkflow landingMode", () => {
       }),
       outputs: scheduledOutputSchemas,
       workPlan,
-      repoRoot: "/repo",
-      maxConcurrency: 1,
       agents: createAgents(),
       landingMode: "pr",
+      ...BASE_PROPS,
     });
 
     const loop = findLoop(element);
