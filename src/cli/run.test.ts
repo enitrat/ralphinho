@@ -352,3 +352,106 @@ describe("runBatchFromLinear", () => {
     );
   });
 });
+
+// ── skip-diagnostics tests ────────────────────────────────────────────
+
+describe("runWorkflow --skip-diagnostics", () => {
+  let repoRoot: string;
+  let ralphDir: string;
+
+  function writeValidConfig(dir: string) {
+    writeFileSync(
+      join(dir, "config.json"),
+      JSON.stringify({
+        mode: "scheduled-work",
+        repoRoot: "/tmp",
+        rfcPath: join(dir, "rfc.md"),
+        baseBranch: "main",
+        landingMode: "merge",
+        agentOverride: null,
+        agents: { claude: true, codex: false, gh: false },
+        maxConcurrency: 1,
+        createdAt: new Date().toISOString(),
+      }),
+      "utf8",
+    );
+  }
+
+  function writeValidWorkPlan(dir: string) {
+    writeFileSync(
+      join(dir, "work-plan.json"),
+      JSON.stringify({ units: [] }),
+      "utf8",
+    );
+  }
+
+  beforeEach(() => {
+    repoRoot = mkdtempSync(join(tmpdir(), "skip-diag-test-"));
+    ralphDir = join(repoRoot, ".ralphinho");
+    mkdirSync(ralphDir, { recursive: true });
+
+    mockRunPreflightDiagnostics.mockReset();
+    mockRunPreflightDiagnostics.mockResolvedValue({
+      ok: true,
+      reports: [],
+      failedAgents: [],
+      warnings: [],
+    });
+    mockResolveSmithersCliPath.mockReset();
+    mockResolveSmithersCliPath.mockReturnValue("/mock/smithers");
+    mockLaunchSmithers.mockReset();
+    mockLaunchSmithers.mockResolvedValue(0);
+
+    writeValidConfig(ralphDir);
+    writeValidWorkPlan(ralphDir);
+    // Create a dummy preset file so existsSync check passes
+    const presetDir = join(repoRoot, "node_modules", "smithers-orchestrator", "src", "workflows", "ralphinho");
+    mkdirSync(presetDir, { recursive: true });
+    writeFileSync(join(presetDir, "preset.tsx"), "", "utf8");
+  });
+
+  test("--skip-diagnostics=true bypasses pre-flight diagnostics", async () => {
+    // Suppress stdout/stderr from log calls
+    const origOut = process.stdout.write;
+    const origErr = process.stderr.write;
+    process.stdout.write = (() => true) as any;
+    process.stderr.write = (() => true) as any;
+
+    try {
+      await runWorkflow({
+        flags: { "skip-diagnostics": true, force: true },
+        repoRoot,
+      });
+    } finally {
+      process.stdout.write = origOut;
+      process.stderr.write = origErr;
+    }
+
+    expect(mockRunPreflightDiagnostics).not.toHaveBeenCalled();
+  });
+
+  test("without --skip-diagnostics, pre-flight diagnostics runs", async () => {
+    const origOut = process.stdout.write;
+    const origErr = process.stderr.write;
+    process.stdout.write = (() => true) as any;
+    process.stderr.write = (() => true) as any;
+
+    try {
+      await runWorkflow({
+        flags: { force: true },
+        repoRoot,
+      });
+    } finally {
+      process.stdout.write = origOut;
+      process.stderr.write = origErr;
+    }
+
+    expect(mockRunPreflightDiagnostics).toHaveBeenCalledTimes(1);
+    expect(mockRunPreflightDiagnostics).toHaveBeenCalledWith(
+      expect.objectContaining({
+        enabledAgents: expect.any(Array),
+        cwd: repoRoot,
+      }),
+    );
+  });
+});
