@@ -23,7 +23,9 @@ mock.module("smithers-orchestrator/src/cli/find-db", () => ({
   openSmithersDb: mockOpenSmithersDb,
 }));
 
+const realSmithers = await import("smithers-orchestrator");
 mock.module("smithers-orchestrator", () => ({
+  ...realSmithers,
   aggregateScores: mockAggregateScores,
 }));
 

@@ -87,12 +87,31 @@ mock.module("./init-scheduled", () => ({
   initScheduledWork: mockInitScheduledWork,
 }));
 
-const mockRunPreflightDiagnostics = mock(() =>
-  Promise.resolve({ ok: true, reports: [], failedAgents: [], warnings: [] }),
+// Mock the underlying smithers diagnostics module (not ./diagnostics itself,
+// which would poison the module cache for diagnostics.test.ts).
+const mockGetDiagnosticStrategy = mock(() => ({
+  agentId: "claude-code",
+  command: "claude",
+  checks: [],
+}));
+const mockRunDiagnostics = mock(() =>
+  Promise.resolve({
+    agentId: "claude-code",
+    command: "claude",
+    timestamp: new Date().toISOString(),
+    checks: [
+      { id: "cli_installed", status: "pass", message: "found", durationMs: 1 },
+      { id: "api_key_valid", status: "pass", message: "valid", durationMs: 1 },
+    ],
+    durationMs: 2,
+  }),
 );
 
-mock.module("./diagnostics", () => ({
-  runPreflightDiagnostics: mockRunPreflightDiagnostics,
+mock.module("smithers-orchestrator/src/agents/diagnostics", () => ({
+  getDiagnosticStrategy: mockGetDiagnosticStrategy,
+  runDiagnostics: mockRunDiagnostics,
+  formatDiagnosticSummary: (r: any) =>
+    `[diagnostics] ${r.agentId}: ${r.checks.length} checks`,
 }));
 
 // Must import AFTER mocks are set up

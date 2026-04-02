@@ -7,9 +7,9 @@
  */
 
 import {
-  getDiagnosticStrategy,
-  runDiagnostics,
-  formatDiagnosticSummary,
+  getDiagnosticStrategy as defaultGetStrategy,
+  runDiagnostics as defaultRunDiagnostics,
+  formatDiagnosticSummary as defaultFormatSummary,
   type DiagnosticReport,
 } from "smithers-orchestrator/src/agents/diagnostics";
 import { createLogger } from "../runtime/logger";
@@ -26,11 +26,27 @@ export type PreflightResult = {
   warnings: string[];
 };
 
+/** Injectable deps for testing without module-level mocks. */
+export type DiagnosticDeps = {
+  getDiagnosticStrategy: typeof defaultGetStrategy;
+  runDiagnostics: typeof defaultRunDiagnostics;
+  formatDiagnosticSummary: typeof defaultFormatSummary;
+};
+
+const defaultDeps: DiagnosticDeps = {
+  getDiagnosticStrategy: defaultGetStrategy,
+  runDiagnostics: defaultRunDiagnostics,
+  formatDiagnosticSummary: defaultFormatSummary,
+};
+
 export async function runPreflightDiagnostics(opts: {
   enabledAgents: string[];
   cwd: string;
+  deps?: DiagnosticDeps;
 }): Promise<PreflightResult> {
-  const { enabledAgents, cwd } = opts;
+  const { enabledAgents, cwd, deps = defaultDeps } = opts;
+  const { getDiagnosticStrategy, runDiagnostics, formatDiagnosticSummary } = deps;
+
   // Filter out undefined env values to satisfy Record<string, string>
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) {
