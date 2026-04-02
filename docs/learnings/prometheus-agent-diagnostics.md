@@ -2,37 +2,42 @@
 
 ## Patterns
 
-### [error-handling] Port binding needs try/catch with graceful degradation
-Server endpoints (Prometheus, health checks, etc.) that bind to ports must wrap binding in try/catch and degrade gracefully rather than crashing the process. A port conflict should log a warning and continue, not abort the entire agent workflow.
-Example: Prometheus HTTP server start wrapped in try/catch, falling back to no-metrics mode if port is already in use.
+### [error-handling] Port binding requires graceful degradation
+Network resources like Prometheus metric endpoints can fail to bind (port in use, permissions). Always wrap port binding in try/catch and degrade gracefully (e.g., log a warning and continue without metrics) rather than crashing the process.
+Example: `try { server.listen(port) } catch { logger.warn("Metrics endpoint unavailable"); }`
 Frequency: recurring
 
-### [testing] Verify side effects with real assertions, not just "no throw"
-Tests that only check a function doesn't throw miss actual behavior. For server lifecycle tests (start/stop), assert the real side effect — e.g., verify the port is no longer accepting connections after stop(), rather than just asserting stop() resolved.
-Example: After `server.stop()`, attempt a fetch to the port and assert it throws `ECONNREFUSED`.
+### [testing] Tests must contain real assertions, not just "doesn't throw"
+A test that only checks a function doesn't throw provides near-zero confidence. For server lifecycle tests, verify observable side effects — e.g., after `stop()`, assert that connecting to the port is refused.
+Example: After calling `server.stop()`, assert `fetch(url)` rejects with connection refused, not just that `stop()` didn't throw.
 Frequency: recurring
 
-### [code-quality] Extract shared parsing helpers instead of inline coercion
-When multiple modules parse the same config values (e.g., `maxConcurrency` from env vars), extract a shared helper rather than duplicating `parseInt`/validation logic. Inline `as` casts on `process.env` are unsafe — use typed filtering instead.
-Example: Shared `parseIntEnv(key, defaultValue)` helper in utils instead of `parseInt(process.env.MAX_CONCURRENCY as string)` scattered across files.
+### [code-quality] Extract shared parsing helpers instead of duplicating inline logic
+When multiple modules parse the same config values (e.g., `maxConcurrency` from env vars), extract a single typed helper rather than scattering `parseInt` calls with fallback defaults across files.
+Example: `parseIntWithDefault(process.env.MAX_CONCURRENCY, 4)` in a shared utils module.
+Frequency: recurring
+
+### [architecture] Register cleanup handlers for long-lived server resources
+Background servers (metrics endpoints, health checks) must register cleanup on process exit signals. Otherwise, ports stay bound after the main process finishes, causing failures on restart.
+Example: `process.on('exit', () => prometheusServer.close())`
 Frequency: recurring
 
 ### [performance] Run independent diagnostics in parallel
-Pre-flight diagnostic checks (connectivity, auth, config validation) that don't depend on each other should run via `Promise.all` rather than sequentially. This is easy to miss when adding checks incrementally.
-Example: `await Promise.all([checkPrometheus(), checkAuth(), checkConfig()])` instead of three sequential awaits.
+Pre-flight diagnostic checks (connectivity, auth, resource availability) are typically independent. Use `Promise.all` rather than sequential awaits to reduce startup latency.
+Example: `await Promise.all([checkDb(), checkRedis(), checkAuth()])` instead of sequential awaits.
 Frequency: recurring
 
-### [architecture] Register cleanup handlers for server resources on process exit
-Long-running server resources (HTTP servers, DB connections, file watchers) must register cleanup on `process.exit`/`SIGTERM`. Without this, ports stay bound after crashes, causing the very port-conflict errors that graceful degradation handles.
-Example: `process.on('exit', () => prometheusServer.close())` registered immediately after successful server start.
+### [code-quality] Avoid unsafe type casts when filtering environment variables
+Filtering `process.env` entries can produce `undefined` values. Use explicit type narrowing (e.g., `Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined)`) rather than casting with `as`.
+Example: Type guard filter instead of `as Record<string, string>`.
 Frequency: recurring
 
-### [testing] Test flag-based bypass paths, not just happy paths
-When a feature has a skip/disable flag (e.g., `--skip-diagnostics`), write explicit tests that the flag actually bypasses the feature. These paths are often untested because they seem trivial, but regressions in flag parsing silently re-enable expensive operations.
-Example: Unit test asserting `runWorkflow({ skipDiagnostics: true })` does not invoke any diagnostic check functions.
+### [testing] Feature flags and bypass paths need dedicated test coverage
+When a feature has a skip/bypass flag (like `--skip-diagnostics`), write explicit tests verifying the bypass path. These are easy to forget because the "happy path" tests pass without them, but they catch regressions when the flag plumbing changes.
+Example: Test that `runWorkflow({ skipDiagnostics: true })` skips diagnostic checks entirely.
 Frequency: recurring
 
-### [architecture] Verify deep imports resolve under tsconfig path mappings
-When importing from a package's internal paths (e.g., `smithers-orchestrator/src/agents/diagnostics`), ensure tsconfig path mappings cover the pattern. Deep imports that work at runtime (via bundler/Node resolution) can fail typecheck without explicit path mapping — and reviewers may flag this as a real error when it's already fixed.
-Example: `"smithers-orchestrator/src/*": ["node_modules/smithers-orchestrator/src/*"]` in tsconfig.typecheck.json.
+### [other] Verify tsconfig path mappings before flagging deep import errors
+TS2307 "cannot find module" errors on deep imports (e.g., `smithers-orchestrator/src/agents/diagnostics`) may be false positives if tsconfig has path mappings that resolve them. Always run `bun run typecheck` to verify rather than assuming the import is broken from static analysis alone.
+Example: `tsconfig.typecheck.json` with `"smithers-orchestrator/src/*": ["node_modules/smithers-orchestrator/src/*"]` resolves deep imports that look broken in IDE.
 Frequency: recurring
