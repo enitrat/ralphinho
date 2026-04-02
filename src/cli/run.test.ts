@@ -409,13 +409,23 @@ describe("runWorkflow --skip-diagnostics", () => {
     ralphDir = join(repoRoot, ".ralphinho");
     mkdirSync(ralphDir, { recursive: true });
 
-    mockRunPreflightDiagnostics.mockReset();
-    mockRunPreflightDiagnostics.mockResolvedValue({
-      ok: true,
-      reports: [],
-      failedAgents: [],
-      warnings: [],
-    });
+    mockGetDiagnosticStrategy.mockReset();
+    mockGetDiagnosticStrategy.mockReturnValue({
+      agentId: "claude-code",
+      command: "claude",
+      checks: [],
+    } as any);
+    mockRunDiagnostics.mockReset();
+    mockRunDiagnostics.mockResolvedValue({
+      agentId: "claude-code",
+      command: "claude",
+      timestamp: new Date().toISOString(),
+      checks: [
+        { id: "cli_installed", status: "pass", message: "found", durationMs: 1 },
+        { id: "api_key_valid", status: "pass", message: "valid", durationMs: 1 },
+      ],
+      durationMs: 2,
+    } as any);
     mockResolveSmithersCliPath.mockReset();
     mockResolveSmithersCliPath.mockReturnValue("/mock/smithers");
     mockLaunchSmithers.mockReset();
@@ -446,7 +456,9 @@ describe("runWorkflow --skip-diagnostics", () => {
       process.stderr.write = origErr;
     }
 
-    expect(mockRunPreflightDiagnostics).not.toHaveBeenCalled();
+    // When skip-diagnostics is true, the smithers diagnostics functions should not be called
+    expect(mockGetDiagnosticStrategy).not.toHaveBeenCalled();
+    expect(mockRunDiagnostics).not.toHaveBeenCalled();
   });
 
   test("without --skip-diagnostics, pre-flight diagnostics runs", async () => {
@@ -465,12 +477,8 @@ describe("runWorkflow --skip-diagnostics", () => {
       process.stderr.write = origErr;
     }
 
-    expect(mockRunPreflightDiagnostics).toHaveBeenCalledTimes(1);
-    expect(mockRunPreflightDiagnostics).toHaveBeenCalledWith(
-      expect.objectContaining({
-        enabledAgents: expect.any(Array),
-        cwd: repoRoot,
-      }),
-    );
+    // Without skip-diagnostics, the underlying smithers diagnostics should be called
+    expect(mockGetDiagnosticStrategy).toHaveBeenCalled();
+    expect(mockRunDiagnostics).toHaveBeenCalled();
   });
 });
