@@ -1,23 +1,54 @@
 /**
  * Pre-flight diagnostics — validates agent CLIs + API keys before workflow launch.
  *
- * Wraps smithers-orchestrator/src/agents/diagnostics for the ralphinho CLI.
+ * Wraps smithers-orchestrator diagnostics for the ralphinho CLI.
  * Critical checks (cli_installed, api_key_valid) cause abort.
  * Non-critical checks (rate_limit_status) produce warnings only.
+ *
+ * Types are defined locally to avoid deep imports into smithers-orchestrator
+ * internals. Runtime functions are loaded via dynamic import.
  */
 
-import {
-  getDiagnosticStrategy as defaultGetStrategy,
-  runDiagnostics as defaultRunDiagnostics,
-  formatDiagnosticSummary as defaultFormatSummary,
-  type DiagnosticReport,
-} from "smithers-orchestrator/src/agents/diagnostics";
 import { createLogger } from "../runtime/logger";
 
 const log = createLogger({ context: { phase: "diagnostics" } });
 
+// ── Local types mirroring smithers-orchestrator/src/agents/diagnostics ───
+
+type DiagnosticCheckId = "cli_installed" | "api_key_valid" | "rate_limit_status";
+type DiagnosticCheckStatus = "pass" | "fail" | "skip" | "error";
+
+type DiagnosticCheck = {
+  id: DiagnosticCheckId;
+  status: DiagnosticCheckStatus;
+  message: string;
+  detail?: Record<string, unknown>;
+  durationMs: number;
+};
+
+export type DiagnosticReport = {
+  agentId: string;
+  command: string;
+  timestamp: string;
+  checks: DiagnosticCheck[];
+  durationMs: number;
+};
+
+type DiagnosticStrategy = {
+  agentId: string;
+  command: string;
+  checks: unknown[];
+};
+
+type DiagnosticContext = {
+  env: Record<string, string>;
+  cwd: string;
+};
+
+// ── Public API ──────────────────────────────────────────────────────────
+
 /** Check IDs that cause a hard abort when they fail. */
-const CRITICAL_CHECKS = new Set(["cli_installed", "api_key_valid"]);
+const CRITICAL_CHECKS = new Set<DiagnosticCheckId>(["cli_installed", "api_key_valid"]);
 
 export type PreflightResult = {
   ok: boolean;
@@ -28,23 +59,27 @@ export type PreflightResult = {
 
 /** Injectable deps for testing without module-level mocks. */
 export type DiagnosticDeps = {
-  getDiagnosticStrategy: typeof defaultGetStrategy;
-  runDiagnostics: typeof defaultRunDiagnostics;
-  formatDiagnosticSummary: typeof defaultFormatSummary;
+  getDiagnosticStrategy: (command: string) => DiagnosticStrategy | null;
+  runDiagnostics: (strategy: DiagnosticStrategy, ctx: DiagnosticContext) => Promise<DiagnosticReport>;
+  formatDiagnosticSummary: (report: DiagnosticReport) => string;
 };
 
-const defaultDeps: DiagnosticDeps = {
-  getDiagnosticStrategy: defaultGetStrategy,
-  runDiagnostics: defaultRunDiagnostics,
-  formatDiagnosticSummary: defaultFormatSummary,
-};
+async function loadDefaultDeps(): Promise<DiagnosticDeps> {
+  const mod = await import("smithers-orchestrator/src/agents/diagnostics");
+  return {
+    getDiagnosticStrategy: mod.getDiagnosticStrategy,
+    runDiagnostics: mod.runDiagnostics,
+    formatDiagnosticSummary: mod.formatDiagnosticSummary,
+  };
+}
 
 export async function runPreflightDiagnostics(opts: {
   enabledAgents: string[];
   cwd: string;
   deps?: DiagnosticDeps;
 }): Promise<PreflightResult> {
-  const { enabledAgents, cwd, deps = defaultDeps } = opts;
+  const { enabledAgents, cwd } = opts;
+  const deps = opts.deps ?? await loadDefaultDeps();
   const { getDiagnosticStrategy, runDiagnostics, formatDiagnosticSummary } = deps;
 
   // Filter out undefined env values to satisfy Record<string, string>
