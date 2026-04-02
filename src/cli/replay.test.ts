@@ -2,10 +2,11 @@
  * Tests for ralphinho replay command.
  *
  * Strategy: mock the smithers time-travel APIs and assert CLI behavior
- * (success output, error exit, argument parsing).
+ * (success output, error propagation, argument parsing).
  */
 
 import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { captureOutput } from "./__tests__/capture-output";
 
 // ── Mock infrastructure ──────────────────────────────────────────────
 
@@ -95,20 +96,14 @@ describe("runReplay", () => {
   });
 
   test("calls replayFromCheckpoint and prints forked run ID on success", async () => {
-    const logs: string[] = [];
-    const origWrite = process.stdout.write;
-    process.stdout.write = ((chunk: any) => {
-      logs.push(String(chunk));
-      return true;
-    }) as any;
-
+    const cap = captureOutput();
     try {
       await runReplay({
         runId: "run-001",
         dbPath: "/tmp/test.db",
       });
     } finally {
-      process.stdout.write = origWrite;
+      cap.restore();
     }
 
     expect(mockReplayFromCheckpoint).toHaveBeenCalledTimes(1);
@@ -117,14 +112,11 @@ describe("runReplay", () => {
       expect.objectContaining({ parentRunId: "run-001" }),
     );
 
-    const allLogs = logs.join("");
-    expect(allLogs).toContain("forked-run-001");
+    expect(cap.allStdout()).toContain("forked-run-001");
   });
 
   test("passes frame number when provided", async () => {
-    const origWrite = process.stdout.write;
-    process.stdout.write = (() => true) as any;
-
+    const cap = captureOutput();
     try {
       await runReplay({
         runId: "run-001",
@@ -132,7 +124,7 @@ describe("runReplay", () => {
         frame: 5,
       });
     } finally {
-      process.stdout.write = origWrite;
+      cap.restore();
     }
 
     expect(mockReplayFromCheckpoint).toHaveBeenCalledWith(
@@ -141,79 +133,40 @@ describe("runReplay", () => {
     );
   });
 
-  test("exits with code 1 on invalid run-id (API throws)", async () => {
+  test("throws on invalid run-id (API throws)", async () => {
     mockReplayFromCheckpoint.mockRejectedValue(
       new Error("Run not found: bad-id"),
     );
 
-    const logs: string[] = [];
-    const origWrite = process.stdout.write;
-    const origErrWrite = process.stderr.write;
-    process.stdout.write = ((chunk: any) => {
-      logs.push(String(chunk));
-      return true;
-    }) as any;
-    process.stderr.write = ((chunk: any) => {
-      logs.push(String(chunk));
-      return true;
-    }) as any;
-
-    const origExit = process.exit;
-    let exitCode: number | undefined;
-    process.exit = ((code: number) => {
-      exitCode = code;
-      throw new Error("EXIT");
-    }) as any;
-
+    const cap = captureOutput();
     try {
-      await runReplay({
-        runId: "bad-id",
-        dbPath: "/tmp/test.db",
-      });
-    } catch (e: any) {
-      if (e.message !== "EXIT") throw e;
+      await expect(
+        runReplay({
+          runId: "bad-id",
+          dbPath: "/tmp/test.db",
+        }),
+      ).rejects.toThrow("Run not found");
     } finally {
-      process.stdout.write = origWrite;
-      process.stderr.write = origErrWrite;
-      process.exit = origExit;
+      cap.restore();
     }
-
-    expect(exitCode).toBe(1);
-    const allLogs = logs.join("");
-    expect(allLogs).toContain("Run not found");
   });
 
-  test("exits with code 1 when DB cannot be opened", async () => {
+  test("throws when DB cannot be opened", async () => {
     mockOpenSmithersDb.mockRejectedValue(
       new Error("SQLITE_CANTOPEN: unable to open database"),
     );
 
-    const origWrite = process.stdout.write;
-    const origErrWrite = process.stderr.write;
-    process.stdout.write = (() => true) as any;
-    process.stderr.write = (() => true) as any;
-
-    const origExit = process.exit;
-    let exitCode: number | undefined;
-    process.exit = ((code: number) => {
-      exitCode = code;
-      throw new Error("EXIT");
-    }) as any;
-
+    const cap = captureOutput();
     try {
-      await runReplay({
-        runId: "run-001",
-        dbPath: "/tmp/nonexistent.db",
-      });
-    } catch (e: any) {
-      if (e.message !== "EXIT") throw e;
+      await expect(
+        runReplay({
+          runId: "run-001",
+          dbPath: "/tmp/nonexistent.db",
+        }),
+      ).rejects.toThrow("SQLITE_CANTOPEN");
     } finally {
-      process.stdout.write = origWrite;
-      process.stderr.write = origErrWrite;
-      process.exit = origExit;
+      cap.restore();
     }
-
-    expect(exitCode).toBe(1);
   });
 
   test("calls cleanup on adapter after replay succeeds", async () => {
@@ -223,16 +176,14 @@ describe("runReplay", () => {
       cleanup: cleanupFn,
     });
 
-    const origWrite = process.stdout.write;
-    process.stdout.write = (() => true) as any;
-
+    const cap = captureOutput();
     try {
       await runReplay({
         runId: "run-001",
         dbPath: "/tmp/test.db",
       });
     } finally {
-      process.stdout.write = origWrite;
+      cap.restore();
     }
 
     expect(cleanupFn).toHaveBeenCalledTimes(1);

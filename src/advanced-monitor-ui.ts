@@ -289,8 +289,8 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
     mergeQueueActivity: null, schedulerReasoning: null, discoveryCount: 0,
   };
   let selectedIdx = 0;
-  // focus: pipeline = left panel; jobs/events/logs = right panels
-  let focus: "pipeline" | "jobs" | "events" | "logs" = "pipeline";
+  // focus: pipeline = left panel; jobs/events/logs/snapshots = right panels
+  let focus: MonitorFocus = "pipeline";
   let detail: TicketDetail | null = null;
   let isRunning = true;
   let lastError: string | null = null;
@@ -428,6 +428,7 @@ const root = new BoxRenderable(renderer, {
     jobsBox.borderColor = (focus === "jobs" || focus === "detail" as any) ? c.selected : c.border;
     eventsBox.borderColor = focus === "events" ? c.selected : c.border;
     logsBox.borderColor = focus === "logs" ? c.selected : c.border;
+    snapshotsBox.borderColor = focus === "snapshots" ? c.selected : c.border;
 
     const rendered = renderMonitorSnapshot(data, {
       selectedIdx,
@@ -498,6 +499,18 @@ const root = new BoxRenderable(renderer, {
     logsText.content = logLines.length === 0
       ? "No output captured"
       : logLines.slice(-40).join("\n");
+
+    // ── Snapshots panel ──
+    snapshotsBox.title = ` Snapshots (${recentSnapshots.length}) `;
+    if (recentSnapshots.length === 0) {
+      snapshotsText.content = "No snapshots yet";
+    } else {
+      snapshotsText.content = recentSnapshots.map(s => {
+        const ts = new Date(s.createdAtMs).toLocaleTimeString();
+        const hash = s.contentHash.slice(0, 8);
+        return `Frame ${s.frameNo}  ${ts}  ${hash}`;
+      }).join("\n");
+    }
 
     renderer.requestRender();
   }
@@ -582,6 +595,22 @@ const root = new BoxRenderable(renderer, {
 
       data = nextData;
 
+      // Fetch recent snapshots (up to 5) from the DB
+      try {
+        const db = new Database(dbPath, { readonly: true });
+        const rows = db.query(
+          `SELECT frame_no, created_at_ms, content_hash FROM _smithers_snapshots WHERE run_id = ? ORDER BY frame_no DESC LIMIT 5`
+        ).all(runId) as Array<{ frame_no: number; created_at_ms: number; content_hash: string }>;
+        db.close();
+        recentSnapshots = rows.map(r => ({
+          frameNo: r.frame_no,
+          createdAtMs: r.created_at_ms,
+          contentHash: r.content_hash,
+        })).reverse(); // chronological order
+      } catch {
+        // Snapshot table may not exist yet — ignore
+      }
+
       if (selectedIdx >= data.tickets.length) selectedIdx = Math.max(0, data.tickets.length - 1);
     } catch (err) {
       lastError = `Poll failed: ${err instanceof Error ? err.message : "unknown"}`;
@@ -610,7 +639,7 @@ const root = new BoxRenderable(renderer, {
 
     // Tab — cycle focus: pipeline → jobs → events → logs → pipeline
     if (seq === "\t") {
-      const modes: Array<typeof focus> = ["pipeline", "jobs", "events", "logs"];
+      const modes: Array<MonitorFocus> = ["pipeline", "jobs", "events", "logs", "snapshots"];
       const base = focus;
       const idx = modes.indexOf(base);
       focus = modes[(idx + 1) % modes.length];
@@ -643,7 +672,7 @@ const root = new BoxRenderable(renderer, {
     }
 
     // Scroll in focused right panel
-    const scrollMap: Record<string, any> = { jobs: jobsScroll, events: eventsScroll, logs: logsScroll };
+    const scrollMap: Record<string, any> = { jobs: jobsScroll, events: eventsScroll, logs: logsScroll, snapshots: snapshotsScroll };
     const activeScroll = scrollMap[focus];
     if (activeScroll) {
       if (seq === "\x1b[A") { activeScroll.scrollBy(-3, "step"); return true; }

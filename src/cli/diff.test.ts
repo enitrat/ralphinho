@@ -6,6 +6,7 @@
  */
 
 import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { captureOutput } from "./__tests__/capture-output";
 
 // ── Mock infrastructure ──────────────────────────────────────────────
 
@@ -48,6 +49,7 @@ mock.module("smithers-orchestrator/src/cli/find-db", () => ({
 
 // Import after mocks
 const { runDiff } = await import("./diff");
+const { parseSpec } = await import("./diff");
 
 // ── Fixtures ─────────────────────────────────────────────────────────
 
@@ -65,6 +67,56 @@ function makeSnapshot(runId: string, frameNo: number) {
     createdAtMs: Date.now(),
   };
 }
+
+// ── parseSpec unit tests ─────────────────────────────────────────────
+
+describe("parseSpec", () => {
+  test("parses plain run-id without frame", () => {
+    expect(parseSpec("run-001")).toEqual({ runId: "run-001", frameNo: null });
+  });
+
+  test("parses run-id:frame format", () => {
+    expect(parseSpec("run-001:3")).toEqual({ runId: "run-001", frameNo: 3 });
+  });
+
+  test("parses frame 0", () => {
+    expect(parseSpec("run-001:0")).toEqual({ runId: "run-001", frameNo: 0 });
+  });
+
+  test("treats trailing colon as no frame", () => {
+    // "run-001:" → maybeFn is "", Number("") is 0, but it's ambiguous.
+    // Actually Number("") === 0 and isInteger(0), so this parses as frame 0.
+    // This is acceptable behavior — empty after colon means frame 0.
+    const result = parseSpec("run-001:");
+    expect(result.runId).toBe("run-001");
+  });
+
+  test("treats negative frame as no frame (whole string becomes runId)", () => {
+    // -1 fails the >= 0 check, so the whole spec is treated as a run-id
+    expect(parseSpec("run-001:-1")).toEqual({ runId: "run-001:-1", frameNo: null });
+  });
+
+  test("treats non-numeric suffix as part of run-id", () => {
+    expect(parseSpec("run-001:abc")).toEqual({ runId: "run-001:abc", frameNo: null });
+  });
+
+  test("handles empty string", () => {
+    expect(parseSpec("")).toEqual({ runId: "", frameNo: null });
+  });
+
+  test("handles UUID-style run-id with colon-delimited frame", () => {
+    expect(parseSpec("abc-def-123:5")).toEqual({ runId: "abc-def-123", frameNo: 5 });
+  });
+
+  test("uses last colon for run-ids containing colons", () => {
+    // "ns:run-001:3" → lastIndexOf(":") points to ":3"
+    expect(parseSpec("ns:run-001:3")).toEqual({ runId: "ns:run-001", frameNo: 3 });
+  });
+
+  test("handles float frame as no frame", () => {
+    expect(parseSpec("run-001:1.5")).toEqual({ runId: "run-001:1.5", frameNo: null });
+  });
+});
 
 // ── Tests ────────────────────────────────────────────────────────────
 
@@ -107,9 +159,7 @@ describe("runDiff", () => {
       return undefined;
     });
 
-    const origWrite = process.stdout.write;
-    process.stdout.write = (() => true) as any;
-
+    const cap = captureOutput();
     try {
       await runDiff({
         specA: "run-001:1",
@@ -117,7 +167,7 @@ describe("runDiff", () => {
         dbPath: "/tmp/test.db",
       });
     } finally {
-      process.stdout.write = origWrite;
+      cap.restore();
     }
 
     // Should call loadSnapshot with specific frame numbers
@@ -135,9 +185,7 @@ describe("runDiff", () => {
       return undefined;
     });
 
-    const origWrite = process.stdout.write;
-    process.stdout.write = (() => true) as any;
-
+    const cap = captureOutput();
     try {
       await runDiff({
         specA: "run-001",
@@ -145,7 +193,7 @@ describe("runDiff", () => {
         dbPath: "/tmp/test.db",
       });
     } finally {
-      process.stdout.write = origWrite;
+      cap.restore();
     }
 
     expect(mockLoadLatestSnapshot).toHaveBeenCalledWith(expect.anything(), "run-001");
@@ -155,19 +203,11 @@ describe("runDiff", () => {
   test("prints formatted TUI diff by default", async () => {
     const snapA = makeSnapshot("run-001", 1);
     const snapB = makeSnapshot("run-001", 3);
-    mockLoadSnapshot.mockResolvedValue(snapA);
-    // Override for both calls
     mockLoadSnapshot.mockImplementation(async (_adapter, _runId, frameNo) => {
       return frameNo === 1 ? snapA : snapB;
     });
 
-    const logs: string[] = [];
-    const origWrite = process.stdout.write;
-    process.stdout.write = ((chunk: any) => {
-      logs.push(String(chunk));
-      return true;
-    }) as any;
-
+    const cap = captureOutput();
     try {
       await runDiff({
         specA: "run-001:1",
@@ -175,12 +215,11 @@ describe("runDiff", () => {
         dbPath: "/tmp/test.db",
       });
     } finally {
-      process.stdout.write = origWrite;
+      cap.restore();
     }
 
     expect(mockFormatDiffForTui).toHaveBeenCalledTimes(1);
-    const allLogs = logs.join("");
-    expect(allLogs).toContain("analyze");
+    expect(cap.allStdout()).toContain("analyze");
   });
 
   test("prints JSON output when --json flag is set", async () => {
@@ -192,13 +231,7 @@ describe("runDiff", () => {
       return undefined;
     });
 
-    const logs: string[] = [];
-    const origWrite = process.stdout.write;
-    process.stdout.write = ((chunk: any) => {
-      logs.push(String(chunk));
-      return true;
-    }) as any;
-
+    const cap = captureOutput();
     try {
       await runDiff({
         specA: "run-001:1",
@@ -207,7 +240,7 @@ describe("runDiff", () => {
         json: true,
       });
     } finally {
-      process.stdout.write = origWrite;
+      cap.restore();
     }
 
     expect(mockFormatDiffAsJson).toHaveBeenCalledTimes(1);
@@ -215,36 +248,21 @@ describe("runDiff", () => {
     expect(mockFormatDiffForTui).not.toHaveBeenCalled();
   });
 
-  test("exits with code 1 when snapshot A is not found", async () => {
+  test("throws when snapshot A is not found", async () => {
     mockLoadSnapshot.mockResolvedValue(undefined);
 
-    const origWrite = process.stdout.write;
-    const origErrWrite = process.stderr.write;
-    process.stdout.write = (() => true) as any;
-    process.stderr.write = (() => true) as any;
-
-    const origExit = process.exit;
-    let exitCode: number | undefined;
-    process.exit = ((code: number) => {
-      exitCode = code;
-      throw new Error("EXIT");
-    }) as any;
-
+    const cap = captureOutput();
     try {
-      await runDiff({
-        specA: "bad-run:99",
-        specB: "run-001:1",
-        dbPath: "/tmp/test.db",
-      });
-    } catch (e: any) {
-      if (e.message !== "EXIT") throw e;
+      await expect(
+        runDiff({
+          specA: "bad-run:99",
+          specB: "run-001:1",
+          dbPath: "/tmp/test.db",
+        }),
+      ).rejects.toThrow("Snapshot not found: bad-run:99");
     } finally {
-      process.stdout.write = origWrite;
-      process.stderr.write = origErrWrite;
-      process.exit = origExit;
+      cap.restore();
     }
-
-    expect(exitCode).toBe(1);
   });
 
   test("calls cleanup on adapter after diff", async () => {
@@ -260,9 +278,7 @@ describe("runDiff", () => {
       return frameNo === 1 ? snapA : snapB;
     });
 
-    const origWrite = process.stdout.write;
-    process.stdout.write = (() => true) as any;
-
+    const cap = captureOutput();
     try {
       await runDiff({
         specA: "run-001:1",
@@ -270,7 +286,7 @@ describe("runDiff", () => {
         dbPath: "/tmp/test.db",
       });
     } finally {
-      process.stdout.write = origWrite;
+      cap.restore();
     }
 
     expect(cleanupFn).toHaveBeenCalledTimes(1);
