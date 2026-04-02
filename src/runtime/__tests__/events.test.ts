@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 
-import { parseEvent, readEventLog } from "../events";
+import { parseEvent, readEventLog, writeEventLog } from "../events";
 
 const TMP_PREFIX = `/tmp/super-ralph-events-${process.pid}-`;
 const created: string[] = [];
@@ -9,6 +9,12 @@ const created: string[] = [];
 async function writeTmp(contents: string): Promise<string> {
   const path = `${TMP_PREFIX}${Date.now()}-${Math.random().toString(16).slice(2)}.ndjson`;
   await Bun.write(path, contents);
+  created.push(path);
+  return path;
+}
+
+function tmpPath(): string {
+  const path = `${TMP_PREFIX}${Date.now()}-${Math.random().toString(16).slice(2)}.ndjson`;
   created.push(path);
   return path;
 }
@@ -285,5 +291,190 @@ describe("parseEvent", () => {
     expect(result).not.toBeNull();
     expect((result as any).unitsLanded).toEqual(["a"]);
     expect((result as any).unitsSemanticallyComplete).toEqual(["b", "c"]);
+  });
+
+  // ── New event types ──────────────────────────────────────────────
+
+  test("parses token-usage-reported with all fields", () => {
+    const input = {
+      type: "token-usage-reported" as const,
+      timestamp: 13000,
+      runId: "run-1",
+      nodeId: "n1",
+      inputTokens: 100,
+      outputTokens: 200,
+      cacheReadTokens: 50,
+      cacheWriteTokens: 10,
+      reasoningTokens: 30,
+      durationMs: 1500,
+    };
+    expect(parseEvent(input)).toEqual(input);
+  });
+
+  test("parses token-usage-reported with optional fields omitted", () => {
+    const input = {
+      type: "token-usage-reported" as const,
+      timestamp: 13001,
+      runId: "run-1",
+      nodeId: "n1",
+      inputTokens: 100,
+      outputTokens: 200,
+      durationMs: 1500,
+    };
+    expect(parseEvent(input)).toEqual(input);
+  });
+
+  test("parses agent-event", () => {
+    const input = {
+      type: "agent-event" as const,
+      timestamp: 14000,
+      runId: "run-1",
+      nodeId: "n1",
+      agentType: "claude",
+      message: "started working",
+    };
+    expect(parseEvent(input)).toEqual(input);
+  });
+
+  test("parses scorer-started", () => {
+    const input = {
+      type: "scorer-started" as const,
+      timestamp: 15000,
+      runId: "run-1",
+      nodeId: "n1",
+      scorerName: "quality",
+    };
+    expect(parseEvent(input)).toEqual(input);
+  });
+
+  test("parses scorer-finished", () => {
+    const input = {
+      type: "scorer-finished" as const,
+      timestamp: 15001,
+      runId: "run-1",
+      nodeId: "n1",
+      scorerName: "quality",
+      score: 0.95,
+    };
+    expect(parseEvent(input)).toEqual(input);
+  });
+
+  test("parses scorer-failed", () => {
+    const input = {
+      type: "scorer-failed" as const,
+      timestamp: 15002,
+      runId: "run-1",
+      nodeId: "n1",
+      scorerName: "quality",
+      error: "timeout",
+    };
+    expect(parseEvent(input)).toEqual(input);
+  });
+
+  test("parses snapshot-captured", () => {
+    const input = {
+      type: "snapshot-captured" as const,
+      timestamp: 16000,
+      runId: "run-1",
+      snapshotId: "snap-1",
+    };
+    expect(parseEvent(input)).toEqual(input);
+  });
+
+  test("parses run-forked", () => {
+    const input = {
+      type: "run-forked" as const,
+      timestamp: 17000,
+      runId: "run-2",
+      parentRunId: "run-1",
+    };
+    expect(parseEvent(input)).toEqual(input);
+  });
+
+  test("parses replay-started", () => {
+    const input = {
+      type: "replay-started" as const,
+      timestamp: 18000,
+      runId: "run-3",
+      sourceRunId: "run-1",
+    };
+    expect(parseEvent(input)).toEqual(input);
+  });
+
+  test("parses run-hijack-requested", () => {
+    const input = {
+      type: "run-hijack-requested" as const,
+      timestamp: 19000,
+      runId: "run-1",
+      requestedBy: "user-1",
+    };
+    expect(parseEvent(input)).toEqual(input);
+  });
+
+  test("parses run-hijacked", () => {
+    const input = {
+      type: "run-hijacked" as const,
+      timestamp: 19001,
+      runId: "run-1",
+      hijackedBy: "user-1",
+    };
+    expect(parseEvent(input)).toEqual(input);
+  });
+});
+
+describe("writeEventLog", () => {
+  test("writes valid events as NDJSON lines", async () => {
+    const path = tmpPath();
+    const events = [
+      { type: "node-started" as const, timestamp: 1, runId: "r", nodeId: "n", unitId: "u", stageName: "implement" as const },
+      { type: "node-completed" as const, timestamp: 2, runId: "r", nodeId: "n", unitId: "u", stageName: "implement" as const },
+    ];
+    await writeEventLog(path, events);
+    const raw = await Bun.file(path).text();
+    const lines = raw.trim().split("\n");
+    expect(lines).toHaveLength(2);
+    for (const line of lines) {
+      expect(() => JSON.parse(line)).not.toThrow();
+    }
+  });
+
+  test("round-trip: writeEventLog then readEventLog returns same events", async () => {
+    const path = tmpPath();
+    const events = [
+      { type: "node-started" as const, timestamp: 1, runId: "r", nodeId: "n", unitId: "u", stageName: "implement" as const },
+      { type: "token-usage-reported" as const, timestamp: 2, runId: "r", nodeId: "n", inputTokens: 10, outputTokens: 20, durationMs: 100 },
+    ];
+    await writeEventLog(path, events);
+    const read = await readEventLog(path);
+    expect(read).toEqual(events);
+  });
+
+  test("appends to existing file", async () => {
+    const path = tmpPath();
+    const event1 = { type: "node-started" as const, timestamp: 1, runId: "r", nodeId: "n", unitId: "u", stageName: "implement" as const };
+    const event2 = { type: "node-completed" as const, timestamp: 2, runId: "r", nodeId: "n", unitId: "u", stageName: "implement" as const };
+    await writeEventLog(path, [event1]);
+    await writeEventLog(path, [event2]);
+    const read = await readEventLog(path);
+    expect(read).toHaveLength(2);
+    expect(read[0]).toEqual(event1);
+    expect(read[1]).toEqual(event2);
+  });
+
+  test("skips invalid events", async () => {
+    const path = tmpPath();
+    const validEvent = { type: "node-started" as const, timestamp: 1, runId: "r", nodeId: "n", unitId: "u", stageName: "implement" as const };
+    const invalidEvent = { type: "bogus" as any, timestamp: 1 } as any;
+    await writeEventLog(path, [validEvent, invalidEvent]);
+    const read = await readEventLog(path);
+    expect(read).toHaveLength(1);
+    expect(read[0]).toEqual(validEvent);
+  });
+
+  test("no-op when events array is empty", async () => {
+    const path = tmpPath();
+    await writeEventLog(path, []);
+    const exists = await Bun.file(path).exists();
+    expect(exists).toBe(false);
   });
 });

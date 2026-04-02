@@ -2,9 +2,11 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import React from "react";
 import { Parallel, Loop, Sequence, Task } from "smithers-orchestrator";
-import type { AgentLike, SmithersCtx } from "smithers-orchestrator";
+import type { AgentLike, SmithersCtx, ScorersMap } from "smithers-orchestrator";
+import { schemaAdherenceScorer, relevancyScorer } from "smithers-orchestrator";
 import type { Issue } from "../schemas";
 import type { WorkUnit } from "../types";
+import { reviewCoverageScorer } from "../scorers";
 import CodeReviewPrompt from "../prompts/CodeReview.mdx";
 import PrdReviewPrompt from "../prompts/PrdReview.mdx";
 import ReviewFixPrompt from "../prompts/ReviewFix.mdx";
@@ -18,6 +20,7 @@ export type ReviewLoopAgents = {
   prdReviewer: AgentLike | AgentLike[];
   codeReviewer: AgentLike | AgentLike[];
   reviewFixer: AgentLike | AgentLike[];
+  judge?: AgentLike;
 };
 
 export type ReviewLoopFallbacks = Partial<{
@@ -97,6 +100,17 @@ export function ReviewLoop({
 }: ReviewLoopProps) {
   const uid = unit.id;
   const tier = unit.tier;
+  const judge = agents.judge;
+
+  const schemaScorer = schemaAdherenceScorer();
+  const baseScorers: ScorersMap = {
+    schemaAdherence: { scorer: schemaScorer },
+    ...(judge ? { relevancy: { scorer: relevancyScorer(judge) } } : {}),
+  };
+  const codeReviewScorers: ScorersMap = {
+    ...baseScorers,
+    ...(judge ? { reviewCoverage: { scorer: reviewCoverageScorer(judge) } } : {}),
+  };
 
   const reviewLoopResult = ctx.latest("review_loop_result", `${uid}:review-loop`);
   const iterationCount = reviewLoopResult?.iterationCount ?? 0;
@@ -139,6 +153,7 @@ export function ReviewLoop({
             agent={agents.tester}
             fallbackAgent={fallbacks?.tester}
             retries={STAGE_RETRY_POLICIES["test"].retries}
+            scorers={baseScorers}
             meta={{
               dependsOn: [stageNodeId(uid, "implement")],
               retryPolicy: STAGE_RETRY_POLICIES["test"],
@@ -165,6 +180,7 @@ export function ReviewLoop({
                 agent={agents.prdReviewer}
                 fallbackAgent={fallbacks?.prdReviewer}
                 retries={STAGE_RETRY_POLICIES["prd-review"].retries}
+                scorers={baseScorers}
                 meta={{
                   dependsOn: [stageNodeId(uid, "implement")],
                   retryPolicy: STAGE_RETRY_POLICIES["prd-review"],
@@ -199,6 +215,7 @@ export function ReviewLoop({
                 agent={agents.codeReviewer}
                 fallbackAgent={fallbacks?.codeReviewer}
                 retries={STAGE_RETRY_POLICIES["code-review"].retries}
+                scorers={codeReviewScorers}
                 meta={{
                   dependsOn: [stageNodeId(uid, "implement")],
                   retryPolicy: STAGE_RETRY_POLICIES["code-review"],

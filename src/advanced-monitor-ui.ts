@@ -120,7 +120,7 @@ function stageIcon(s: StageStatus): string {
   }
 }
 
-type MonitorFocus = "pipeline" | "jobs" | "events" | "logs";
+type MonitorFocus = "pipeline" | "jobs" | "events" | "logs" | "snapshots";
 
 export function renderMonitorSnapshot(
   data: PollData,
@@ -398,6 +398,22 @@ const root = new BoxRenderable(renderer, {
   logsBox.add(logsScroll);
   const logsText = new TextRenderable(renderer, { id: "logsText", content: "No output captured" });
   logsScroll.add(logsText);
+
+  // Panel 4: Snapshot Timeline
+  const snapshotsBox = new BoxRenderable(renderer, {
+    id: "snapshotsBox", border: true, title: " Snapshots ", flexGrow: 1,
+    flexDirection: "column", borderColor: c.border,
+  });
+  rightCol.add(snapshotsBox);
+
+  const snapshotsScroll = new ScrollBoxRenderable(renderer, { id: "snapshotsScroll", flexGrow: 1, scrollY: true });
+  snapshotsBox.add(snapshotsScroll);
+  const snapshotsText = new TextRenderable(renderer, { id: "snapshotsText", content: "No snapshots yet" });
+  snapshotsScroll.add(snapshotsText);
+
+  // Snapshot timeline state
+  type SnapshotEntry = { frameNo: number; createdAtMs: number; contentHash: string };
+  let recentSnapshots: SnapshotEntry[] = [];
 
   const footer = new TextRenderable(renderer, {
     id: "footer", height: 1,

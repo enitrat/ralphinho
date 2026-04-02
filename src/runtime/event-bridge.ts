@@ -408,6 +408,37 @@ export async function pollEventsFromDb(
     } catch {
       // pass tracker table may be unavailable early in startup.
     }
+
+    try {
+      const tokenRows = db.query(
+        "SELECT node_id, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, duration_ms, timestamp_ms FROM _smithers_token_usage WHERE run_id = ? ORDER BY timestamp_ms ASC",
+      ).all(runId) as Array<{
+        node_id: string;
+        input_tokens: number;
+        output_tokens: number;
+        cache_read_tokens: number | null;
+        cache_write_tokens: number | null;
+        reasoning_tokens: number | null;
+        duration_ms: number;
+        timestamp_ms: number | null;
+      }>;
+      for (const row of tokenRows) {
+        events.push({
+          type: "token-usage-reported",
+          timestamp: row.timestamp_ms ?? now,
+          runId,
+          nodeId: row.node_id,
+          inputTokens: row.input_tokens,
+          outputTokens: row.output_tokens,
+          ...(row.cache_read_tokens != null ? { cacheReadTokens: row.cache_read_tokens } : {}),
+          ...(row.cache_write_tokens != null ? { cacheWriteTokens: row.cache_write_tokens } : {}),
+          ...(row.reasoning_tokens != null ? { reasoningTokens: row.reasoning_tokens } : {}),
+          durationMs: row.duration_ms,
+        });
+      }
+    } catch {
+      // _smithers_token_usage table may not exist yet.
+    }
   } finally {
     db.close();
   }

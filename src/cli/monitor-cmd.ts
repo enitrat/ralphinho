@@ -60,6 +60,17 @@ export async function runMonitor(opts: {
 
   const prompt = config.rfcPath ?? "";
 
+  // ── Prometheus metrics server ────────────────────────────────────────
+  const prometheusPort =
+    typeof opts.flags["prometheus-port"] === "string"
+      ? Number(opts.flags["prometheus-port"])
+      : undefined;
+  if (prometheusPort !== undefined) {
+    const { startPrometheusServer } = await import("./prometheus");
+    const prom = startPrometheusServer({ port: prometheusPort });
+    log.info(`📊 Prometheus metrics at http://localhost:${prom.port}/metrics`);
+  }
+
   log.info(`Launching monitor for run ${runId}...\n`);
 
   const cliDir = import.meta.dir;

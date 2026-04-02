@@ -13,8 +13,8 @@
  *   ralphinho status                   Show current state
  */
 
-import { resolve } from "node:path";
-import { parseArgs } from "./shared";
+import { join, resolve } from "node:path";
+import { parseArgs, getRalphDir } from "./shared";
 import { createLogger } from "../runtime/logger";
 
 const log = createLogger({ context: { phase: "cli" } });
@@ -34,11 +34,16 @@ Usage:
   ralphinho run --force                      Attempt resume without prompts
   ralphinho monitor --run-id <run-id>        Attach TUI to a workflow run
   ralphinho status                           Show current state
+  ralphinho scores <run-id>                  Show aggregated scorer results
+  ralphinho replay <run-id> [--frame N]     Replay a run from a checkpoint
+  ralphinho diff <a> <b> [--json]           Diff two snapshots (run-id or run-id:frame)
 
 Global Options:
   --cwd <path>                Repo root (default: current directory)
   --max-concurrency <n>       Max parallel work units (default: 6)
   --force                     Skip prompts and attempt resume
+  --prometheus-port <port>    Start Prometheus /metrics server on <port>
+  --skip-diagnostics          Skip pre-flight agent diagnostics
   --help                      Show this help
 
 Linear Integration:
@@ -60,6 +65,9 @@ Examples:
   ralphinho run
   ralphinho run --force
   ralphinho run --resume sw-m3abc12-deadbeef
+  ralphinho replay run-001 --frame 2
+  ralphinho diff run-001:1 run-001:3
+  ralphinho diff run-001 run-002 --json
 
   # Linear integration
   ralphinho run --linear --team <team-id>              # improvinho: push findings to Linear
@@ -141,6 +149,41 @@ async function main() {
     case "status": {
       const { runStatus } = await import("./status");
       return runStatus({ repoRoot });
+    }
+
+    case "replay": {
+      const runId = parsed.positional[1];
+      if (!runId) {
+        log.error('Usage: ralphinho replay <run-id> [--frame N] [--node <name>] [--label <label>] [--restore-vcs]');
+        process.exit(1);
+      }
+      const { runReplay } = await import("./replay");
+      const dbPath = join(getRalphDir(repoRoot), "workflow.db");
+      return runReplay({
+        runId,
+        dbPath,
+        frame: typeof parsed.flags.frame === "string" ? Number(parsed.flags.frame) : undefined,
+        node: typeof parsed.flags.node === "string" ? parsed.flags.node : undefined,
+        label: typeof parsed.flags.label === "string" ? parsed.flags.label : undefined,
+        restoreVcs: parsed.flags["restore-vcs"] === true,
+      });
+    }
+
+    case "diff": {
+      const specA = parsed.positional[1];
+      const specB = parsed.positional[2];
+      if (!specA || !specB) {
+        log.error('Usage: ralphinho diff <run-a> <run-b> [--json]');
+        process.exit(1);
+      }
+      const { runDiff } = await import("./diff");
+      const diffDbPath = join(getRalphDir(repoRoot), "workflow.db");
+      return runDiff({
+        specA,
+        specB,
+        dbPath: diffDbPath,
+        json: parsed.flags.json === true,
+      });
     }
 
     default: {

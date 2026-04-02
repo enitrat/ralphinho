@@ -22,6 +22,7 @@ import type { WorkPlan } from "../types";
 import { QualityPipeline, type QualityPipelineAgents, type QualityPipelineFallbacks, type ScheduledOutputs } from "./QualityPipeline";
 import { AgenticMergeQueue, type AgenticMergeQueueTicket } from "./AgenticMergeQueue";
 import { PushAndCreatePR, type PushAndCreatePRTicket } from "./PushAndCreatePR";
+import { Monitor } from "../../../components/Monitor";
 import { buildUnitBranchPrefix, buildUnitWorktreePath } from "./runtimeNames";
 import {
   COMPLETION_REPORT_NODE_ID,
@@ -55,6 +56,8 @@ export type ScheduledWorkflowProps = {
   landingMode?: "merge" | "pr";
   agents: ScheduledWorkflowAgents;
   fallbacks?: QualityPipelineFallbacks & { mergeQueue?: AgentLike };
+  dbPath: string;
+  prompt: string;
 };
 
 // ── Component ────────────────────────────────────────────────────────
@@ -69,6 +72,8 @@ export function ScheduledWorkflow({
   landingMode = "merge",
   agents,
   fallbacks,
+  dbPath,
+  prompt,
 }: ScheduledWorkflowProps) {
   const baseBranch = workPlan.baseBranch;
   const units = workPlan.units;
@@ -77,6 +82,7 @@ export function ScheduledWorkflow({
   const testChecks = Object.values(workPlan.repo.testCmds);
   const verificationChecks = Array.from(new Set([...buildChecks, ...testChecks]));
   const snapshot = buildSnapshot(ctx);
+  const showMonitor = process.stdout.isTTY && process.env.SUPER_RALPH_SKIP_MONITOR !== "1";
 
   // ── Landing status ──────────────────────────────────────────────
   const unitState = (unitId: string): UnitState => getUnitState(snapshot, units, unitId);
@@ -117,6 +123,15 @@ export function ScheduledWorkflow({
 
   return (
     <Sequence>
+      {showMonitor && (
+        <Monitor
+          dbPath={dbPath}
+          runId={ctx.runId}
+          config={{ projectName: workPlan.repo.projectName }}
+          prompt={prompt}
+          repoRoot={repoRoot}
+        />
+      )}
       <Loop
         id="outer-ralph-loop"
         until={done}

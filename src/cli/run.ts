@@ -68,6 +68,11 @@ export async function runWorkflow(opts: {
   const resumeRunId =
     typeof flags.resume === "string" ? flags.resume : null;
   const force = flags.force === true;
+  const skipDiagnostics = flags["skip-diagnostics"] === true;
+  const prometheusPort =
+    typeof flags["prometheus-port"] === "string"
+      ? Number(flags["prometheus-port"])
+      : undefined;
   const linearEnabled = flags.linear === true;
   const linearTeamId = typeof flags.team === "string" ? flags.team : (process.env.LINEAR_TEAM_ID ?? null);
   const linearLabel = typeof flags.label === "string" ? flags.label : (process.env.LINEAR_LABEL ?? "ralph-approved");
@@ -78,6 +83,13 @@ export async function runWorkflow(opts: {
   if (linearEnabled && !linearTeamId) {
     log.error("Error: --linear requires --team <team-id> or LINEAR_TEAM_ID env var.");
     process.exit(1);
+  }
+
+  // ── Prometheus metrics server ────────────────────────────────────────
+  if (prometheusPort !== undefined) {
+    const { startPrometheusServer } = await import("./prometheus");
+    const prom = startPrometheusServer({ port: prometheusPort });
+    log.info(`📊 Prometheus metrics at http://localhost:${prom.port}/metrics`);
   }
 
   // Build Linear options (undefined when --linear is not set)
@@ -261,6 +273,22 @@ export async function runWorkflow(opts: {
     if (confirmChoice !== 0) {
       log.info("Cancelled.\n");
       process.exit(0);
+    }
+  }
+
+  // ── Pre-flight diagnostics ──────────────────────────────────────────
+  if (!skipDiagnostics) {
+    const { runPreflightDiagnostics } = await import("./diagnostics");
+    const enabledAgents = Object.entries(config.agents)
+      .filter(([, v]) => v)
+      .map(([k]) => k);
+    const diag = await runPreflightDiagnostics({ enabledAgents, cwd: repoRoot });
+    for (const w of diag.warnings) log.warn(`⚠️  ${w}`);
+    if (!diag.ok) {
+      log.error(
+        `❌ Pre-flight failed for: ${diag.failedAgents.join(", ")}. Fix issues above or use --skip-diagnostics.`,
+      );
+      process.exit(1);
     }
   }
 
