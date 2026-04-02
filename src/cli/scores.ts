@@ -3,6 +3,7 @@
  */
 
 import { createLogger } from "../runtime/logger";
+import { withSmithersDb } from "./shared";
 
 const log = createLogger({ context: { phase: "scores" } });
 
@@ -48,33 +49,25 @@ export async function runScores(opts: {
 }): Promise<void> {
   const { runId, dbPath } = opts;
 
-  const { openSmithersDb } = await import(
-    "smithers-orchestrator/src/cli/find-db"
-  );
   const { aggregateScores } = await import("smithers-orchestrator");
 
-  let cleanup: (() => void) | undefined;
-
   try {
-    const db = await openSmithersDb(dbPath);
-    cleanup = db.cleanup;
+    await withSmithersDb(dbPath, async (adapter) => {
+      const scores = await aggregateScores(adapter, { runId });
 
-    const scores = await aggregateScores(db.adapter, { runId });
+      if (scores.length === 0) {
+        log.error(`No scores found for run "${runId}".`);
+        process.exit(1);
+      }
 
-    if (scores.length === 0) {
-      log.error(`No scores found for run "${runId}".`);
-      process.exit(1);
-    }
-
-    log.info(`\nScores for run: ${runId}\n`);
-    log.info(formatScoresTable(scores));
-    log.info("");
+      log.info(`\nScores for run: ${runId}\n`);
+      log.info(formatScoresTable(scores));
+      log.info("");
+    });
   } catch (err) {
     log.error(
       `Could not open smithers.db at ${dbPath}. Has a workflow run been started?`,
     );
     process.exit(1);
-  } finally {
-    cleanup?.();
   }
 }

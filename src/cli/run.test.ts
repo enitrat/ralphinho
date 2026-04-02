@@ -1,8 +1,9 @@
 /**
  * Tests for CLI batch wiring: --batch flag routing + runBatchFromLinear orchestration.
+ * Also tests --skip-diagnostics flag behavior in runWorkflow.
  *
  * Strategy: mock external dependencies (Linear adapter, scheduler, smithers launch,
- * init-scheduled) and assert call routing and orchestration behavior only.
+ * init-scheduled, diagnostics) and assert call routing and orchestration behavior only.
  */
 
 import { describe, test, expect, mock, beforeEach } from "bun:test";
@@ -86,8 +87,16 @@ mock.module("./init-scheduled", () => ({
   initScheduledWork: mockInitScheduledWork,
 }));
 
+const mockRunPreflightDiagnostics = mock(() =>
+  Promise.resolve({ ok: true, reports: [], failedAgents: [], warnings: [] }),
+);
+
+mock.module("./diagnostics", () => ({
+  runPreflightDiagnostics: mockRunPreflightDiagnostics,
+}));
+
 // Must import AFTER mocks are set up
-const { runBatchFromLinear } = await import("./run");
+const { runBatchFromLinear, runWorkflow } = await import("./run");
 
 // ── Tests ────────────────────────────────────────────────────────────
 
