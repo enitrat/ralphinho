@@ -265,7 +265,7 @@ export type WorkPlanLoadedEvent = z.infer<typeof workPlanLoadedSchema>;
 export type FinalReviewDecisionEvent = z.infer<typeof finalReviewDecisionSchema>;
 export type SemanticCompletionUpdateEvent = z.infer<typeof semanticCompletionUpdateSchema>;
 export type TokenUsageReportedEvent = z.infer<typeof tokenUsageReportedSchema>;
-export type AgentEventEvent = z.infer<typeof agentEventSchema>;
+export type AgentEvent = z.infer<typeof agentEventSchema>;
 export type ScorerStartedEvent = z.infer<typeof scorerStartedSchema>;
 export type ScorerFinishedEvent = z.infer<typeof scorerFinishedSchema>;
 export type ScorerFailedEvent = z.infer<typeof scorerFailedSchema>;
@@ -286,9 +286,19 @@ export function parseEvent(value: unknown): SmithersEvent | null {
 // ── Event log reader ────────────────────────────────────────────
 
 export async function writeEventLog(path: string, events: SmithersEvent[]): Promise<void> {
-  const lines = events
-    .filter((e) => smithersEventSchema.safeParse(e).success)
-    .map((e) => JSON.stringify(e))
+  const lines = events.map((e) => JSON.stringify(e)).join("\n");
+  if (lines) await appendFile(path, lines + "\n", "utf8");
+}
+
+/**
+ * Write unknown data as NDJSON, validating each entry through the event schema first.
+ * Use this when the data source is untrusted (e.g. raw JSON from external input).
+ */
+export async function writeUntrustedEventLog(path: string, data: unknown[]): Promise<void> {
+  const lines = data
+    .map((d) => smithersEventSchema.safeParse(d))
+    .filter((r) => r.success)
+    .map((r) => JSON.stringify(r.data))
     .join("\n");
   if (lines) await appendFile(path, lines + "\n", "utf8");
 }

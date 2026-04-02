@@ -1,7 +1,7 @@
 import React from "react";
 import { Task, Sequence, Worktree } from "smithers-orchestrator";
 import type { SmithersCtx, AgentLike, ScorersMap } from "smithers-orchestrator";
-import { schemaAdherenceScorer } from "smithers-orchestrator";
+import { schemaAdherenceScorer, relevancyScorer } from "smithers-orchestrator";
 import type { WorkUnit, WorkPlan } from "../types";
 import { scheduledOutputSchemas } from "../schemas";
 
@@ -96,9 +96,11 @@ export function QualityPipeline({
 }: QualityPipelineProps) {
   const uid = unit.id;
   const tier = unit.tier;
+  const judge = agents.judge;
 
   const pipelineScorers: ScorersMap = {
     schemaAdherence: { scorer: schemaAdherenceScorer() },
+    ...(judge ? { relevancy: { scorer: relevancyScorer(judge) } } : {}),
   };
 
   // In Loop loops, cross-stage reads must use latest() to see prior iterations.

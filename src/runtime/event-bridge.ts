@@ -59,6 +59,17 @@ const mergeQueueRowSchema = z.object({
   summary: z.string().nullable(),
 });
 
+const tokenUsageRowSchema = z.object({
+  node_id: z.string(),
+  input_tokens: z.number(),
+  output_tokens: z.number(),
+  cache_read_tokens: z.number().nullable(),
+  cache_write_tokens: z.number().nullable(),
+  reasoning_tokens: z.number().nullable(),
+  duration_ms: z.number(),
+  timestamp_ms: z.number().nullable(),
+});
+
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -409,36 +420,28 @@ export async function pollEventsFromDb(
       // pass tracker table may be unavailable early in startup.
     }
 
-    try {
-      const tokenRows = db.query(
-        "SELECT node_id, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, duration_ms, timestamp_ms FROM _smithers_token_usage WHERE run_id = ? ORDER BY timestamp_ms ASC",
-      ).all(runId) as Array<{
-        node_id: string;
-        input_tokens: number;
-        output_tokens: number;
-        cache_read_tokens: number | null;
-        cache_write_tokens: number | null;
-        reasoning_tokens: number | null;
-        duration_ms: number;
-        timestamp_ms: number | null;
-      }>;
-      for (const row of tokenRows) {
-        events.push({
+    const tokenEvents = queryRows(
+      db,
+      "SELECT node_id, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, duration_ms, timestamp_ms FROM _smithers_token_usage WHERE run_id = ? ORDER BY timestamp_ms ASC",
+      [runId],
+      (row): SmithersEvent | null => {
+        const r = tokenUsageRowSchema.safeParse(row);
+        if (!r.success) return null;
+        return {
           type: "token-usage-reported",
-          timestamp: row.timestamp_ms ?? now,
+          timestamp: r.data.timestamp_ms ?? now,
           runId,
-          nodeId: row.node_id,
-          inputTokens: row.input_tokens,
-          outputTokens: row.output_tokens,
-          ...(row.cache_read_tokens != null ? { cacheReadTokens: row.cache_read_tokens } : {}),
-          ...(row.cache_write_tokens != null ? { cacheWriteTokens: row.cache_write_tokens } : {}),
-          ...(row.reasoning_tokens != null ? { reasoningTokens: row.reasoning_tokens } : {}),
-          durationMs: row.duration_ms,
-        });
-      }
-    } catch {
-      // _smithers_token_usage table may not exist yet.
-    }
+          nodeId: r.data.node_id,
+          inputTokens: r.data.input_tokens,
+          outputTokens: r.data.output_tokens,
+          ...(r.data.cache_read_tokens != null ? { cacheReadTokens: r.data.cache_read_tokens } : {}),
+          ...(r.data.cache_write_tokens != null ? { cacheWriteTokens: r.data.cache_write_tokens } : {}),
+          ...(r.data.reasoning_tokens != null ? { reasoningTokens: r.data.reasoning_tokens } : {}),
+          durationMs: r.data.duration_ms,
+        };
+      },
+    );
+    events.push(...tokenEvents);
   } finally {
     db.close();
   }

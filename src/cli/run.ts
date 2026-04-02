@@ -86,10 +86,20 @@ export async function runWorkflow(opts: {
   }
 
   // ── Prometheus metrics server ────────────────────────────────────────
+  let promStop: (() => void) | undefined;
   if (prometheusPort !== undefined) {
-    const { startPrometheusServer } = await import("./prometheus");
-    const prom = startPrometheusServer({ port: prometheusPort });
-    log.info(`📊 Prometheus metrics at http://localhost:${prom.port}/metrics`);
+    try {
+      const { startPrometheusServer } = await import("./prometheus");
+      const prom = startPrometheusServer({ port: prometheusPort });
+      promStop = prom.stop;
+      log.info(`📊 Prometheus metrics at http://localhost:${prom.port}/metrics`);
+      // Ensure cleanup on process exit
+      process.on("exit", () => promStop?.());
+    } catch (err) {
+      log.warn(
+        `⚠️  Prometheus server failed to start on port ${prometheusPort}: ${err instanceof Error ? err.message : String(err)}. Continuing without metrics.`,
+      );
+    }
   }
 
   // Build Linear options (undefined when --linear is not set)
@@ -128,10 +138,7 @@ export async function runWorkflow(opts: {
     process.exit(1);
   }
 
-  const maxConcurrency =
-    typeof flags["max-concurrency"] === "string"
-      ? Math.max(1, Number(flags["max-concurrency"]) || config.maxConcurrency)
-      : config.maxConcurrency;
+  const maxConcurrency = parseMaxConcurrency(flags, config.maxConcurrency);
 
   // ── Execute scheduled work ──────────────────────────────────────────
   const planFileName = config.mode === "review-discovery"
@@ -380,6 +387,15 @@ function reportExit(exitCode: number, label: string): void {
   }
 }
 
+function parseMaxConcurrency(
+  flags: ParsedArgs["flags"],
+  fallback: number,
+): number {
+  return typeof flags["max-concurrency"] === "string"
+    ? Math.max(1, Number(flags["max-concurrency"]) || fallback)
+    : fallback;
+}
+
 function buildPresetEnv(
   ralphDir: string,
   dbPath: string,
@@ -458,10 +474,7 @@ async function runFromLinearTicket(opts: {
     process.exit(1);
   }
 
-  const maxConcurrency =
-    typeof flags["max-concurrency"] === "string"
-      ? Math.max(1, Number(flags["max-concurrency"]) || config.maxConcurrency)
-      : config.maxConcurrency;
+  const maxConcurrency = parseMaxConcurrency(flags, config.maxConcurrency);
 
   const planPath = join(ralphDir, "work-plan.json");
   const dbPath = join(ralphDir, "workflow.db");
@@ -600,10 +613,7 @@ export async function runBatchFromLinear(opts: {
           landingMode: "pr",
           agentOverride: null,
           agents: { claude: true, codex: true, gh: false },
-          maxConcurrency:
-            typeof flags["max-concurrency"] === "string"
-              ? Math.max(1, Number(flags["max-concurrency"]) || 4)
-              : 4,
+          maxConcurrency: parseMaxConcurrency(flags, 4),
           createdAt: new Date().toISOString(),
         },
         null,
@@ -618,10 +628,7 @@ export async function runBatchFromLinear(opts: {
 
     const runId = `sw-batch-${group.id}-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
 
-    const maxConcurrency =
-      typeof flags["max-concurrency"] === "string"
-        ? Math.max(1, Number(flags["max-concurrency"]) || 4)
-        : 4;
+    const maxConcurrency = parseMaxConcurrency(flags, 4);
 
     const exitCode = await launchSmithers({
       mode: "run",

@@ -374,3 +374,22 @@ export const RALPHINHO_DIR = ".ralphinho";
 export function getRalphDir(repoRoot: string): string {
   return join(repoRoot, RALPHINHO_DIR);
 }
+
+// ── Shared DB helper ──────────────────────────────────────────────────
+
+/**
+ * Open the smithers DB, run a callback, and clean up.
+ * Throws on error — callers in ralphinho.ts catch and exit.
+ */
+export async function withSmithersDb<T>(
+  dbPath: string,
+  fn: (adapter: any) => Promise<T>,
+): Promise<T> {
+  const { openSmithersDb } = await import("smithers-orchestrator/src/cli/find-db");
+  const { adapter, cleanup } = await openSmithersDb(dbPath);
+  try {
+    return await fn(adapter);
+  } finally {
+    cleanup();
+  }
+}

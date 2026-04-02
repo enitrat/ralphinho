@@ -44,30 +44,22 @@ export function formatScoresTable(rows: ScoresRow[]): string {
 
 export async function runScores(opts: {
   runId: string;
-  repoRoot: string;
+  dbPath: string;
 }): Promise<void> {
-  const { runId, repoRoot } = opts;
+  const { runId, dbPath } = opts;
 
-  const { findAndOpenDb } = await import(
+  const { openSmithersDb } = await import(
     "smithers-orchestrator/src/cli/find-db"
   );
   const { aggregateScores } = await import("smithers-orchestrator");
 
-  let adapter: Awaited<ReturnType<typeof findAndOpenDb>>["adapter"];
-  let cleanup: () => void;
-  try {
-    const db = await findAndOpenDb(repoRoot);
-    adapter = db.adapter;
-    cleanup = db.cleanup;
-  } catch {
-    log.error(
-      `Could not find smithers.db in ${repoRoot}. Has a workflow run been started?`,
-    );
-    process.exit(1);
-  }
+  let cleanup: (() => void) | undefined;
 
   try {
-    const scores = await aggregateScores(adapter, { runId });
+    const db = await openSmithersDb(dbPath);
+    cleanup = db.cleanup;
+
+    const scores = await aggregateScores(db.adapter, { runId });
 
     if (scores.length === 0) {
       log.error(`No scores found for run "${runId}".`);
@@ -77,7 +69,12 @@ export async function runScores(opts: {
     log.info(`\nScores for run: ${runId}\n`);
     log.info(formatScoresTable(scores));
     log.info("");
+  } catch (err) {
+    log.error(
+      `Could not open smithers.db at ${dbPath}. Has a workflow run been started?`,
+    );
+    process.exit(1);
   } finally {
-    cleanup();
+    cleanup?.();
   }
 }
