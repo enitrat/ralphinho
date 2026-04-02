@@ -4,9 +4,9 @@
  * Opens the smithers DB, calls replayFromCheckpoint, and prints the new run ID.
  */
 
-import { openSmithersDb } from "smithers-orchestrator/src/cli/find-db";
 import { replayFromCheckpoint } from "smithers-orchestrator/src/time-travel/replay";
 import { createLogger } from "../runtime/logger";
+import { withSmithersDb } from "./shared";
 
 const log = createLogger({ context: { phase: "cli" } });
 
@@ -20,12 +20,7 @@ export type ReplayOptions = {
 };
 
 export async function runReplay(opts: ReplayOptions): Promise<void> {
-  let cleanup: (() => void) | undefined;
-
-  try {
-    const { adapter, cleanup: dbCleanup } = await openSmithersDb(opts.dbPath);
-    cleanup = dbCleanup;
-
+  await withSmithersDb(opts.dbPath, async (adapter) => {
     const result = await replayFromCheckpoint(adapter, {
       parentRunId: opts.runId,
       frameNo: opts.frame ?? 0,
@@ -39,10 +34,5 @@ export async function runReplay(opts: ReplayOptions): Promise<void> {
     if (result.vcsRestored) {
       log.info(`  VCS restored: ${result.vcsPointer}`);
     }
-  } catch (err) {
-    log.error(`Replay failed: ${err instanceof Error ? err.message : String(err)}`);
-    process.exit(1);
-  } finally {
-    cleanup?.();
-  }
+  });
 }

@@ -186,6 +186,20 @@ async function main() {
       });
     }
 
+    case "scores": {
+      const scoresRunId = parsed.positional[1];
+      if (!scoresRunId) {
+        log.error('Usage: ralphinho scores <run-id>');
+        process.exit(1);
+      }
+      const { runScores } = await import("./scores");
+      const scoresDbPath = join(getRalphDir(repoRoot), "workflow.db");
+      return runScores({
+        runId: scoresRunId,
+        dbPath: scoresDbPath,
+      });
+    }
+
     default: {
       if (!command) {
         const { runWorkflow } = await import("./run");

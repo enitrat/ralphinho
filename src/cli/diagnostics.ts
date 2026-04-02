@@ -31,17 +31,26 @@ export async function runPreflightDiagnostics(opts: {
   cwd: string;
 }): Promise<PreflightResult> {
   const { enabledAgents, cwd } = opts;
-  const env = process.env as Record<string, string>;
-  const reports: DiagnosticReport[] = [];
+  // Filter out undefined env values to satisfy Record<string, string>
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v !== undefined) env[k] = v;
+  }
+
   const failedAgents: string[] = [];
   const warnings: string[] = [];
 
-  for (const agent of enabledAgents) {
-    const strategy = getDiagnosticStrategy(agent);
-    if (!strategy) continue;
+  // Collect strategies, skipping agents without a diagnostic strategy
+  const strategies = enabledAgents
+    .map((agent) => getDiagnosticStrategy(agent))
+    .filter((s): s is NonNullable<typeof s> => s !== null);
 
-    const report = await runDiagnostics(strategy, { env, cwd });
-    reports.push(report);
+  // Run all agent diagnostics in parallel since checks are independent
+  const reports = await Promise.all(
+    strategies.map((strategy) => runDiagnostics(strategy, { env, cwd })),
+  );
+
+  for (const report of reports) {
     log.info(formatDiagnosticSummary(report));
 
     for (const check of report.checks) {

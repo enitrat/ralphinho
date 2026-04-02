@@ -230,6 +230,71 @@ describe("projectEvents", () => {
   });
 });
 
+function tokenUsageReported(
+  nodeId: string,
+  inputTokens: number,
+  outputTokens: number,
+  durationMs: number,
+  timestamp = BASE_TS + 50,
+  extra: { cacheReadTokens?: number } = {},
+): SmithersEvent {
+  return {
+    type: "token-usage-reported",
+    timestamp,
+    runId: "run-1",
+    nodeId,
+    inputTokens,
+    outputTokens,
+    durationMs,
+    ...(extra.cacheReadTokens != null ? { cacheReadTokens: extra.cacheReadTokens } : {}),
+  };
+}
+
+describe("projectEvents — token totals and runDurationMs", () => {
+  test("returns zero totals when no token-usage-reported events exist", () => {
+    const projected = projectEvents([]);
+    expect(projected.inputTokensTotal).toBe(0);
+    expect(projected.outputTokensTotal).toBe(0);
+    expect(projected.cacheReadTokensTotal).toBe(0);
+    expect(projected.runDurationMs).toBe(0);
+  });
+
+  test("accumulates token totals from multiple token-usage-reported events", () => {
+    const now = BASE_TS + 1000;
+    const projected = projectEvents(
+      [
+        tokenUsageReported("n1", 100, 200, 500, BASE_TS + 10, { cacheReadTokens: 50 }),
+        tokenUsageReported("n2", 300, 400, 600, BASE_TS + 20, { cacheReadTokens: 70 }),
+      ],
+      now,
+    );
+    expect(projected.inputTokensTotal).toBe(400);
+    expect(projected.outputTokensTotal).toBe(600);
+    expect(projected.cacheReadTokensTotal).toBe(120);
+  });
+
+  test("computes runDurationMs from earliest token event timestamp to now", () => {
+    const now = BASE_TS + 5000;
+    const projected = projectEvents(
+      [
+        tokenUsageReported("n1", 10, 20, 100, BASE_TS + 1000),
+        tokenUsageReported("n2", 30, 40, 200, BASE_TS + 500), // earlier timestamp
+        tokenUsageReported("n3", 50, 60, 300, BASE_TS + 2000),
+      ],
+      now,
+    );
+    // earliest = BASE_TS + 500, now = BASE_TS + 5000 => duration = 4500
+    expect(projected.runDurationMs).toBe(4500);
+  });
+
+  test("treats missing cacheReadTokens as zero", () => {
+    const projected = projectEvents([
+      tokenUsageReported("n1", 100, 200, 500, BASE_TS + 10),
+    ]);
+    expect(projected.cacheReadTokensTotal).toBe(0);
+  });
+});
+
 describe("monitor rendering with projection output", () => {
   test("renders semantic completion stats and ticket list from projected events", () => {
     const projected = projectEvents([

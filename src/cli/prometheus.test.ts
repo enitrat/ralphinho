@@ -25,7 +25,7 @@ describe("startPrometheusServer", () => {
 
     const body = await res.text();
     // Should have at least one smithers_ metric line (from effect-utils metrics)
-    expect(body).toContain("smithers");
+    expect(body).toContain("smithers_");
   });
 
   test("returns 404 for non-/metrics paths", async () => {
@@ -42,13 +42,13 @@ describe("startPrometheusServer", () => {
     result.stop();
     cleanup = null;
 
-    // After stop, fetch should fail
+    // After stop, fetch should throw (connection refused)
+    let threw = false;
     try {
       await fetch(`http://localhost:${port}/metrics`);
-      // If it somehow succeeds, that's unexpected but not a hard fail
-      // since port reuse is OS-dependent
     } catch {
-      // Expected: connection refused
+      threw = true;
     }
+    expect(threw).toBe(true);
   });
 });

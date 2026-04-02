@@ -6,7 +6,6 @@
  *   ralphinho diff <run-a>:<frame> <run-b>:<frame> — diff specific frames
  */
 
-import { openSmithersDb } from "smithers-orchestrator/src/cli/find-db";
 import {
   loadSnapshot,
   loadLatestSnapshot,
@@ -17,6 +16,7 @@ import {
   formatDiffAsJson,
 } from "smithers-orchestrator/src/time-travel/diff";
 import { createLogger } from "../runtime/logger";
+import { withSmithersDb } from "./shared";
 
 const log = createLogger({ context: { phase: "cli" } });
 
@@ -27,9 +27,9 @@ export type DiffOptions = {
   json?: boolean;
 };
 
-type SnapshotSpec = { runId: string; frameNo: number | null };
+export type SnapshotSpec = { runId: string; frameNo: number | null };
 
-function parseSpec(spec: string): SnapshotSpec {
+export function parseSpec(spec: string): SnapshotSpec {
   const colonIdx = spec.lastIndexOf(":");
   if (colonIdx === -1) return { runId: spec, frameNo: null };
 
@@ -42,12 +42,7 @@ function parseSpec(spec: string): SnapshotSpec {
 }
 
 export async function runDiff(opts: DiffOptions): Promise<void> {
-  let cleanup: (() => void) | undefined;
-
-  try {
-    const { adapter, cleanup: dbCleanup } = await openSmithersDb(opts.dbPath);
-    cleanup = dbCleanup;
-
+  await withSmithersDb(opts.dbPath, async (adapter) => {
     const specA = parseSpec(opts.specA);
     const specB = parseSpec(opts.specB);
 
@@ -61,12 +56,10 @@ export async function runDiff(opts: DiffOptions): Promise<void> {
     ]);
 
     if (!snapA) {
-      log.error(`Snapshot not found: ${opts.specA}`);
-      process.exit(1);
+      throw new Error(`Snapshot not found: ${opts.specA}`);
     }
     if (!snapB) {
-      log.error(`Snapshot not found: ${opts.specB}`);
-      process.exit(1);
+      throw new Error(`Snapshot not found: ${opts.specB}`);
     }
 
     const diff = diffRawSnapshots(snapA, snapB);
@@ -76,10 +69,5 @@ export async function runDiff(opts: DiffOptions): Promise<void> {
     } else {
       log.info(formatDiffForTui(diff));
     }
-  } catch (err) {
-    log.error(`Diff failed: ${err instanceof Error ? err.message : String(err)}`);
-    process.exit(1);
-  } finally {
-    cleanup?.();
-  }
+  });
 }

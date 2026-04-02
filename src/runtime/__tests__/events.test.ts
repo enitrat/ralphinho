@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 
-import { parseEvent, readEventLog, writeEventLog } from "../events";
+import { parseEvent, readEventLog, writeEventLog, writeUntrustedEventLog } from "../events";
 
 const TMP_PREFIX = `/tmp/super-ralph-events-${process.pid}-`;
 const created: string[] = [];
@@ -461,11 +461,11 @@ describe("writeEventLog", () => {
     expect(read[1]).toEqual(event2);
   });
 
-  test("skips invalid events", async () => {
+  test("skips invalid events via writeUntrustedEventLog", async () => {
     const path = tmpPath();
     const validEvent = { type: "node-started" as const, timestamp: 1, runId: "r", nodeId: "n", unitId: "u", stageName: "implement" as const };
-    const invalidEvent = { type: "bogus" as any, timestamp: 1 } as any;
-    await writeEventLog(path, [validEvent, invalidEvent]);
+    const invalidEvent = { type: "bogus", timestamp: 1 };
+    await writeUntrustedEventLog(path, [validEvent, invalidEvent]);
     const read = await readEventLog(path);
     expect(read).toHaveLength(1);
     expect(read[0]).toEqual(validEvent);

@@ -60,6 +60,10 @@ export interface PollData {
   mergeQueueActivity: MergeQueueActivity | null;
   schedulerReasoning: string | null;
   discoveryCount: number;
+  inputTokensTotal: number;
+  outputTokensTotal: number;
+  cacheReadTokensTotal: number;
+  runDurationMs: number;
 }
 
 interface TicketMeta {
@@ -105,6 +109,10 @@ export function projectEvents(events: SmithersEvent[], now = Date.now()): PollDa
   let discoveryCount = 0;
   let maxConcurrency = 0;
   let schedulerReasoning: string | null = null;
+  let inputTokensTotal = 0;
+  let outputTokensTotal = 0;
+  let cacheReadTokensTotal = 0;
+  let earliestTimestamp: number | null = null;
   const ensureMergeQueueActivity = (): MergeQueueActivity => {
     mergeQueueActivity ??= {
       ticketsLanded: [],
@@ -194,6 +202,14 @@ export function projectEvents(events: SmithersEvent[], now = Date.now()): PollDa
           unitsSemanticallyComplete: new Set(event.unitsSemanticallyComplete),
         };
         break;
+      case "token-usage-reported":
+        inputTokensTotal += event.inputTokens;
+        outputTokensTotal += event.outputTokens;
+        cacheReadTokensTotal += event.cacheReadTokens ?? 0;
+        if (earliestTimestamp === null || event.timestamp < earliestTimestamp) {
+          earliestTimestamp = event.timestamp;
+        }
+        break;
     }
   }
 
@@ -276,5 +292,9 @@ export function projectEvents(events: SmithersEvent[], now = Date.now()): PollDa
     mergeQueueActivity,
     schedulerReasoning,
     discoveryCount,
+    inputTokensTotal,
+    outputTokensTotal,
+    cacheReadTokensTotal,
+    runDurationMs: earliestTimestamp !== null ? Math.max(0, now - earliestTimestamp) : 0,
   };
 }
