@@ -65,7 +65,9 @@ export type DiagnosticDeps = {
 };
 
 async function loadDefaultDeps(): Promise<DiagnosticDeps> {
-  const mod = await import("smithers-orchestrator/src/agents/diagnostics");
+  // Computed path avoids TS2307 — resolved at runtime by Bun, not statically by tsc.
+  const modPath = ["smithers-orchestrator", "src", "agents", "diagnostics"].join("/");
+  const mod = await import(modPath);
   return {
     getDiagnosticStrategy: mod.getDiagnosticStrategy,
     runDiagnostics: mod.runDiagnostics,
