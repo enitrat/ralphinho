@@ -11,22 +11,25 @@ import { formatScoresTable, type ScoresRow } from "../scores";
 // ── Mock infrastructure ──────────────────────────────────────────────
 
 const mockAggregateScores = mock(() => Promise.resolve([]));
+const mockClose = mock(() => {});
 
-const mockOpenSmithersDb = mock(() =>
-  Promise.resolve({
-    adapter: {} as any,
-    cleanup: mock(() => {}),
-  }),
-);
+mock.module("bun:sqlite", () => ({
+  Database: class MockDatabase {
+    close = mockClose;
+    constructor(_path: string) {}
+  },
+}));
 
-mock.module("smithers-orchestrator/src/cli/find-db", () => ({
-  openSmithersDb: mockOpenSmithersDb,
+mock.module("drizzle-orm/bun-sqlite", () => ({
+  drizzle: () => ({}),
 }));
 
 const realSmithers = await import("smithers-orchestrator");
 mock.module("smithers-orchestrator", () => ({
   ...realSmithers,
   aggregateScores: mockAggregateScores,
+  SmithersDb: class MockSmithersDb {},
+  ensureSmithersTables: () => {},
 }));
 
 // Import after mocks
@@ -81,12 +84,7 @@ describe("formatScoresTable", () => {
 describe("runScores", () => {
   beforeEach(() => {
     mockAggregateScores.mockReset();
-    mockOpenSmithersDb.mockReset();
-
-    mockOpenSmithersDb.mockResolvedValue({
-      adapter: {} as any,
-      cleanup: mock(() => {}),
-    });
+    mockClose.mockReset();
   });
 
   test("opens DB and calls aggregateScores with correct runId", async () => {
@@ -105,19 +103,13 @@ describe("runScores", () => {
 
     await runScores({ runId: "run-001", dbPath: "/tmp/test.db" });
 
-    expect(mockOpenSmithersDb).toHaveBeenCalledWith("/tmp/test.db");
     expect(mockAggregateScores).toHaveBeenCalledWith(
       expect.anything(),
       { runId: "run-001" },
     );
   });
 
-  test("calls cleanup after successful execution", async () => {
-    const cleanupFn = mock(() => {});
-    mockOpenSmithersDb.mockResolvedValue({
-      adapter: {} as any,
-      cleanup: cleanupFn,
-    });
+  test("closes DB after successful execution", async () => {
     mockAggregateScores.mockResolvedValue([
       {
         scorerId: "s1",
@@ -132,6 +124,6 @@ describe("runScores", () => {
 
     await runScores({ runId: "run-001", dbPath: "/tmp/test.db" });
 
-    expect(cleanupFn).toHaveBeenCalled();
+    expect(mockClose).toHaveBeenCalled();
   });
 });

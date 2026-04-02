@@ -385,11 +385,18 @@ export async function withSmithersDb<T>(
   dbPath: string,
   fn: (adapter: any) => Promise<T>,
 ): Promise<T> {
-  const { openSmithersDb } = await import("smithers-orchestrator/src/cli/find-db");
-  const { adapter, cleanup } = await openSmithersDb(dbPath);
+  const { Database } = await import("bun:sqlite");
+  const { drizzle } = await import("drizzle-orm/bun-sqlite");
+  const { SmithersDb, ensureSmithersTables } = await import("smithers-orchestrator");
+
+  const sqlite = new Database(dbPath);
+  const db = drizzle(sqlite);
+  ensureSmithersTables(db as any);
+  const adapter = new SmithersDb(db as any);
+
   try {
     return await fn(adapter);
   } finally {
-    cleanup();
+    sqlite.close();
   }
 }
