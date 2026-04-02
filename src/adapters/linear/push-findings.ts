@@ -14,6 +14,9 @@ import {
 import { getLinearClient } from "../../linear/client";
 import { useLinear } from "../../linear/useLinear";
 import type { PushFindingsResult } from "./types";
+import { createLogger } from "../../runtime/logger";
+
+const log = createLogger({ context: { phase: "execute", stage: "push-findings" } });
 
 const PRIORITY_MAP: Record<string, number> = {
   critical: 1, // Urgent
@@ -110,7 +113,7 @@ export async function pushFindingsToLinear(opts: {
     }
 
     if (findings.length === 0) {
-      console.log("  No findings to push.");
+      log.info("  No findings to push.");
       return { created: [], skipped: 0 };
     }
 
@@ -144,7 +147,7 @@ export async function pushFindingsToLinear(opts: {
 
         const issueRef = result.issue;
         if (!issueRef) {
-          console.error(`  Failed to create issue for finding ${i + 1}: no issue returned`);
+          log.error(`  Failed to create issue for finding ${i + 1}: no issue returned`);
           skipped++;
           continue;
         }
@@ -159,9 +162,9 @@ export async function pushFindingsToLinear(opts: {
           url: issue.url,
         });
 
-        console.log(`  Created ${issue.identifier}: ${finding.summary}`);
+        log.info(`  Created ${issue.identifier}: ${finding.summary}`);
       } catch (error) {
-        console.error(`  Failed to create issue for finding ${i + 1}: ${error}`);
+        log.error(`  Failed to create issue for finding ${i + 1}: ${error}`);
         skipped++;
       }
     }

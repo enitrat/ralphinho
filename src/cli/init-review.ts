@@ -14,6 +14,9 @@ import {
   type ReviewAgentOverride,
 } from "../config/types";
 import { buildReviewPlan } from "../workflows/improvinho/plan";
+import { createLogger } from "../runtime/logger";
+
+const log = createLogger({ context: { phase: "init", mode: "review-discovery" } });
 
 function collectReviewPaths(
   positional: string[],
@@ -33,7 +36,7 @@ function parseReviewAgentOverride(
 
   const parsed = reviewAgentOverrideSchema.safeParse(flags.agent.trim().toLowerCase());
   if (!parsed.success) {
-    console.error(
+    log.error(
       'Error: Invalid --agent value for review mode. Use one of: "sonnet", "opus", "codex".',
     );
     process.exit(1);
@@ -49,18 +52,18 @@ export async function initReviewDiscovery(opts: {
 }): Promise<void> {
   const { positional, flags, repoRoot } = opts;
 
-  console.log("🔎 ralphinho — Review Discovery Mode\n");
+  log.info("🔎 ralphinho — Review Discovery Mode\n");
 
   const rawInstruction = positional[0];
   if (!rawInstruction) {
-    console.error("Error: Review instruction is required.");
-    console.error('Usage: ralphinho init review "<instruction>" --paths src/foo src/bar');
+    log.error("Error: Review instruction is required.");
+    log.error('Usage: ralphinho init review "<instruction>" --paths src/foo src/bar');
     process.exit(1);
   }
 
   const reviewPaths = collectReviewPaths(positional.slice(1), flags);
   if (reviewPaths.length === 0) {
-    console.error("Error: Review mode requires at least one path via `--paths`.");
+    log.error("Error: Review mode requires at least one path via `--paths`.");
     process.exit(1);
   }
 
@@ -70,7 +73,7 @@ export async function initReviewDiscovery(opts: {
   const reviewAgentOverride = parseReviewAgentOverride(flags);
 
   if (!agents.claude && !agents.codex) {
-    console.error(
+    log.error(
       "\nError: No supported agent CLI detected. Install claude and/or codex.",
     );
     process.exit(1);
@@ -110,19 +113,19 @@ export async function initReviewDiscovery(opts: {
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
   await writeFile(planPath, `${JSON.stringify(reviewPlan, null, 2)}\n`, "utf8");
 
-  console.log(`  Repo: ${repoRoot}`);
-  console.log(`  Instruction: ${promptSourcePath ?? promptText}`);
-  console.log(`  Review paths: ${reviewPlan.slices.map((slice) => slice.path).join(", ")}`);
-  console.log(`  Slices: ${reviewPlan.slices.length}`);
-  console.log(`  Agents: claude=${agents.claude} codex=${agents.codex}`);
+  log.info(`  Repo: ${repoRoot}`);
+  log.info(`  Instruction: ${promptSourcePath ?? promptText}`);
+  log.info(`  Review paths: ${reviewPlan.slices.map((slice) => slice.path).join(", ")}`);
+  log.info(`  Slices: ${reviewPlan.slices.length}`);
+  log.info(`  Agents: claude=${agents.claude} codex=${agents.codex}`);
   if (reviewAgentOverride) {
-    console.log(`  Agent override: ${reviewAgentOverride}`);
+    log.info(`  Agent override: ${reviewAgentOverride}`);
   }
-  console.log("  Written:");
-  console.log(`    ${configPath}`);
-  console.log(`    ${planPath}`);
-  console.log();
-  console.log("  Run:");
-  console.log("    ralphinho run");
-  console.log();
+  log.info("  Written:");
+  log.info(`    ${configPath}`);
+  log.info(`    ${planPath}`);
+  log.info("");
+  log.info("  Run:");
+  log.info("    ralphinho run");
+  log.info("");
 }

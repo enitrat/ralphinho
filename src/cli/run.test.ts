@@ -120,8 +120,8 @@ describe("runBatchFromLinear", () => {
     mockConsumeAllTickets.mockResolvedValue({ tickets: [], unparseable: [] });
 
     const logs: string[] = [];
-    const origLog = console.log;
-    console.log = (...args: any[]) => logs.push(args.join(" "));
+    const origWrite = process.stdout.write;
+    process.stdout.write = ((chunk: any) => { logs.push(String(chunk)); return true; }) as any;
 
     try {
       await runBatchFromLinear({
@@ -132,7 +132,7 @@ describe("runBatchFromLinear", () => {
         flags: {},
       });
     } finally {
-      console.log = origLog;
+      process.stdout.write = origWrite;
     }
 
     expect(mockConsumeAllTickets).toHaveBeenCalledTimes(1);
@@ -162,10 +162,10 @@ describe("runBatchFromLinear", () => {
     });
 
     const logs: string[] = [];
-    const origLog = console.log;
-    const origWarn = console.warn;
-    console.log = (...args: any[]) => logs.push(args.join(" "));
-    console.warn = (...args: any[]) => logs.push(args.join(" "));
+    const origWrite = process.stdout.write;
+    const origErrWrite = process.stderr.write;
+    process.stdout.write = ((chunk: any) => { logs.push(String(chunk)); return true; }) as any;
+    process.stderr.write = ((chunk: any) => { logs.push(String(chunk)); return true; }) as any;
 
     try {
       await runBatchFromLinear({
@@ -176,8 +176,8 @@ describe("runBatchFromLinear", () => {
         flags: {},
       });
     } finally {
-      console.log = origLog;
-      console.warn = origWarn;
+      process.stdout.write = origWrite;
+      process.stderr.write = origErrWrite;
     }
 
     // Should log unparseable identifiers
@@ -211,8 +211,8 @@ describe("runBatchFromLinear", () => {
     });
 
     const logs: string[] = [];
-    const origLog = console.log;
-    console.log = (...args: any[]) => logs.push(args.join(" "));
+    const origWrite = process.stdout.write;
+    process.stdout.write = ((chunk: any) => { logs.push(String(chunk)); return true; }) as any;
 
     try {
       await runBatchFromLinear({
@@ -223,7 +223,7 @@ describe("runBatchFromLinear", () => {
         flags: {},
       });
     } finally {
-      console.log = origLog;
+      process.stdout.write = origWrite;
     }
 
     // Should log group-0 info
@@ -318,8 +318,10 @@ describe("runBatchFromLinear", () => {
     });
 
     // Suppress error logs from failed group
-    const origError = console.error;
-    console.error = () => {};
+    const origErrWrite = process.stderr.write;
+    const origOutWrite = process.stdout.write;
+    process.stderr.write = (() => true) as any;
+    process.stdout.write = (() => true) as any;
 
     try {
       await runBatchFromLinear({
@@ -330,7 +332,8 @@ describe("runBatchFromLinear", () => {
         flags: {},
       });
     } finally {
-      console.error = origError;
+      process.stderr.write = origErrWrite;
+      process.stdout.write = origOutWrite;
     }
 
     // Only the first group's ticket should be marked done

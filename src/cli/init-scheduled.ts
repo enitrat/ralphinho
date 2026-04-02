@@ -12,6 +12,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { createLogger } from "../runtime/logger";
 
 import {
   detectAgents,
@@ -25,6 +26,8 @@ import { createSpinner } from "./spinner";
 import { decomposeRFC } from "../workflows/ralphinho/decompose";
 import { printPlanSummary } from "./plan-summary";
 import type { WorkPlan, WorkUnit } from "../workflows/ralphinho/types";
+
+const log = createLogger({ context: { phase: "init", mode: "scheduled-work" } });
 import {
   reviewAgentOverrideSchema,
   type ScheduledWorkConfig,
@@ -38,41 +41,41 @@ export async function initScheduledWork(opts: {
 }): Promise<void> {
   const { positional, flags, repoRoot } = opts;
 
-  console.log("🗂️  ralphinho — Scheduled Work Mode\n");
+  log.info("🗂️  ralphinho — Scheduled Work Mode\n");
 
   // ── Read RFC file ───────────────────────────────────────────────────
   const rfcArg = positional[0];
   if (!rfcArg) {
-    console.error("Error: RFC file path is required.");
-    console.error("Usage: ralphinho init ./path/to/rfc.md");
+    log.error("Error: RFC file path is required.");
+    log.error("Usage: ralphinho init ./path/to/rfc.md");
     process.exit(1);
   }
 
   const rfcPath = resolve(repoRoot, rfcArg);
   if (!existsSync(rfcPath)) {
-    console.error(`Error: RFC file not found: ${rfcPath}`);
+    log.error(`Error: RFC file not found: ${rfcPath}`);
     process.exit(1);
   }
 
   const rfcContent = await readFile(rfcPath, "utf8");
-  console.log(`  RFC: ${rfcPath}`);
-  console.log(`  Repo: ${repoRoot}`);
+  log.info(`  RFC: ${rfcPath}`);
+  log.info(`  Repo: ${repoRoot}`);
 
   // ── Check prerequisites ─────────────────────────────────────────────
   await ensureJjColocated(repoRoot);
 
   // ── Scan repo ───────────────────────────────────────────────────────
   const repoConfig = await scanRepo(repoRoot);
-  console.log(`  Project: ${repoConfig.projectName}`);
-  console.log(`  Package manager: ${repoConfig.runner}`);
+  log.info(`  Project: ${repoConfig.projectName}`);
+  log.info(`  Package manager: ${repoConfig.runner}`);
 
   if (Object.keys(repoConfig.buildCmds).length > 0) {
-    console.log(
+    log.info(
       `  Build: ${Object.values(repoConfig.buildCmds).join(", ")}`,
     );
   }
   if (Object.keys(repoConfig.testCmds).length > 0) {
-    console.log(
+    log.info(
       `  Test: ${Object.values(repoConfig.testCmds).join(", ")}`,
     );
   }
@@ -81,22 +84,22 @@ export async function initScheduledWork(opts: {
   const agents = await detectAgents(repoRoot);
   const agentOverride = parseAgentOverride(flags);
   if (agentOverride) {
-    console.log(`  Agent override: ${agentOverride}`);
+    log.info(`  Agent override: ${agentOverride}`);
   } else {
-    console.log(
+    log.info(
       `  Agents: claude=${agents.claude} codex=${agents.codex}`,
     );
   }
 
   if (!agents.claude && !agents.codex) {
-    console.error(
+    log.error(
       "\nError: No supported agent CLI detected. Install claude and/or codex.",
     );
     process.exit(1);
   }
 
   // ── Decompose RFC ───────────────────────────────────────────────────
-  console.log();
+  log.info("");
   const spinner = createSpinner("Decomposing RFC into work units...");
   spinner.start();
   let plan: WorkPlan;
@@ -123,7 +126,7 @@ export async function initScheduledWork(opts: {
     typeof flags["base-branch"] === "string"
       ? flags["base-branch"]
       : await detectCurrentBranch(repoRoot);
-  console.log(`  Base branch: ${baseBranch}`);
+  log.info(`  Base branch: ${baseBranch}`);
 
   const landingMode =
     typeof flags["landing-mode"] === "string" &&
@@ -149,18 +152,18 @@ export async function initScheduledWork(opts: {
   await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", "utf8");
   await writeFile(planPath, JSON.stringify(plan, null, 2) + "\n", "utf8");
 
-  console.log(`  Written:`);
-  console.log(`    ${configPath}`);
-  console.log(`    ${planPath}`);
-  console.log();
-  console.log(
+  log.info(`  Written:`);
+  log.info(`    ${configPath}`);
+  log.info(`    ${planPath}`);
+  log.info("");
+  log.info(
     `  Review and edit ${planPath} if needed, then run:`,
   );
-  console.log(`    ralphinho run`);
-  console.log();
+  log.info(`    ralphinho run`);
+  log.info("");
 
   if (flags["dry-run"]) {
-    console.log("  (dry-run: workflow not executed)\n");
+    log.info("  (dry-run: workflow not executed)\n");
     return;
   }
 }
@@ -172,7 +175,7 @@ function parseAgentOverride(
 
   const parsed = reviewAgentOverrideSchema.safeParse(flags.agent.trim().toLowerCase());
   if (!parsed.success) {
-    console.error(
+    log.error(
       'Error: Invalid --agent value. Use one of: "sonnet", "opus", "codex".',
     );
     process.exit(1);
