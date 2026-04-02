@@ -106,6 +106,27 @@ function fmtElapsed(ms: number): string {
   return `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s`;
 }
 
+export function fmtTokenCount(n: number): string {
+  if (n === 0) return "—";
+  return n.toLocaleString("en-US");
+}
+
+export function metricsContent(data: PollData, errorCount: number): string {
+  const inTok  = fmtTokenCount(data.inputTokensTotal);
+  const outTok = fmtTokenCount(data.outputTokensTotal);
+  const cache  = fmtTokenCount(data.cacheReadTokensTotal);
+  const dur    = data.runDurationMs > 0 ? fmtElapsed(data.runDurationMs) : "—";
+  const agents = String(data.activeJobs.length);
+  const errors = String(errorCount);
+
+  return [
+    `Tokens In:  ${inTok.padStart(12)}   Out: ${outTok}`,
+    `Cache Read: ${cache.padStart(12)}`,
+    `Duration:   ${dur.padStart(12)}`,
+    `Agents:     ${agents.padStart(12)}   Errors: ${errors}`,
+  ].join("\n");
+}
+
 function fmtTime(): string {
   const d = new Date();
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
@@ -120,7 +141,7 @@ function stageIcon(s: StageStatus): string {
   }
 }
 
-type MonitorFocus = "pipeline" | "jobs" | "events" | "logs" | "snapshots";
+type MonitorFocus = "pipeline" | "metrics" | "jobs" | "events" | "logs" | "snapshots";
 
 export function renderMonitorSnapshot(
   data: PollData,
@@ -287,6 +308,7 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
     tickets: [], activeJobs: [], discovered: 0, landed: 0, semanticallyComplete: 0, evicted: 0,
     inPipeline: 0, maxConcurrency: 0, phase: "starting",
     mergeQueueActivity: null, schedulerReasoning: null, discoveryCount: 0,
+    inputTokensTotal: 0, outputTokensTotal: 0, cacheReadTokensTotal: 0, runDurationMs: 0,
   };
   let selectedIdx = 0;
   // focus: pipeline = left panel; jobs/events/logs/snapshots = right panels
@@ -294,6 +316,7 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
   let detail: TicketDetail | null = null;
   let isRunning = true;
   let lastError: string | null = null;
+  let errorCount = 0;
   const eventLog: EventLogEntry[] = [];
   let prevPhase: WorkflowPhase = "starting";
 
@@ -363,6 +386,18 @@ const root = new BoxRenderable(renderer, {
   });
   content.add(rightCol);
 
+  // Panel 0: Metrics (compact, fixed height — content is 4 lines)
+  const metricsBox = new BoxRenderable(renderer, {
+    id: "metricsBox", border: true, title: " Metrics ", flexGrow: 0,
+    flexDirection: "column", borderColor: c.border, height: 6,
+  });
+  rightCol.add(metricsBox);
+
+  const metricsText = new TextRenderable(renderer, {
+    id: "metricsText", content: metricsContent(data, 0),
+  });
+  metricsBox.add(metricsText);
+
   // Panel 1: Active Jobs (1 share)
   const jobsBox = new BoxRenderable(renderer, {
     id: "jobsBox", border: true, title: " Active Jobs ", flexGrow: 1,
@@ -428,6 +463,7 @@ const root = new BoxRenderable(renderer, {
     jobsBox.borderColor = (focus === "jobs" || focus === "detail" as any) ? c.selected : c.border;
     eventsBox.borderColor = focus === "events" ? c.selected : c.border;
     logsBox.borderColor = focus === "logs" ? c.selected : c.border;
+    metricsBox.borderColor = focus === "metrics" ? c.selected : c.border;
     snapshotsBox.borderColor = focus === "snapshots" ? c.selected : c.border;
 
     const rendered = renderMonitorSnapshot(data, {
@@ -511,6 +547,9 @@ const root = new BoxRenderable(renderer, {
         return `Frame ${s.frameNo}  ${ts}  ${hash}`;
       }).join("\n");
     }
+
+    // ── Metrics panel ──
+    metricsText.content = metricsContent(data, errorCount);
 
     renderer.requestRender();
   }
@@ -613,6 +652,7 @@ const root = new BoxRenderable(renderer, {
 
       if (selectedIdx >= data.tickets.length) selectedIdx = Math.max(0, data.tickets.length - 1);
     } catch (err) {
+      errorCount++;
       lastError = `Poll failed: ${err instanceof Error ? err.message : "unknown"}`;
       recordSpan("monitor.poll.error", {
         run_id: runId,
@@ -639,7 +679,7 @@ const root = new BoxRenderable(renderer, {
 
     // Tab — cycle focus: pipeline → jobs → events → logs → pipeline
     if (seq === "\t") {
-      const modes: Array<MonitorFocus> = ["pipeline", "jobs", "events", "logs", "snapshots"];
+      const modes: Array<MonitorFocus> = ["pipeline", "metrics", "jobs", "events", "logs", "snapshots"];
       const base = focus;
       const idx = modes.indexOf(base);
       focus = modes[(idx + 1) % modes.length];
