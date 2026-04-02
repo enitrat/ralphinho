@@ -26,7 +26,6 @@ Usage:
   ralphinho init ./rfc-003.md
   ralphinho init review "Review src/api/auth for bugs and security issues" --paths src/api/auth
   ralphinho init review "Review packages/app logic" --paths packages/app --agent sonnet
-  ralphinho init bugfinder "Find bugs and improvements" --paths src/
 
   ralphinho plan                             (Re)generate work plan from RFC
   ralphinho run                              Execute the initialized workflow
@@ -99,15 +98,6 @@ async function main() {
       if (initMode === "review") {
         const { initReviewDiscovery } = await import("./init-review");
         return initReviewDiscovery({
-          positional: parsed.positional.slice(2),
-          flags: parsed.flags,
-          repoRoot,
-        });
-      }
-
-      if (initMode === "bugfinder") {
-        const { initBugfinder } = await import("./init-bugfinder");
-        return initBugfinder({
           positional: parsed.positional.slice(2),
           flags: parsed.flags,
           repoRoot,

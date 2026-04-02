@@ -53,11 +53,6 @@ export async function runMonitor(opts: {
     process.exit(1);
   }
 
-  if (config.mode === "bugfinder") {
-    log.error("Error: bugfinder monitor UI is not implemented yet.");
-    process.exit(1);
-  }
-
   const prompt = config.rfcPath ?? "";
 
   // ── Prometheus metrics server ────────────────────────────────────────

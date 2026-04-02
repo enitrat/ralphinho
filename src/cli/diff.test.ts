@@ -10,8 +10,8 @@ import { captureOutput } from "./__tests__/capture-output";
 
 // ── Mock infrastructure ──────────────────────────────────────────────
 
-const mockLoadSnapshot = mock(() => Promise.resolve(undefined));
-const mockLoadLatestSnapshot = mock(() => Promise.resolve(undefined));
+const mockLoadSnapshot = mock((_adapter: any, _runId: string, _frameNo: number) => Promise.resolve(undefined as any));
+const mockLoadLatestSnapshot = mock((_adapter: any, _runId: string) => Promise.resolve(undefined as any));
 const mockDiffRawSnapshots = mock(() => ({
   nodesAdded: [],
   nodesRemoved: [],
