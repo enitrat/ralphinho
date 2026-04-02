@@ -33,7 +33,7 @@ export type ReviewLoopProps = {
   outputs: ScheduledOutputs;
   agents: ReviewLoopAgents;
   fallbacks?: ReviewLoopFallbacks;
-  implOutput: { whatWasDone: string; filesCreated: string[]; filesModified: string[] } | null;
+  implOutput: { whatWasDone: string; filesCreated?: string[]; filesModified?: string[] } | null;
   testSuites: Array<{ name: string; command: string; description: string }>;
   verifyCommands: string[];
   branchPrefix?: string;

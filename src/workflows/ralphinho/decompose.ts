@@ -171,6 +171,7 @@ export async function decomposeRFC(
       testCmds: repoConfig.testCmds,
     },
     units,
+    baseBranch: "main",
   };
 
   // Validate against full schema

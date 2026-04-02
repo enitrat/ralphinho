@@ -15,14 +15,18 @@
 
 import { resolve } from "node:path";
 import { parseArgs } from "./shared";
+import { createLogger } from "../runtime/logger";
+
+const log = createLogger({ context: { phase: "cli" } });
 
 function printHelp() {
-  console.log(`ralphinho — RFC-driven AI development workflow CLI
+  log.info(`ralphinho — RFC-driven AI development workflow CLI
 
 Usage:
   ralphinho init ./rfc-003.md
   ralphinho init review "Review src/api/auth for bugs and security issues" --paths src/api/auth
   ralphinho init review "Review packages/app logic" --paths packages/app --agent sonnet
+  ralphinho init bugfinder "Find bugs and improvements" --paths src/
 
   ralphinho plan                             (Re)generate work plan from RFC
   ralphinho run                              Execute the initialized workflow
@@ -93,6 +97,15 @@ async function main() {
         });
       }
 
+      if (initMode === "bugfinder") {
+        const { initBugfinder } = await import("./init-bugfinder");
+        return initBugfinder({
+          positional: parsed.positional.slice(2),
+          flags: parsed.flags,
+          repoRoot,
+        });
+      }
+
       if (initMode === "scheduled-work") {
         const { initScheduledWork } = await import("./init-scheduled");
         return initScheduledWork({
@@ -136,7 +149,7 @@ async function main() {
         return runWorkflow({ flags: parsed.flags, repoRoot });
       }
 
-      console.error(
+      log.error(
         `Unknown command: "${command}". Run "ralphinho --help" for usage.`,
       );
       process.exit(1);
@@ -145,6 +158,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error("\n❌ Error:", error.message);
+  log.error("\n❌ Error:", error.message);
   process.exit(1);
 });

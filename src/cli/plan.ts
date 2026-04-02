@@ -21,6 +21,9 @@ import { decomposeRFC } from "../workflows/ralphinho/decompose";
 import { printPlanSummary } from "./plan-summary";
 import type { WorkPlan, WorkUnit } from "../workflows/ralphinho/types";
 import { buildReviewPlan } from "../workflows/improvinho/plan";
+import { createLogger } from "../runtime/logger";
+
+const log = createLogger({ context: { phase: "plan" } });
 
 export async function runPlan(opts: {
   flags: ParsedArgs["flags"];
@@ -31,7 +34,7 @@ export async function runPlan(opts: {
   const configPath = join(ralphDir, "config.json");
 
   if (!existsSync(configPath)) {
-    console.error(
+    log.error(
       "Error: No ralphinho config found. Run `ralphinho init ./rfc.md` first.",
     );
     process.exit(1);
@@ -43,12 +46,12 @@ export async function runPlan(opts: {
 
   if (config.mode === "scheduled-work") {
     if (!config.rfcPath || !existsSync(config.rfcPath)) {
-      console.error(`Error: RFC file not found: ${config.rfcPath}`);
+      log.error(`Error: RFC file not found: ${config.rfcPath}`);
       process.exit(1);
     }
 
-    console.log("🗂️  ralphinho plan — Regenerating work plan\n");
-    console.log(`  RFC: ${config.rfcPath}`);
+    log.info("🗂️  ralphinho plan — Regenerating work plan\n");
+    log.info(`  RFC: ${config.rfcPath}`);
 
     const rfcContent = await readFile(config.rfcPath, "utf8");
     const repoConfig = await scanRepo(repoRoot);
@@ -69,12 +72,17 @@ export async function runPlan(opts: {
     const planPath = join(ralphDir, "work-plan.json");
     await writeFile(planPath, JSON.stringify(plan, null, 2) + "\n", "utf8");
 
-    console.log(`  Updated: ${planPath}`);
-    console.log();
+    log.info(`  Updated: ${planPath}`);
+    log.info("");
     return;
   }
 
-  console.log("🔎 ralphinho plan — Regenerating review plan\n");
+  if (config.mode === "bugfinder") {
+    log.info("🐛 Bugfinder plans are generated at init time. Re-run `ralphinho init bugfinder` to regenerate.\n");
+    return;
+  }
+
+  log.info("🔎 ralphinho plan — Regenerating review plan\n");
   const { promptText, promptSourcePath } = await readPromptInput(
     config.reviewInstructionSource ?? config.reviewInstruction,
     repoRoot,
@@ -91,7 +99,7 @@ export async function runPlan(opts: {
   const planPath = join(ralphDir, "review-plan.json");
   await writeFile(planPath, JSON.stringify(plan, null, 2) + "\n", "utf8");
 
-  console.log(`  Updated: ${planPath}`);
-  console.log(`  Slices: ${plan.slices.length}`);
-  console.log();
+  log.info(`  Updated: ${planPath}`);
+  log.info(`  Slices: ${plan.slices.length}`);
+  log.info("");
 }

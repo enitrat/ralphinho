@@ -68,7 +68,7 @@ try {
   const result = await runWorkflow(workflow, {
     input: {},
     onProgress: (e) => {
-      if (e.type === "task:complete" || e.type === "error") {
+      if (e.type === "NodeFinished" || e.type === "RunFailed") {
         console.log(`  [${e.type}]`, JSON.stringify(e).slice(0, 120));
       }
     },

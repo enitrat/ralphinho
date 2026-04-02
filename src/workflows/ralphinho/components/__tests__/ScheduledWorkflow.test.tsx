@@ -60,6 +60,7 @@ function createWorkPlan(): WorkPlan {
       testCmds: { unit: "bun test" },
     },
     units: [unit],
+    baseBranch: "main",
   };
 }
 

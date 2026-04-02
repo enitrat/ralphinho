@@ -8,6 +8,9 @@ import { basename, join } from "node:path";
 
 import { getRalphDir, type ParsedArgs } from "./shared";
 import { ralphinhoConfigSchema } from "../config/types";
+import { createLogger } from "../runtime/logger";
+
+const log = createLogger({ context: { phase: "monitor" } });
 
 export async function runMonitor(opts: {
   flags: ParsedArgs["flags"];
@@ -18,7 +21,7 @@ export async function runMonitor(opts: {
   const configPath = join(ralphDir, "config.json");
 
   if (!existsSync(configPath)) {
-    console.error("Error: No ralphinho workflow found. Run `ralphinho init` first.");
+    log.error("Error: No ralphinho workflow found. Run `ralphinho init` first.");
     process.exit(1);
   }
 
@@ -28,7 +31,7 @@ export async function runMonitor(opts: {
 
   const dbPath = join(ralphDir, "workflow.db");
   if (!existsSync(dbPath)) {
-    console.error("Error: No workflow database found. Run `ralphinho run` first.");
+    log.error("Error: No workflow database found. Run `ralphinho run` first.");
     process.exit(1);
   }
 
@@ -40,19 +43,24 @@ export async function runMonitor(opts: {
         : null;
 
   if (!runId) {
-    console.error("Error: Missing run ID. Use `ralphinho monitor --run-id <run-id>`.");
+    log.error("Error: Missing run ID. Use `ralphinho monitor --run-id <run-id>`.");
     process.exit(1);
   }
 
   const projectName = basename(repoRoot);
   if (config.mode === "review-discovery") {
-    console.error("Error: review-discovery monitor UI is not implemented yet.");
+    log.error("Error: review-discovery monitor UI is not implemented yet.");
+    process.exit(1);
+  }
+
+  if (config.mode === "bugfinder") {
+    log.error("Error: bugfinder monitor UI is not implemented yet.");
     process.exit(1);
   }
 
   const prompt = config.rfcPath ?? "";
 
-  console.log(`Launching monitor for run ${runId}...\n`);
+  log.info(`Launching monitor for run ${runId}...\n`);
 
   const cliDir = import.meta.dir;
   const monitorScript = join(cliDir, "monitor-standalone.ts");

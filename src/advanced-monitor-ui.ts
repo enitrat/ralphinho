@@ -278,7 +278,6 @@ export async function runMonitorUI(opts: MonitorUIOptions): Promise<{ started: b
   }
 
   const renderer = await createCliRenderer({
-    useAlternateScreen: true,
     useMouse: false,
     exitOnCtrlC: false,
   });
