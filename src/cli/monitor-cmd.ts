@@ -61,9 +61,16 @@ export async function runMonitor(opts: {
       ? Number(opts.flags["prometheus-port"])
       : undefined;
   if (prometheusPort !== undefined) {
-    const { startPrometheusServer } = await import("./prometheus");
-    const prom = startPrometheusServer({ port: prometheusPort });
-    log.info(`📊 Prometheus metrics at http://localhost:${prom.port}/metrics`);
+    try {
+      const { startPrometheusServer } = await import("./prometheus");
+      const prom = startPrometheusServer({ port: prometheusPort });
+      log.info(`📊 Prometheus metrics at http://localhost:${prom.port}/metrics`);
+      process.on("exit", () => prom.stop());
+    } catch (err) {
+      log.warn(
+        `⚠️  Prometheus server failed to start on port ${prometheusPort}: ${err instanceof Error ? err.message : String(err)}. Continuing without metrics.`,
+      );
+    }
   }
 
   log.info(`Launching monitor for run ${runId}...\n`);
