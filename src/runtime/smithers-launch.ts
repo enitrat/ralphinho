@@ -106,14 +106,14 @@ export function buildLaunchConfig(
     "-r",
     hasSharedPreload ? sharedPreload : workflowPreload,
     opts.smithersCliPath,
-    opts.mode,
+    "up",
     opts.workflowPath,
     "--root",
     opts.repoRoot,
+    ...(opts.mode === "resume" ? ["--resume"] : []),
     ...(opts.runId ? ["--run-id", opts.runId] : []),
     "--max-concurrency",
     String(opts.maxConcurrency),
-    ...(opts.force ? ["--force"] : []),
   ];
 
   const launchEnv: Record<string, string> = {

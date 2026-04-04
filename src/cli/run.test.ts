@@ -1,8 +1,9 @@
 /**
  * Tests for CLI batch wiring: --batch flag routing + runBatchFromLinear orchestration.
+ * Also tests --skip-diagnostics flag behavior in runWorkflow.
  *
  * Strategy: mock external dependencies (Linear adapter, scheduler, smithers launch,
- * init-scheduled) and assert call routing and orchestration behavior only.
+ * init-scheduled, diagnostics) and assert call routing and orchestration behavior only.
  */
 
 import { describe, test, expect, mock, beforeEach } from "bun:test";
@@ -86,8 +87,35 @@ mock.module("./init-scheduled", () => ({
   initScheduledWork: mockInitScheduledWork,
 }));
 
+// Mock the underlying smithers diagnostics module (not ./diagnostics itself,
+// which would poison the module cache for diagnostics.test.ts).
+const mockGetDiagnosticStrategy = mock(() => ({
+  agentId: "claude-code",
+  command: "claude",
+  checks: [],
+}));
+const mockRunDiagnostics = mock(() =>
+  Promise.resolve({
+    agentId: "claude-code",
+    command: "claude",
+    timestamp: new Date().toISOString(),
+    checks: [
+      { id: "cli_installed", status: "pass", message: "found", durationMs: 1 },
+      { id: "api_key_valid", status: "pass", message: "valid", durationMs: 1 },
+    ],
+    durationMs: 2,
+  }),
+);
+
+mock.module("smithers-orchestrator/src/agents/diagnostics", () => ({
+  getDiagnosticStrategy: mockGetDiagnosticStrategy,
+  runDiagnostics: mockRunDiagnostics,
+  formatDiagnosticSummary: (r: any) =>
+    `[diagnostics] ${r.agentId}: ${r.checks.length} checks`,
+}));
+
 // Must import AFTER mocks are set up
-const { runBatchFromLinear } = await import("./run");
+const { runBatchFromLinear, runWorkflow } = await import("./run");
 
 // ── Tests ────────────────────────────────────────────────────────────
 
@@ -120,8 +148,8 @@ describe("runBatchFromLinear", () => {
     mockConsumeAllTickets.mockResolvedValue({ tickets: [], unparseable: [] });
 
     const logs: string[] = [];
-    const origLog = console.log;
-    console.log = (...args: any[]) => logs.push(args.join(" "));
+    const origWrite = process.stdout.write;
+    process.stdout.write = ((chunk: any) => { logs.push(String(chunk)); return true; }) as any;
 
     try {
       await runBatchFromLinear({
@@ -132,7 +160,7 @@ describe("runBatchFromLinear", () => {
         flags: {},
       });
     } finally {
-      console.log = origLog;
+      process.stdout.write = origWrite;
     }
 
     expect(mockConsumeAllTickets).toHaveBeenCalledTimes(1);
@@ -162,10 +190,10 @@ describe("runBatchFromLinear", () => {
     });
 
     const logs: string[] = [];
-    const origLog = console.log;
-    const origWarn = console.warn;
-    console.log = (...args: any[]) => logs.push(args.join(" "));
-    console.warn = (...args: any[]) => logs.push(args.join(" "));
+    const origWrite = process.stdout.write;
+    const origErrWrite = process.stderr.write;
+    process.stdout.write = ((chunk: any) => { logs.push(String(chunk)); return true; }) as any;
+    process.stderr.write = ((chunk: any) => { logs.push(String(chunk)); return true; }) as any;
 
     try {
       await runBatchFromLinear({
@@ -176,8 +204,8 @@ describe("runBatchFromLinear", () => {
         flags: {},
       });
     } finally {
-      console.log = origLog;
-      console.warn = origWarn;
+      process.stdout.write = origWrite;
+      process.stderr.write = origErrWrite;
     }
 
     // Should log unparseable identifiers
@@ -211,8 +239,8 @@ describe("runBatchFromLinear", () => {
     });
 
     const logs: string[] = [];
-    const origLog = console.log;
-    console.log = (...args: any[]) => logs.push(args.join(" "));
+    const origWrite = process.stdout.write;
+    process.stdout.write = ((chunk: any) => { logs.push(String(chunk)); return true; }) as any;
 
     try {
       await runBatchFromLinear({
@@ -223,7 +251,7 @@ describe("runBatchFromLinear", () => {
         flags: {},
       });
     } finally {
-      console.log = origLog;
+      process.stdout.write = origWrite;
     }
 
     // Should log group-0 info
@@ -318,8 +346,10 @@ describe("runBatchFromLinear", () => {
     });
 
     // Suppress error logs from failed group
-    const origError = console.error;
-    console.error = () => {};
+    const origErrWrite = process.stderr.write;
+    const origOutWrite = process.stdout.write;
+    process.stderr.write = (() => true) as any;
+    process.stdout.write = (() => true) as any;
 
     try {
       await runBatchFromLinear({
@@ -330,7 +360,8 @@ describe("runBatchFromLinear", () => {
         flags: {},
       });
     } finally {
-      console.error = origError;
+      process.stderr.write = origErrWrite;
+      process.stdout.write = origOutWrite;
     }
 
     // Only the first group's ticket should be marked done
@@ -338,5 +369,116 @@ describe("runBatchFromLinear", () => {
     expect(mockMarkTicketDone).toHaveBeenCalledWith(
       expect.objectContaining({ issueId: "t1" }),
     );
+  });
+});
+
+// ── skip-diagnostics tests ────────────────────────────────────────────
+
+describe("runWorkflow --skip-diagnostics", () => {
+  let repoRoot: string;
+  let ralphDir: string;
+
+  function writeValidConfig(dir: string) {
+    writeFileSync(
+      join(dir, "config.json"),
+      JSON.stringify({
+        mode: "scheduled-work",
+        repoRoot: "/tmp",
+        rfcPath: join(dir, "rfc.md"),
+        baseBranch: "main",
+        landingMode: "merge",
+        agentOverride: null,
+        agents: { claude: true, codex: false, gh: false },
+        maxConcurrency: 1,
+        createdAt: new Date().toISOString(),
+      }),
+      "utf8",
+    );
+  }
+
+  function writeValidWorkPlan(dir: string) {
+    writeFileSync(
+      join(dir, "work-plan.json"),
+      JSON.stringify({ units: [] }),
+      "utf8",
+    );
+  }
+
+  beforeEach(() => {
+    repoRoot = mkdtempSync(join(tmpdir(), "skip-diag-test-"));
+    ralphDir = join(repoRoot, ".ralphinho");
+    mkdirSync(ralphDir, { recursive: true });
+
+    mockGetDiagnosticStrategy.mockReset();
+    mockGetDiagnosticStrategy.mockReturnValue({
+      agentId: "claude-code",
+      command: "claude",
+      checks: [],
+    } as any);
+    mockRunDiagnostics.mockReset();
+    mockRunDiagnostics.mockResolvedValue({
+      agentId: "claude-code",
+      command: "claude",
+      timestamp: new Date().toISOString(),
+      checks: [
+        { id: "cli_installed", status: "pass", message: "found", durationMs: 1 },
+        { id: "api_key_valid", status: "pass", message: "valid", durationMs: 1 },
+      ],
+      durationMs: 2,
+    } as any);
+    mockResolveSmithersCliPath.mockReset();
+    mockResolveSmithersCliPath.mockReturnValue("/mock/smithers");
+    mockLaunchSmithers.mockReset();
+    mockLaunchSmithers.mockResolvedValue(0);
+
+    writeValidConfig(ralphDir);
+    writeValidWorkPlan(ralphDir);
+    // Create a dummy preset file so existsSync check passes
+    const presetDir = join(repoRoot, "node_modules", "smithers-orchestrator", "src", "workflows", "ralphinho");
+    mkdirSync(presetDir, { recursive: true });
+    writeFileSync(join(presetDir, "preset.tsx"), "", "utf8");
+  });
+
+  test("--skip-diagnostics=true bypasses pre-flight diagnostics", async () => {
+    // Suppress stdout/stderr from log calls
+    const origOut = process.stdout.write;
+    const origErr = process.stderr.write;
+    process.stdout.write = (() => true) as any;
+    process.stderr.write = (() => true) as any;
+
+    try {
+      await runWorkflow({
+        flags: { "skip-diagnostics": true, force: true },
+        repoRoot,
+      });
+    } finally {
+      process.stdout.write = origOut;
+      process.stderr.write = origErr;
+    }
+
+    // When skip-diagnostics is true, the smithers diagnostics functions should not be called
+    expect(mockGetDiagnosticStrategy).not.toHaveBeenCalled();
+    expect(mockRunDiagnostics).not.toHaveBeenCalled();
+  });
+
+  test("without --skip-diagnostics, pre-flight diagnostics runs", async () => {
+    const origOut = process.stdout.write;
+    const origErr = process.stderr.write;
+    process.stdout.write = (() => true) as any;
+    process.stderr.write = (() => true) as any;
+
+    try {
+      await runWorkflow({
+        flags: { force: true },
+        repoRoot,
+      });
+    } finally {
+      process.stdout.write = origOut;
+      process.stderr.write = origErr;
+    }
+
+    // Without skip-diagnostics, the underlying smithers diagnostics should be called
+    expect(mockGetDiagnosticStrategy).toHaveBeenCalled();
+    expect(mockRunDiagnostics).toHaveBeenCalled();
   });
 });

@@ -9,6 +9,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { createLogger } from "../runtime/logger";
 
 import {
   getRalphinhoPresetPath,
@@ -38,6 +39,8 @@ import {
 } from "../workflows/ralphinho/scheduler";
 import { Database } from "bun:sqlite";
 
+const log = createLogger({ context: { phase: "cli" } });
+
 function resolveLatestRunId(dbPath: string): string | null {
   try {
     const db = new Database(dbPath, { readonly: true });
@@ -65,6 +68,11 @@ export async function runWorkflow(opts: {
   const resumeRunId =
     typeof flags.resume === "string" ? flags.resume : null;
   const force = flags.force === true;
+  const skipDiagnostics = flags["skip-diagnostics"] === true;
+  const prometheusPort =
+    typeof flags["prometheus-port"] === "string"
+      ? Number(flags["prometheus-port"])
+      : undefined;
   const linearEnabled = flags.linear === true;
   const linearTeamId = typeof flags.team === "string" ? flags.team : (process.env.LINEAR_TEAM_ID ?? null);
   const linearLabel = typeof flags.label === "string" ? flags.label : (process.env.LINEAR_LABEL ?? "ralph-approved");
@@ -73,8 +81,25 @@ export async function runWorkflow(opts: {
     : undefined;
 
   if (linearEnabled && !linearTeamId) {
-    console.error("Error: --linear requires --team <team-id> or LINEAR_TEAM_ID env var.");
+    log.error("Error: --linear requires --team <team-id> or LINEAR_TEAM_ID env var.");
     process.exit(1);
+  }
+
+  // ── Prometheus metrics server ────────────────────────────────────────
+  let promStop: (() => void) | undefined;
+  if (prometheusPort !== undefined) {
+    try {
+      const { startPrometheusServer } = await import("./prometheus");
+      const prom = startPrometheusServer({ port: prometheusPort });
+      promStop = prom.stop;
+      log.info(`📊 Prometheus metrics at http://localhost:${prom.port}/metrics`);
+      // Ensure cleanup on process exit
+      process.on("exit", () => promStop?.());
+    } catch (err) {
+      log.warn(
+        `⚠️  Prometheus server failed to start on port ${prometheusPort}: ${err instanceof Error ? err.message : String(err)}. Continuing without metrics.`,
+      );
+    }
   }
 
   // Build Linear options (undefined when --linear is not set)
@@ -94,7 +119,7 @@ export async function runWorkflow(opts: {
 
   // ── Load config ─────────────────────────────────────────────────────
   if (!existsSync(configPath)) {
-    console.error(
+    log.error(
       "Error: No workflow initialized. Run `ralphinho init` first.",
     );
     process.exit(1);
@@ -107,16 +132,13 @@ export async function runWorkflow(opts: {
   // ── Find Smithers ───────────────────────────────────────────────────
   const smithersCliPath = resolveSmithersCliPath(join(repoRoot, "package.json"));
   if (!smithersCliPath) {
-    console.error(
+    log.error(
       "Error: Could not find smithers CLI. Install smithers-orchestrator:\n  bun add smithers-orchestrator",
     );
     process.exit(1);
   }
 
-  const maxConcurrency =
-    typeof flags["max-concurrency"] === "string"
-      ? Math.max(1, Number(flags["max-concurrency"]) || config.maxConcurrency)
-      : config.maxConcurrency;
+  const maxConcurrency = parseMaxConcurrency(flags, config.maxConcurrency);
 
   // ── Execute scheduled work ──────────────────────────────────────────
   const planFileName = config.mode === "review-discovery"
@@ -124,7 +146,7 @@ export async function runWorkflow(opts: {
     : "work-plan.json";
   const planPath = join(ralphDir, planFileName);
   if (!existsSync(planPath)) {
-    console.error(
+    log.error(
       `Error: No ${planFileName} found. Run \`ralphinho plan\` or \`ralphinho init\` first.`,
     );
     process.exit(1);
@@ -135,7 +157,7 @@ export async function runWorkflow(opts: {
   const envOverrides = buildPresetEnv(ralphDir, dbPath, planPath);
 
   if (!existsSync(workflowPath)) {
-    console.error(
+    log.error(
       `Error: Built-in preset not found at ${workflowPath}. Reinstall super-ralph and try again.`,
     );
     process.exit(1);
@@ -144,10 +166,10 @@ export async function runWorkflow(opts: {
   // ── Resume path ─────────────────────────────────────────────────────
   if (resumeRunId) {
     if (!existsSync(dbPath)) {
-      console.error("Error: No database found. Cannot resume.");
+      log.error("Error: No database found. Cannot resume.");
       process.exit(1);
     }
-    console.log(`Attempting to resume run ${resumeRunId}...\n`);
+    log.info(`Attempting to resume run ${resumeRunId}...\n`);
 
     return launchAndReport({
       mode: "resume",
@@ -170,10 +192,10 @@ export async function runWorkflow(opts: {
     if (force) {
       const latestRunId = resolveLatestRunId(dbPath);
       if (!latestRunId) {
-        console.error("Error: Could not find a run ID to resume in the database.");
+        log.error("Error: Could not find a run ID to resume in the database.");
         process.exit(1);
       }
-      console.log(`Attempting to resume run ${latestRunId} (--force)...\n`);
+      log.info(`Attempting to resume run ${latestRunId} (--force)...\n`);
       return launchAndReport({
         mode: "resume",
         workflowPath,
@@ -189,7 +211,7 @@ export async function runWorkflow(opts: {
       });
     }
 
-    console.log("Found an existing scheduled-work run.\n");
+    log.info("Found an existing scheduled-work run.\n");
     const options = ["Start fresh (new run ID)", "Resume previous run", "Cancel"];
 
     const choice = await promptChoice("What would you like to do?", options);
@@ -197,10 +219,10 @@ export async function runWorkflow(opts: {
     if (choice === 1) {
       const latestRunId = resolveLatestRunId(dbPath);
       if (!latestRunId) {
-        console.error("Error: Could not find a run ID to resume in the database.");
+        log.error("Error: Could not find a run ID to resume in the database.");
         process.exit(1);
       }
-      console.log(`Attempting to resume run ${latestRunId}...\n`);
+      log.info(`Attempting to resume run ${latestRunId}...\n`);
       return launchAndReport({
         mode: "resume",
         workflowPath,
@@ -224,28 +246,28 @@ export async function runWorkflow(opts: {
   const plan = JSON.parse(await readFile(planPath, "utf8"));
   const unitCount = plan.units?.length ?? 0;
 
-  console.log(`\n🚀 ralphinho — ${config.mode === "review-discovery" ? "Review Discovery" : "Scheduled Work"}\n`);
+  log.info(`\n🚀 ralphinho — ${config.mode === "review-discovery" ? "Review Discovery" : "Scheduled Work"}\n`);
   if (config.mode === "scheduled-work") {
-    console.log(`  RFC: ${config.rfcPath}`);
-    console.log(`  Work units: ${unitCount}`);
+    log.info(`  RFC: ${config.rfcPath}`);
+    log.info(`  Work units: ${unitCount}`);
   } else {
     const reviewPlan = JSON.parse(await readFile(planPath, "utf8"));
-    console.log(`  Instruction: ${config.reviewInstruction}`);
-    console.log(`  Review slices: ${reviewPlan.slices?.length ?? 0}`);
+    log.info(`  Instruction: ${config.reviewInstruction}`);
+    log.info(`  Review slices: ${reviewPlan.slices?.length ?? 0}`);
   }
-  console.log(`  Max concurrency: ${maxConcurrency}`);
+  log.info(`  Max concurrency: ${maxConcurrency}`);
   const agentOverride = config.mode === "review-discovery"
     ? config.reviewAgentOverride
     : config.mode === "scheduled-work"
       ? config.agentOverride
       : null;
   if (agentOverride) {
-    console.log(`  Agent: ${agentOverride}`);
+    log.info(`  Agent: ${agentOverride}`);
   } else {
-    console.log(`  Agents: claude=${config.agents.claude} codex=${config.agents.codex}`);
+    log.info(`  Agents: claude=${config.agents.claude} codex=${config.agents.codex}`);
   }
   if (linearOpts) {
-    console.log(`  Linear: team=${linearOpts.teamId} label=${linearOpts.label}\n`);
+    log.info(`  Linear: team=${linearOpts.teamId} label=${linearOpts.label}\n`);
   }
 
   if (!force) {
@@ -256,8 +278,26 @@ export async function runWorkflow(opts: {
       ["Yes, start", "No, cancel"],
     );
     if (confirmChoice !== 0) {
-      console.log("Cancelled.\n");
+      log.info("Cancelled.\n");
       process.exit(0);
+    }
+  }
+
+  // ── Pre-flight diagnostics ──────────────────────────────────────────
+  if (!skipDiagnostics) {
+    const { runPreflightDiagnostics } = await import("./diagnostics");
+    const enabledAgents = agentOverride
+      ? [agentOverride === "codex" ? "codex" : "claude"]
+      : Object.entries(config.agents)
+          .filter(([, v]) => v)
+          .map(([k]) => k);
+    const diag = await runPreflightDiagnostics({ enabledAgents, cwd: repoRoot });
+    for (const w of diag.warnings) log.warn(`⚠️  ${w}`);
+    if (!diag.ok) {
+      log.error(
+        `❌ Pre-flight failed for: ${diag.failedAgents.join(", ")}. Fix issues above or use --skip-diagnostics.`,
+      );
+      process.exit(1);
     }
   }
 
@@ -300,11 +340,11 @@ async function launchAndReport(opts: {
 }): Promise<void> {
   const { label, configMode: _configMode, linear, ...launchOpts } = opts;
 
-  console.log(`🎬 ${label} — Starting execution...`);
+  log.info(`🎬 ${label} — Starting execution...`);
   if (launchOpts.runId) {
-    console.log(`  Run ID: ${launchOpts.runId}`);
+    log.info(`  Run ID: ${launchOpts.runId}`);
   }
-  console.log();
+  log.info("");
 
   const exitCode = await launchSmithers(launchOpts);
 
@@ -313,14 +353,14 @@ async function launchAndReport(opts: {
 
     // Push findings to Linear if enabled
     if (linear) {
-      console.log("\n📤 Pushing findings to Linear...\n");
+      log.info("\n📤 Pushing findings to Linear...\n");
       const dbPath = join(getRalphDir(opts.repoRoot), "workflow.db");
       const result = await pushFindingsToLinear({
         dbPath,
         teamId: linear.teamId,
         minPriority: linear.minPriority,
       });
-      console.log(
+      log.info(
         `\n  Linear: ${result.created.length} issues created, ${result.skipped} skipped.`,
       );
     }
@@ -328,13 +368,13 @@ async function launchAndReport(opts: {
 
   // Mark Linear ticket done after successful scheduled-work
   if (exitCode === 0 && opts.configMode === "scheduled-work" && linear?.issueId) {
-    console.log("\n📤 Updating Linear ticket...\n");
+    log.info("\n📤 Updating Linear ticket...\n");
     await markTicketDone({
       issueId: linear.issueId,
       teamId: linear.teamId,
       summary: `Completed by ralphinho run ${launchOpts.runId ?? "unknown"}.`,
     });
-    console.log("  Linear ticket marked as done.");
+    log.info("  Linear ticket marked as done.");
   }
 
   reportExit(exitCode, label);
@@ -342,11 +382,20 @@ async function launchAndReport(opts: {
 
 function reportExit(exitCode: number, label: string): void {
   if (exitCode === 0) {
-    console.log(`\n✅ ${label} completed successfully!\n`);
+    log.info(`\n✅ ${label} completed successfully!\n`);
   } else {
-    console.error(`\n❌ ${label} exited with code ${exitCode}\n`);
+    log.error(`\n❌ ${label} exited with code ${exitCode}\n`);
     process.exit(exitCode);
   }
+}
+
+function parseMaxConcurrency(
+  flags: ParsedArgs["flags"],
+  fallback: number,
+): number {
+  return typeof flags["max-concurrency"] === "string"
+    ? Math.max(1, Number(flags["max-concurrency"]) || fallback)
+    : fallback;
 }
 
 function buildPresetEnv(
@@ -375,7 +424,7 @@ async function runFromLinearTicket(opts: {
 }): Promise<void> {
   const { repoRoot, ralphDir, linearOpts, force, flags } = opts;
 
-  console.log("🔍 Fetching approved ticket from Linear...\n");
+  log.info("🔍 Fetching approved ticket from Linear...\n");
 
   const ticket = await consumeTicket({
     teamId: linearOpts.teamId,
@@ -383,12 +432,12 @@ async function runFromLinearTicket(opts: {
   });
 
   if (!ticket) {
-    console.log("  No approved tickets found in Linear. Nothing to do.\n");
+    log.info("  No approved tickets found in Linear. Nothing to do.\n");
     return;
   }
 
-  console.log(`  Found: ${ticket.issue.identifier} — ${ticket.issue.title}`);
-  console.log(`  Priority: ${ticket.issue.priorityLabel}\n`);
+  log.info(`  Found: ${ticket.issue.identifier} — ${ticket.issue.title}`);
+  log.info(`  Priority: ${ticket.issue.priorityLabel}\n`);
 
   // Mark in-progress
   await markTicketInProgress({
@@ -400,7 +449,7 @@ async function runFromLinearTicket(opts: {
   await mkdir(ralphDir, { recursive: true });
   const rfcPath = join(ralphDir, "linear-task.md");
   await writeFile(rfcPath, ticket.rfcContent, "utf8");
-  console.log(`  Written RFC: ${rfcPath}`);
+  log.info(`  Written RFC: ${rfcPath}`);
 
   // Run init-scheduled programmatically
   const { initScheduledWork } = await import("./init-scheduled");
@@ -413,7 +462,7 @@ async function runFromLinearTicket(opts: {
   // Now load the config and launch
   const configPath = join(ralphDir, "config.json");
   if (!existsSync(configPath)) {
-    console.error("Error: init-scheduled failed to create config.");
+    log.error("Error: init-scheduled failed to create config.");
     process.exit(1);
   }
 
@@ -423,14 +472,11 @@ async function runFromLinearTicket(opts: {
 
   const smithersCliPath = resolveSmithersCliPath(join(repoRoot, "package.json"));
   if (!smithersCliPath) {
-    console.error("Error: Could not find smithers CLI.");
+    log.error("Error: Could not find smithers CLI.");
     process.exit(1);
   }
 
-  const maxConcurrency =
-    typeof flags["max-concurrency"] === "string"
-      ? Math.max(1, Number(flags["max-concurrency"]) || config.maxConcurrency)
-      : config.maxConcurrency;
+  const maxConcurrency = parseMaxConcurrency(flags, config.maxConcurrency);
 
   const planPath = join(ralphDir, "work-plan.json");
   const dbPath = join(ralphDir, "workflow.db");
@@ -474,7 +520,7 @@ export async function runBatchFromLinear(opts: {
 }): Promise<void> {
   const { repoRoot, ralphDir, linearOpts, force, flags } = opts;
 
-  console.log("🔍 Fetching all approved tickets from Linear...\n");
+  log.info("🔍 Fetching all approved tickets from Linear...\n");
 
   const { tickets, unparseable } = await consumeAllTickets({
     teamId: linearOpts.teamId,
@@ -482,12 +528,12 @@ export async function runBatchFromLinear(opts: {
   });
 
   if (tickets.length === 0 && unparseable.length === 0) {
-    console.log("  No approved tickets found. Nothing to do.\n");
+    log.info("  No approved tickets found. Nothing to do.\n");
     return;
   }
 
   if (tickets.length === 0) {
-    console.log(
+    log.info(
       "  No parseable tickets found (all tickets lack metadata). Nothing to do.\n",
     );
     return;
@@ -495,29 +541,29 @@ export async function runBatchFromLinear(opts: {
 
   // Log unparseable tickets
   if (unparseable.length > 0) {
-    console.log(
+    log.info(
       `  ⚠️  Skipping ${unparseable.length} unparseable ticket(s):`,
     );
     for (const t of unparseable) {
-      console.log(`    - ${t.issue.identifier}: ${t.issue.title}`);
+      log.info(`    - ${t.issue.identifier}: ${t.issue.title}`);
     }
-    console.log();
+    log.info("");
   }
 
-  console.log(`  Found ${tickets.length} parseable ticket(s).\n`);
+  log.info(`  Found ${tickets.length} parseable ticket(s).\n`);
 
   // Group by file overlap
   const groups = groupByFileOverlap(tickets);
 
   // Log grouping plan
-  console.log(`  📋 Batch plan: ${groups.length} group(s)\n`);
+  log.info(`  📋 Batch plan: ${groups.length} group(s)\n`);
   for (const group of groups) {
     const ticketIds = group.tickets
       .map((t) => t.issue.identifier)
       .join(", ");
-    console.log(`    ${group.id}: files=[${group.files.join(", ")}] tickets=[${ticketIds}]`);
+    log.info(`    ${group.id}: files=[${group.files.join(", ")}] tickets=[${ticketIds}]`);
   }
-  console.log();
+  log.info("");
 
   // Mark all parseable tickets in-progress before executing groups
   await Promise.all(
@@ -534,7 +580,7 @@ export async function runBatchFromLinear(opts: {
     join(repoRoot, "package.json"),
   );
   if (!smithersCliPath) {
-    console.error("Error: Could not find smithers CLI.");
+    log.error("Error: Could not find smithers CLI.");
     process.exit(1);
   }
 
@@ -547,7 +593,7 @@ export async function runBatchFromLinear(opts: {
 
   // Execute groups sequentially
   for (const group of groups) {
-    console.log(`\n🚀 Executing ${group.id}...\n`);
+    log.info(`\n🚀 Executing ${group.id}...\n`);
 
     const workPlan = groupToWorkPlan(group, repoConfig);
 
@@ -569,10 +615,7 @@ export async function runBatchFromLinear(opts: {
           landingMode: "pr",
           agentOverride: null,
           agents: { claude: true, codex: true, gh: false },
-          maxConcurrency:
-            typeof flags["max-concurrency"] === "string"
-              ? Math.max(1, Number(flags["max-concurrency"]) || 4)
-              : 4,
+          maxConcurrency: parseMaxConcurrency(flags, 4),
           createdAt: new Date().toISOString(),
         },
         null,
@@ -587,10 +630,7 @@ export async function runBatchFromLinear(opts: {
 
     const runId = `sw-batch-${group.id}-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
 
-    const maxConcurrency =
-      typeof flags["max-concurrency"] === "string"
-        ? Math.max(1, Number(flags["max-concurrency"]) || 4)
-        : 4;
+    const maxConcurrency = parseMaxConcurrency(flags, 4);
 
     const exitCode = await launchSmithers({
       mode: "run",
@@ -604,7 +644,7 @@ export async function runBatchFromLinear(opts: {
     });
 
     if (exitCode === 0) {
-      console.log(`  ✅ ${group.id} completed successfully.`);
+      log.info(`  ✅ ${group.id} completed successfully.`);
       // Mark this group's tickets as done
       for (const ticket of group.tickets) {
         await markTicketDone({
@@ -614,14 +654,14 @@ export async function runBatchFromLinear(opts: {
         });
       }
     } else {
-      console.error(
+      log.error(
         `  ❌ ${group.id} failed (exit ${exitCode}). Tickets remain in-progress.`,
       );
       // Continue to next group — failed group tickets stay in-progress
     }
   }
 
-  console.log("\n🏁 Batch execution complete.\n");
+  log.info("\n🏁 Batch execution complete.\n");
 }
 
 async function projectReviewArtifacts(repoRoot: string): Promise<void> {

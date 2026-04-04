@@ -6,6 +6,9 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createLogger } from "../runtime/logger";
+
+const log = createLogger({ context: { phase: "cli" } });
 
 // ── Path detection ────────────────────────────────────────────────────
 
@@ -195,7 +198,7 @@ export async function ensureJjColocated(repoRoot: string) {
   if (existsSync(join(repoRoot, ".jj"))) return;
 
   // Auto-colocate so jj commands work in the target repo.
-  console.log("  jj not yet colocated — running `jj git init --colocate`...");
+  log.info("  jj not yet colocated — running `jj git init --colocate`...");
   const proc = Bun.spawn(["jj", "git", "init", "--colocate"], {
     cwd: repoRoot,
     stdout: "inherit",
@@ -207,7 +210,7 @@ export async function ensureJjColocated(repoRoot: string) {
       "Failed to colocate jj. Run `jj git init --colocate` manually in the repo root.",
     );
   }
-  console.log("  jj colocated successfully.\n");
+  log.info("  jj colocated successfully.\n");
 }
 
 // ── Config building ───────────────────────────────────────────────────
@@ -343,9 +346,9 @@ export async function promptChoice(
   message: string,
   options: string[],
 ): Promise<number> {
-  console.log(message);
+  log.info(message);
   for (let i = 0; i < options.length; i++) {
-    console.log(`  ${i + 1}) ${options[i]}`);
+    log.info(`  ${i + 1}) ${options[i]}`);
   }
   process.stdout.write("\nChoice: ");
 
@@ -354,10 +357,10 @@ export async function promptChoice(
   reader.releaseLock();
   const input = new TextDecoder().decode(value).trim();
   const choice = parseInt(input, 10);
-  console.log();
+  log.info("");
 
   if (isNaN(choice) || choice < 1 || choice > options.length) {
-    console.log(`Invalid choice "${input}", defaulting to 1.\n`);
+    log.info(`Invalid choice "${input}", defaulting to 1.\n`);
     return 0;
   }
   return choice - 1;
@@ -370,4 +373,23 @@ export const RALPHINHO_DIR = ".ralphinho";
 
 export function getRalphDir(repoRoot: string): string {
   return join(repoRoot, RALPHINHO_DIR);
+}
+
+// ── Shared DB helper ──────────────────────────────────────────────────
+
+/**
+ * Open the smithers DB, run a callback, and clean up.
+ * Throws on error — callers in ralphinho.ts catch and exit.
+ */
+export async function withSmithersDb<T>(
+  dbPath: string,
+  fn: (adapter: any) => Promise<T>,
+): Promise<T> {
+  const { openSmithersDb } = await import("smithers-orchestrator/src/cli/find-db");
+  const { adapter, cleanup } = await openSmithersDb(dbPath);
+  try {
+    return await fn(adapter);
+  } finally {
+    cleanup();
+  }
 }

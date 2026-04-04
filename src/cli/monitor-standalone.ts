@@ -7,11 +7,14 @@
 
 import { dirname, join } from "node:path";
 import { runMonitorUI } from "../advanced-monitor-ui";
+import { createLogger } from "../runtime/logger";
+
+const log = createLogger({ context: { phase: "monitor" } });
 
 const [dbPath, runId, projectName, prompt, eventLogPath] = process.argv.slice(2);
 
 if (!dbPath || !runId) {
-  console.error("Usage: bun monitor-standalone.ts <dbPath> <runId> [projectName] [prompt] [eventLogPath]");
+  log.error("Usage: bun monitor-standalone.ts <dbPath> <runId> [projectName] [prompt] [eventLogPath]");
   process.exit(1);
 }
 
@@ -23,6 +26,6 @@ runMonitorUI({
   logFile: join(dirname(dbPath), "monitor.log"),
   eventLogPath,
 }).catch((err) => {
-  console.error("Monitor error:", err);
+  log.error("Monitor error:", err);
   process.exit(1);
 });

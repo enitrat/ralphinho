@@ -82,6 +82,7 @@ const roles = {
   codeReviewer: chooseAgent(AGENT_OVERRIDE ?? "opus", "Code Reviewer — Check code quality, conventions, security"),
   reviewFixer: chooseAgent(AGENT_OVERRIDE ?? "codex", "ReviewFixer — Fix issues found in code review"),
   learningsExtractor: chooseAgent(AGENT_OVERRIDE ?? "sonnet", "Learnings Extractor — Extract generalizable patterns from review cycles"),
+  judge: chooseAgent(AGENT_OVERRIDE ?? "sonnet", "Judge — LLM-as-judge scorer for evaluating task outputs"),
   mergeQueue: chooseAgent(AGENT_OVERRIDE ?? "opus", "MergeQueue Coordinator — Rebase and land unit branches onto the configured target branch"),
 } satisfies Record<keyof ScheduledWorkflowAgents, { agent: AgentLike | AgentLike[]; fallback?: AgentLike }>;
 
@@ -115,6 +116,8 @@ export default smithers((ctx) => (
       landingMode={config.landingMode}
       agents={agents}
       fallbacks={fallbacks}
+      dbPath={paths.dbPath}
+      prompt={config.rfcPath}
     />
   </Workflow>
 ));

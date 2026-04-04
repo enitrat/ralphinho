@@ -139,7 +139,88 @@ describe("queryRows", () => {
   });
 });
 
+async function makeTokenUsageDb(rows: Array<{
+  runId: string;
+  nodeId: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number | null;
+  cacheWriteTokens: number | null;
+  reasoningTokens: number | null;
+  durationMs: number;
+  timestampMs: number | null;
+}>): Promise<{ dir: string; dbPath: string }> {
+  const dir = await mkdtemp(join(tmpdir(), "event-bridge-token-test-"));
+  const dbPath = join(dir, "events.db");
+  const db = new Database(dbPath);
+  db.run(`
+    CREATE TABLE _smithers_token_usage (
+      run_id TEXT NOT NULL,
+      node_id TEXT NOT NULL,
+      input_tokens INTEGER NOT NULL,
+      output_tokens INTEGER NOT NULL,
+      cache_read_tokens INTEGER,
+      cache_write_tokens INTEGER,
+      reasoning_tokens INTEGER,
+      duration_ms INTEGER NOT NULL,
+      timestamp_ms INTEGER
+    )
+  `);
+  for (const row of rows) {
+    db.run(
+      `INSERT INTO _smithers_token_usage
+       (run_id, node_id, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, duration_ms, timestamp_ms)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [row.runId, row.nodeId, row.inputTokens, row.outputTokens, row.cacheReadTokens, row.cacheWriteTokens, row.reasoningTokens, row.durationMs, row.timestampMs],
+    );
+  }
+  db.close();
+  return { dir, dbPath };
+}
+
 describe("pollEventsFromDb", () => {
+  test("emits token-usage-reported from _smithers_token_usage table", async () => {
+    const { dir, dbPath } = await makeTokenUsageDb([
+      {
+        runId: "run-1",
+        nodeId: "ticket-1:implement",
+        inputTokens: 100,
+        outputTokens: 200,
+        cacheReadTokens: 50,
+        cacheWriteTokens: null,
+        reasoningTokens: null,
+        durationMs: 1500,
+        timestampMs: 1000,
+      },
+    ]);
+    try {
+      const events = await pollEventsFromDb(dbPath, "run-1", join(dir, "missing-plan.json"));
+      const tokenEvent = events.find((e) => e.type === "token-usage-reported");
+      expect(tokenEvent).toBeDefined();
+      expect(tokenEvent!.type).toBe("token-usage-reported");
+      if (tokenEvent!.type === "token-usage-reported") {
+        expect(tokenEvent!.inputTokens).toBe(100);
+        expect(tokenEvent!.outputTokens).toBe(200);
+        expect(tokenEvent!.cacheReadTokens).toBe(50);
+        expect(tokenEvent!.durationMs).toBe(1500);
+        expect(tokenEvent!.timestamp).toBe(1000);
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("gracefully handles missing _smithers_token_usage table", async () => {
+    const { dir, dbPath } = await makeReviewLoopDb([]);
+    try {
+      const events = await pollEventsFromDb(dbPath, "run-1", join(dir, "missing-plan.json"));
+      const tokenEvents = events.filter((e) => e.type === "token-usage-reported");
+      expect(tokenEvents).toHaveLength(0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test("keeps final review decision pending while review loop is not passed and not exhausted", async () => {
     const { dir, dbPath } = await makeReviewLoopDb([
       {

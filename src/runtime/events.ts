@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { appendFile, readFile } from "node:fs/promises";
 
 import { z } from "zod";
 
@@ -138,6 +138,89 @@ const semanticCompletionUpdateSchema = z.object({
   unitsSemanticallyComplete: stringArrayFilterSchema,
 });
 
+const tokenUsageReportedSchema = z.object({
+  type: z.literal("token-usage-reported"),
+  timestamp: z.number().finite(),
+  runId: z.string(),
+  nodeId: z.string(),
+  inputTokens: z.number().finite(),
+  outputTokens: z.number().finite(),
+  cacheReadTokens: z.number().finite().optional(),
+  cacheWriteTokens: z.number().finite().optional(),
+  reasoningTokens: z.number().finite().optional(),
+  durationMs: z.number().finite(),
+});
+
+const agentEventSchema = z.object({
+  type: z.literal("agent-event"),
+  timestamp: z.number().finite(),
+  runId: z.string(),
+  nodeId: z.string(),
+  agentType: z.string(),
+  message: z.string(),
+});
+
+const scorerStartedSchema = z.object({
+  type: z.literal("scorer-started"),
+  timestamp: z.number().finite(),
+  runId: z.string(),
+  nodeId: z.string(),
+  scorerName: z.string(),
+});
+
+const scorerFinishedSchema = z.object({
+  type: z.literal("scorer-finished"),
+  timestamp: z.number().finite(),
+  runId: z.string(),
+  nodeId: z.string(),
+  scorerName: z.string(),
+  score: z.number().finite(),
+});
+
+const scorerFailedSchema = z.object({
+  type: z.literal("scorer-failed"),
+  timestamp: z.number().finite(),
+  runId: z.string(),
+  nodeId: z.string(),
+  scorerName: z.string(),
+  error: z.string(),
+});
+
+const snapshotCapturedSchema = z.object({
+  type: z.literal("snapshot-captured"),
+  timestamp: z.number().finite(),
+  runId: z.string(),
+  snapshotId: z.string(),
+});
+
+const runForkedSchema = z.object({
+  type: z.literal("run-forked"),
+  timestamp: z.number().finite(),
+  runId: z.string(),
+  parentRunId: z.string(),
+});
+
+const replayStartedSchema = z.object({
+  type: z.literal("replay-started"),
+  timestamp: z.number().finite(),
+  runId: z.string(),
+  sourceRunId: z.string(),
+});
+
+const runHijackRequestedSchema = z.object({
+  type: z.literal("run-hijack-requested"),
+  timestamp: z.number().finite(),
+  runId: z.string(),
+  requestedBy: z.string(),
+});
+
+const runHijackedSchema = z.object({
+  type: z.literal("run-hijacked"),
+  timestamp: z.number().finite(),
+  runId: z.string(),
+  hijackedBy: z.string(),
+});
+
 // ── Discriminated union ─────────────────────────────────────────
 
 const smithersEventSchema = z.discriminatedUnion("type", [
@@ -153,6 +236,16 @@ const smithersEventSchema = z.discriminatedUnion("type", [
   workPlanLoadedSchema,
   finalReviewDecisionSchema,
   semanticCompletionUpdateSchema,
+  tokenUsageReportedSchema,
+  agentEventSchema,
+  scorerStartedSchema,
+  scorerFinishedSchema,
+  scorerFailedSchema,
+  snapshotCapturedSchema,
+  runForkedSchema,
+  replayStartedSchema,
+  runHijackRequestedSchema,
+  runHijackedSchema,
 ]);
 
 // ── Exported types (derived from Zod schemas — single source of truth) ──────
@@ -171,6 +264,16 @@ export type PassTrackerUpdateEvent = z.infer<typeof passTrackerUpdateSchema>;
 export type WorkPlanLoadedEvent = z.infer<typeof workPlanLoadedSchema>;
 export type FinalReviewDecisionEvent = z.infer<typeof finalReviewDecisionSchema>;
 export type SemanticCompletionUpdateEvent = z.infer<typeof semanticCompletionUpdateSchema>;
+export type TokenUsageReportedEvent = z.infer<typeof tokenUsageReportedSchema>;
+export type AgentEvent = z.infer<typeof agentEventSchema>;
+export type ScorerStartedEvent = z.infer<typeof scorerStartedSchema>;
+export type ScorerFinishedEvent = z.infer<typeof scorerFinishedSchema>;
+export type ScorerFailedEvent = z.infer<typeof scorerFailedSchema>;
+export type SnapshotCapturedEvent = z.infer<typeof snapshotCapturedSchema>;
+export type RunForkedEvent = z.infer<typeof runForkedSchema>;
+export type ReplayStartedEvent = z.infer<typeof replayStartedSchema>;
+export type RunHijackRequestedEvent = z.infer<typeof runHijackRequestedSchema>;
+export type RunHijackedEvent = z.infer<typeof runHijackedSchema>;
 
 // ── Parser ──────────────────────────────────────────────────────
 
@@ -181,6 +284,24 @@ export function parseEvent(value: unknown): SmithersEvent | null {
 }
 
 // ── Event log reader ────────────────────────────────────────────
+
+export async function writeEventLog(path: string, events: SmithersEvent[]): Promise<void> {
+  const lines = events.map((e) => JSON.stringify(e)).join("\n");
+  if (lines) await appendFile(path, lines + "\n", "utf8");
+}
+
+/**
+ * Write unknown data as NDJSON, validating each entry through the event schema first.
+ * Use this when the data source is untrusted (e.g. raw JSON from external input).
+ */
+export async function writeUntrustedEventLog(path: string, data: unknown[]): Promise<void> {
+  const lines = data
+    .map((d) => smithersEventSchema.safeParse(d))
+    .filter((r) => r.success)
+    .map((r) => JSON.stringify(r.data))
+    .join("\n");
+  if (lines) await appendFile(path, lines + "\n", "utf8");
+}
 
 export async function readEventLog(path: string): Promise<SmithersEvent[]> {
   let raw: string;

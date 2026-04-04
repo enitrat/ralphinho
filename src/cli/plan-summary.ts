@@ -3,6 +3,9 @@
  */
 
 import type { WorkPlan, WorkUnit } from "../workflows/ralphinho/types";
+import { createLogger } from "../runtime/logger";
+
+const log = createLogger({ context: { phase: "plan" } });
 
 /**
  * Pretty-print a work plan summary to the console.
@@ -16,21 +19,21 @@ export function printPlanSummary(
     tierCounts[u.tier]++;
   }
 
-  console.log(
+  log.info(
     `\n  Generated ${plan.units.length} work units in ${layers.length} parallelizable layers\n`,
   );
 
-  console.log("  Tiers:");
+  log.info("  Tiers:");
   for (const [tier, count] of Object.entries(tierCounts)) {
-    if (count > 0) console.log(`    ${tier}: ${count}`);
+    if (count > 0) log.info(`    ${tier}: ${count}`);
   }
 
-  console.log("\n  Execution layers (units in same layer run in parallel):");
+  log.info("\n  Execution layers (units in same layer run in parallel):");
   for (let i = 0; i < layers.length; i++) {
     const layer = layers[i];
     const names = layer.map((u) => u.id).join(", ");
-    console.log(`    Layer ${i}: [${names}]`);
+    log.info(`    Layer ${i}: [${names}]`);
   }
 
-  console.log();
+  log.info("");
 }

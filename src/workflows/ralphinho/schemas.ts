@@ -7,6 +7,7 @@
  */
 
 import { z } from "zod";
+import { monitorOutputSchema } from "../../components/Monitor";
 
 export const issueSchema = z.object({
   severity: z.enum(["critical", "major", "minor"]),
@@ -19,6 +20,9 @@ export const issueSchema = z.object({
 export type Issue = z.infer<typeof issueSchema>;
 
 export const scheduledOutputSchemas = {
+  // ── Monitor ────────────────────────────────────────────────────────
+  monitor: monitorOutputSchema,
+
   // ── Research ──────────────────────────────────────────────────────
   research: z.object({
     inputSignature: z.string(),

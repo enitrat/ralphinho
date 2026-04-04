@@ -13,16 +13,20 @@
  *   ralphinho status                   Show current state
  */
 
-import { resolve } from "node:path";
-import { parseArgs } from "./shared";
+import { join, resolve } from "node:path";
+import { parseArgs, getRalphDir } from "./shared";
+import { createLogger } from "../runtime/logger";
+
+const log = createLogger({ context: { phase: "cli" } });
 
 function printHelp() {
-  console.log(`ralphinho — RFC-driven AI development workflow CLI
+  log.info(`ralphinho — RFC-driven AI development workflow CLI
 
 Usage:
   ralphinho init ./rfc-003.md
   ralphinho init review "Review src/api/auth for bugs and security issues" --paths src/api/auth
   ralphinho init review "Review packages/app logic" --paths packages/app --agent sonnet
+  ralphinho init bugfinder "Find bugs and improvements" --paths src/
 
   ralphinho plan                             (Re)generate work plan from RFC
   ralphinho run                              Execute the initialized workflow
@@ -30,11 +34,16 @@ Usage:
   ralphinho run --force                      Attempt resume without prompts
   ralphinho monitor --run-id <run-id>        Attach TUI to a workflow run
   ralphinho status                           Show current state
+  ralphinho scores <run-id>                  Show aggregated scorer results
+  smithers replay <run-id> [--frame N]      Replay a run (use smithers CLI directly)
+  smithers diff <a> <b> [--json]            Diff two snapshots (use smithers CLI directly)
 
 Global Options:
   --cwd <path>                Repo root (default: current directory)
   --max-concurrency <n>       Max parallel work units (default: 6)
   --force                     Skip prompts and attempt resume
+  --prometheus-port <port>    Start Prometheus /metrics server on <port>
+  --skip-diagnostics          Skip pre-flight agent diagnostics
   --help                      Show this help
 
 Linear Integration:
@@ -56,7 +65,6 @@ Examples:
   ralphinho run
   ralphinho run --force
   ralphinho run --resume sw-m3abc12-deadbeef
-
   # Linear integration
   ralphinho run --linear --team <team-id>              # improvinho: push findings to Linear
   ralphinho run --linear --team <team-id> --label approved   # ralphinho: consume from Linear
@@ -87,6 +95,15 @@ async function main() {
       if (initMode === "review") {
         const { initReviewDiscovery } = await import("./init-review");
         return initReviewDiscovery({
+          positional: parsed.positional.slice(2),
+          flags: parsed.flags,
+          repoRoot,
+        });
+      }
+
+      if (initMode === "bugfinder") {
+        const { initBugfinder } = await import("./init-bugfinder");
+        return initBugfinder({
           positional: parsed.positional.slice(2),
           flags: parsed.flags,
           repoRoot,
@@ -130,13 +147,34 @@ async function main() {
       return runStatus({ repoRoot });
     }
 
+    case "replay":
+    case "diff": {
+      log.error(`The "${command}" command is now provided by the smithers CLI directly.`);
+      log.error(`Run: smithers ${command} --help`);
+      process.exit(1);
+    }
+
+    case "scores": {
+      const scoresRunId = parsed.positional[1];
+      if (!scoresRunId) {
+        log.error('Usage: ralphinho scores <run-id>');
+        process.exit(1);
+      }
+      const { runScores } = await import("./scores");
+      const scoresDbPath = join(getRalphDir(repoRoot), "workflow.db");
+      return runScores({
+        runId: scoresRunId,
+        dbPath: scoresDbPath,
+      });
+    }
+
     default: {
       if (!command) {
         const { runWorkflow } = await import("./run");
         return runWorkflow({ flags: parsed.flags, repoRoot });
       }
 
-      console.error(
+      log.error(
         `Unknown command: "${command}". Run "ralphinho --help" for usage.`,
       );
       process.exit(1);
@@ -145,6 +183,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error("\n❌ Error:", error.message);
+  log.error("\n❌ Error:", error.message);
   process.exit(1);
 });

@@ -8,6 +8,9 @@ import { join } from "node:path";
 
 import { getRalphDir, getRalphinhoPresetPath } from "./shared";
 import { ralphinhoConfigSchema } from "../config/types";
+import { createLogger } from "../runtime/logger";
+
+const log = createLogger({ context: { phase: "status" } });
 
 export async function runStatus(opts: { repoRoot: string }): Promise<void> {
   const { repoRoot } = opts;
@@ -15,8 +18,8 @@ export async function runStatus(opts: { repoRoot: string }): Promise<void> {
   const configPath = join(ralphDir, "config.json");
 
   if (!existsSync(configPath)) {
-    console.log("No ralphinho workflow initialized in this directory.\n");
-    console.log("Run `ralphinho init` to get started.");
+    log.info("No ralphinho workflow initialized in this directory.\n");
+    log.info("Run `ralphinho init` to get started.");
     return;
   }
 
@@ -24,11 +27,11 @@ export async function runStatus(opts: { repoRoot: string }): Promise<void> {
     JSON.parse(await readFile(configPath, "utf8")),
   );
 
-  console.log(`ralphinho — Status\n`);
-  console.log(`  Mode: ${config.mode}`);
-  console.log(`  Repo: ${config.repoRoot}`);
-  console.log(`  Created: ${config.createdAt}`);
-  console.log(
+  log.info(`ralphinho — Status\n`);
+  log.info(`  Mode: ${config.mode}`);
+  log.info(`  Repo: ${config.repoRoot}`);
+  log.info(`  Created: ${config.createdAt}`);
+  log.info(
     `  Agents: claude=${config.agents.claude} codex=${config.agents.codex}`,
   );
 
@@ -36,26 +39,26 @@ export async function runStatus(opts: { repoRoot: string }): Promise<void> {
     const planPath = join(ralphDir, "work-plan.json");
     if (existsSync(planPath)) {
       const plan = JSON.parse(await readFile(planPath, "utf8"));
-      console.log(`  RFC: ${config.rfcPath}`);
-      console.log(`  Work units: ${plan.units?.length ?? 0}`);
+      log.info(`  RFC: ${config.rfcPath}`);
+      log.info(`  Work units: ${plan.units?.length ?? 0}`);
     } else {
-      console.log("  Work plan: not generated yet");
+      log.info("  Work plan: not generated yet");
     }
   } else {
     const planPath = join(ralphDir, "review-plan.json");
     if (existsSync(planPath)) {
       const plan = JSON.parse(await readFile(planPath, "utf8"));
-      console.log(`  Instruction: ${config.reviewInstruction}`);
-      console.log(`  Review slices: ${plan.slices?.length ?? 0}`);
+      log.info(`  Instruction: ${config.reviewInstruction}`);
+      log.info(`  Review slices: ${plan.slices?.length ?? 0}`);
     } else {
-      console.log("  Review plan: not generated yet");
+      log.info("  Review plan: not generated yet");
     }
   }
 
   const dbPath = join(ralphDir, "workflow.db");
   const workflowPath = getRalphinhoPresetPath(config.mode);
   if (existsSync(dbPath)) {
-    console.log("  Database: exists");
+    log.info("  Database: exists");
     try {
       const { Database } = await import("bun:sqlite");
       const db = new Database(dbPath, { readonly: true });
@@ -75,9 +78,9 @@ export async function runStatus(opts: { repoRoot: string }): Promise<void> {
           const semanticallyComplete = typeof row.units_semantically_complete === "string"
             ? JSON.parse(row.units_semantically_complete) as string[]
             : [];
-          console.log(`  Landed: ${landed.length}/${row.total_units ?? landed.length}`);
-          console.log(`  Semantically complete: ${semanticallyComplete.length}/${row.total_units ?? semanticallyComplete.length}`);
-          if (row.summary) console.log(`  Summary: ${row.summary}`);
+          log.info(`  Landed: ${landed.length}/${row.total_units ?? landed.length}`);
+          log.info(`  Semantically complete: ${semanticallyComplete.length}/${row.total_units ?? semanticallyComplete.length}`);
+          if (row.summary) log.info(`  Summary: ${row.summary}`);
         }
       } else {
         const row = db.query(
@@ -97,11 +100,11 @@ export async function runStatus(opts: { repoRoot: string }): Promise<void> {
             ? JSON.parse(row.local_slices_complete) as string[]
             : [];
           const crossCuttingComplete = Boolean(row.cross_cutting_slice_complete);
-          console.log(`  Local slices complete: ${localSlicesComplete.length}`);
-          console.log(`  Cross-cutting pass complete: ${crossCuttingComplete}`);
-          console.log(`  Confirmed findings: ${row.confirmed_findings ?? 0}`);
-          console.log(`  Merged findings: ${row.merged_findings ?? 0}`);
-          if (row.summary) console.log(`  Summary: ${row.summary}`);
+          log.info(`  Local slices complete: ${localSlicesComplete.length}`);
+          log.info(`  Cross-cutting pass complete: ${crossCuttingComplete}`);
+          log.info(`  Confirmed findings: ${row.confirmed_findings ?? 0}`);
+          log.info(`  Merged findings: ${row.merged_findings ?? 0}`);
+          if (row.summary) log.info(`  Summary: ${row.summary}`);
         }
       }
     } catch {
@@ -109,9 +112,9 @@ export async function runStatus(opts: { repoRoot: string }): Promise<void> {
     }
   }
 
-  console.log(
+  log.info(
     `  Workflow preset: ${existsSync(workflowPath) ? "yes" : "no"}`,
   );
 
-  console.log();
+  log.info("");
 }

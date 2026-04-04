@@ -7,6 +7,9 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import type { ClarificationQuestion, ClarificationAnswer } from "./clarifications.ts";
+import { createLogger } from "../runtime/logger";
+
+const log = createLogger({ context: { phase: "cli", component: "interactive-questions" } });
 
 type AnswerState = {
   index: number;
@@ -59,14 +62,14 @@ async function promptMultipleChoice(params: {
       process.stdout.write("\x1B[2J\x1B[H");
       
       // Tab bar at top
-      console.log(renderTabs(params.questionIndex, params.totalQuestions, params.answered));
-      console.log("");
-      
+      process.stdout.write(renderTabs(params.questionIndex, params.totalQuestions, params.answered) + "\n");
+      process.stdout.write("\n");
+
       // Progress
-      console.log(`\x1b[1mQuestion ${params.questionIndex + 1} of ${params.totalQuestions}\x1b[0m\n`);
-      
+      process.stdout.write(`\x1b[1mQuestion ${params.questionIndex + 1} of ${params.totalQuestions}\x1b[0m\n\n`);
+
       // Question
-      console.log(`${params.question}\n`);
+      process.stdout.write(`${params.question}\n\n`);
 
       // Choices
       for (let i = 0; i < params.choices.length; i++) {
@@ -74,8 +77,8 @@ async function promptMultipleChoice(params: {
         const prefix = i === selectedIndex && !customInputMode ? "→ " : "  ";
         const highlight = i === selectedIndex && !customInputMode ? "\x1b[1m\x1b[36m" : "";
         const reset = i === selectedIndex && !customInputMode ? "\x1b[0m" : "";
-        console.log(`${highlight}${prefix}${i + 1}. ${choice.label}${reset}`);
-        console.log(`     ${choice.description}\n`);
+        process.stdout.write(`${highlight}${prefix}${i + 1}. ${choice.label}${reset}\n`);
+        process.stdout.write(`     ${choice.description}\n\n`);
       }
 
       if (params.allowCustom) {
@@ -85,20 +88,20 @@ async function promptMultipleChoice(params: {
         const highlight = isCustomSelected && !customInputMode ? "\x1b[1m\x1b[36m" : "";
         const reset = isCustomSelected && !customInputMode ? "\x1b[0m" : "";
 
-        console.log(`${highlight}${prefix}${customIndex + 1}. Custom Answer${reset}`);
-        console.log(`     Write your own answer\n`);
+        process.stdout.write(`${highlight}${prefix}${customIndex + 1}. Custom Answer${reset}\n`);
+        process.stdout.write(`     Write your own answer\n\n`);
 
         if (isCustomSelected || customInputMode) {
-          console.log("\x1b[1m\x1b[33m✎ Your answer:\x1b[0m");
-          console.log(`┌${"─".repeat(78)}┐`);
+          process.stdout.write("\x1b[1m\x1b[33m✎ Your answer:\x1b[0m\n");
+          process.stdout.write(`┌${"─".repeat(78)}┐\n`);
           const displayValue = customInputValue.slice(0, 76);
-          console.log(`│ \x1b[36m${displayValue}\x1b[7m \x1b[0m${" ".repeat(Math.max(0, 76 - displayValue.length))}│`);
-          console.log(`└${"─".repeat(78)}┘`);
+          process.stdout.write(`│ \x1b[36m${displayValue}\x1b[7m \x1b[0m${" ".repeat(Math.max(0, 76 - displayValue.length))}│\n`);
+          process.stdout.write(`└${"─".repeat(78)}┘\n`);
         }
       }
 
       // Navigation hints
-      console.log("\n\x1b[90m" + "─".repeat(80) + "\x1b[0m");
+      process.stdout.write("\n\x1b[90m" + "─".repeat(80) + "\x1b[0m\n");
       const hints = [
         "↑/↓: Navigate choices",
         "Enter: Confirm",
@@ -107,7 +110,7 @@ async function promptMultipleChoice(params: {
         "Ctrl+C: Cancel",
         "1-" + totalChoices + ": Quick select",
       ].filter(Boolean);
-      console.log("\x1b[90m" + hints.join(" | ") + "\x1b[0m");
+      process.stdout.write("\x1b[90m" + hints.join(" | ") + "\x1b[0m\n");
     };
 
     render();
@@ -166,7 +169,7 @@ async function promptMultipleChoice(params: {
         }
       } else if (key === "\u0003") {
         cleanup();
-        console.log("\n\nCancelled");
+        process.stdout.write("\n\nCancelled\n");
         process.exit(1);
       } else if (key === "\u007f" || key === "\b") {
         if (isOnCustomOption && customInputValue.length > 0) {
@@ -205,7 +208,7 @@ async function main() {
   const args = process.argv.slice(2);
 
   if (args.length !== 2) {
-    console.error("Usage: bun interactive-questions.ts <questions-file.json> <answers-output.json>");
+    log.error("Usage: bun interactive-questions.ts <questions-file.json> <answers-output.json>");
     process.exit(1);
   }
 
@@ -216,7 +219,7 @@ async function main() {
   const questions: ClarificationQuestion[] = questionsData.questions;
 
   if (!Array.isArray(questions) || questions.length === 0) {
-    console.error("Error: Questions file must contain a non-empty 'questions' array");
+    log.error("Error: Questions file must contain a non-empty 'questions' array");
     process.exit(1);
   }
 
@@ -293,24 +296,24 @@ async function main() {
 
   // Summary
   process.stdout.write("\x1B[2J\x1B[H");
-  console.log("\n" + "=".repeat(80));
-  console.log("CLARIFICATION COMPLETE");
-  console.log("=".repeat(80) + "\n");
+  log.info("\n" + "=".repeat(80));
+  log.info("CLARIFICATION COMPLETE");
+  log.info("=".repeat(80) + "\n");
 
   const summary = answers
     .map((a, i) => `${i + 1}. ${a.question}\n   → ${a.answer}`)
     .join("\n\n");
 
-  console.log("Your answers:\n");
-  console.log(summary);
-  console.log("");
+  log.info("Your answers:\n");
+  log.info(summary);
+  log.info("");
 
   await writeFile(answersPath, JSON.stringify({ answers }, null, 2), "utf8");
-  console.log(`\nAnswers saved to: ${answersPath}\n`);
+  log.info(`\nAnswers saved to: ${answersPath}\n`);
   process.exit(0);
 }
 
 main().catch((error) => {
-  console.error("Error:", error.message);
+  log.error("Error:", error.message);
   process.exit(1);
 });

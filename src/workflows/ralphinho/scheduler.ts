@@ -142,6 +142,7 @@ export function groupToWorkPlan(
     generatedAt: now().toISOString(),
     repo: repoConfig,
     units,
+    baseBranch: "main",
   };
 }
 

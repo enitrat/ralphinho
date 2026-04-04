@@ -1,6 +1,7 @@
 import React from "react";
 import { Task, Sequence, Worktree } from "smithers-orchestrator";
-import type { SmithersCtx, AgentLike } from "smithers-orchestrator";
+import type { SmithersCtx, AgentLike, ScorersMap } from "smithers-orchestrator";
+import { schemaAdherenceScorer, relevancyScorer } from "smithers-orchestrator";
 import type { WorkUnit, WorkPlan } from "../types";
 import { scheduledOutputSchemas } from "../schemas";
 
@@ -35,6 +36,7 @@ export type QualityPipelineAgents = {
   codeReviewer: AgentLike | AgentLike[];
   reviewFixer: AgentLike | AgentLike[];
   learningsExtractor?: AgentLike | AgentLike[];
+  judge?: AgentLike;
 };
 
 /** Single fallback agents per role (used with Task's fallbackAgent prop). */
@@ -94,6 +96,12 @@ export function QualityPipeline({
 }: QualityPipelineProps) {
   const uid = unit.id;
   const tier = unit.tier;
+  const judge = agents.judge;
+
+  const pipelineScorers: ScorersMap = {
+    schemaAdherence: { scorer: schemaAdherenceScorer() },
+    ...(judge ? { relevancy: { scorer: relevancyScorer(judge) } } : {}),
+  };
 
   // In Loop loops, cross-stage reads must use latest() to see prior iterations.
   const research = ctx.latest("research", stageNodeId(uid, "research"));
@@ -154,6 +162,7 @@ export function QualityPipeline({
             agent={agents.researcher}
             fallbackAgent={fallbacks?.researcher}
             retries={STAGE_RETRY_POLICIES["research"].retries}
+            scorers={pipelineScorers}
             meta={{ retryPolicy: STAGE_RETRY_POLICIES["research"] }}
             // Cache semantics: reuse only when the prior output matches current inputs.
             skipIf={research?.inputSignature === researchInputSignature}
@@ -183,6 +192,7 @@ export function QualityPipeline({
             agent={agents.planner}
             fallbackAgent={fallbacks?.planner}
             retries={STAGE_RETRY_POLICIES["plan"].retries}
+            scorers={pipelineScorers}
             meta={{
               dependsOn: [stageNodeId(uid, "research")],
               retryPolicy: STAGE_RETRY_POLICIES["plan"],
@@ -214,6 +224,7 @@ export function QualityPipeline({
           agent={agents.implementer}
           fallbackAgent={fallbacks?.implementer}
           retries={STAGE_RETRY_POLICIES["implement"].retries}
+          scorers={pipelineScorers}
           meta={{ dependsOn: implementDependsOn, retryPolicy: STAGE_RETRY_POLICIES["implement"] }}
           // No cache: implementation must re-run against latest review context.
         >
@@ -250,6 +261,7 @@ export function QualityPipeline({
             prdReviewer: agents.prdReviewer,
             codeReviewer: agents.codeReviewer,
             reviewFixer: agents.reviewFixer,
+            judge: agents.judge,
           }}
           fallbacks={fallbacks ? {
             tester: fallbacks.tester,
