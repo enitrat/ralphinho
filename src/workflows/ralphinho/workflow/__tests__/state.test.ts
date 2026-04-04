@@ -1,13 +1,22 @@
 import { describe, expect, test } from "bun:test";
+import type { SmithersCtx } from "smithers-orchestrator";
 import type { WorkUnit } from "../../types";
+import type { ScheduledOutputs } from "../../components/QualityPipeline";
+import type { z } from "zod";
+import { scheduledOutputSchemas } from "../../schemas";
+import { resolveTableName } from "../../__tests__/testUtils";
 import {
   buildDepSummaries,
   buildMergeTickets,
   getEvictionContext,
   getUnitState,
   isUnitEvicted,
-  type OutputSnapshot,
+  isUnitLanded,
+  shouldRunPipeline,
 } from "../state";
+import { reviewLoopNodeId, stageNodeId } from "../contracts";
+
+type MergeQueueRow = z.infer<typeof scheduledOutputSchemas.merge_queue>;
 
 function unit(id: string, deps: string[] = []): WorkUnit {
   return {
@@ -21,27 +30,38 @@ function unit(id: string, deps: string[] = []): WorkUnit {
   };
 }
 
-function snapshot(overrides: Partial<OutputSnapshot> = {}): OutputSnapshot {
-  const rows = overrides.mergeQueueRows ?? [];
+function createCtx(opts?: {
+  mergeQueueRows?: MergeQueueRow[];
+  latestMap?: Map<string, unknown>;
+}): SmithersCtx<ScheduledOutputs> {
+  const mergeQueueRows = opts?.mergeQueueRows ?? [];
+  const latestMap = opts?.latestMap ?? new Map<string, unknown>();
+
+  const outputsFn = ((table: unknown) => {
+    const name = resolveTableName(table);
+    if (name === "merge_queue") return mergeQueueRows;
+    return [];
+  }) as SmithersCtx<ScheduledOutputs>["outputs"];
+
   return {
-    mergeQueueRows: rows,
-    latestTest: () => null,
-    latestReviewLoopResult: () => null,
-    latestImplement: () => null,
-    freshTest: () => null,
-    testHistory: () => [],
-    implementHistory: () => [],
-    reviewFixHistory: () => [],
-    isUnitLanded: (unitId) =>
-      rows.some((row) => row.nodeId === "merge-queue"
-        && row.ticketsLanded.some((ticket) => ticket.ticketId === unitId)),
+    runId: "run-1",
+    iteration: 0,
+    latest: (table: unknown, nodeId: string) => latestMap.get(`${resolveTableName(table)}|${nodeId}`) ?? null,
+    outputs: outputsFn,
+  } as unknown as SmithersCtx<ScheduledOutputs>;
+}
+
+function mqRow(overrides: Partial<MergeQueueRow> & Pick<MergeQueueRow, "ticketsLanded" | "ticketsEvicted">): MergeQueueRow {
+  return {
+    ticketsSkipped: [],
+    summary: "",
+    nextActions: null,
     ...overrides,
   };
 }
 
 function reviewLoopResult(iterationCount: number, passed = true) {
   return {
-    nodeId: "u1:review-loop-result",
     iterationCount,
     codeSeverity: "none" as const,
     prdSeverity: "none" as const,
@@ -52,139 +72,165 @@ function reviewLoopResult(iterationCount: number, passed = true) {
 
 describe("isUnitLanded", () => {
   test("returns true when merge queue has landed ticket", () => {
-    const s = snapshot({
-      mergeQueueRows: [{
-        nodeId: "merge-queue",
+    const ctx = createCtx({
+      mergeQueueRows: [mqRow({
         ticketsLanded: [{ ticketId: "u1", mergeCommit: "abc", summary: "ok", reviewLoopIterationCount: 1, testIteration: 1 }],
         ticketsEvicted: [],
-      }],
+      })],
     });
 
-    expect(s.isUnitLanded("u1")).toBe(true);
+    expect(isUnitLanded(ctx, "u1")).toBe(true);
   });
 
   test("returns false when no landed entry exists", () => {
-    const s = snapshot();
-    expect(s.isUnitLanded("u1")).toBe(false);
+    const ctx = createCtx();
+    expect(isUnitLanded(ctx, "u1")).toBe(false);
   });
 });
 
 describe("isUnitEvicted", () => {
   test("returns true when evicted and not landed", () => {
-    const s = snapshot({
-      mergeQueueRows: [{
-        nodeId: "merge-queue",
+    const ctx = createCtx({
+      mergeQueueRows: [mqRow({
         ticketsLanded: [],
         ticketsEvicted: [{ ticketId: "u1", reason: "conflict", details: "x" }],
-      }],
+      })],
     });
 
-    expect(isUnitEvicted(s, "u1")).toBe(true);
+    expect(isUnitEvicted(ctx, "u1")).toBe(true);
   });
 
   test("returns false when both landed and evicted", () => {
-    const s = snapshot({
+    const ctx = createCtx({
       mergeQueueRows: [
-        {
-          nodeId: "merge-queue",
+        mqRow({
           ticketsLanded: [{ ticketId: "u1", mergeCommit: "abc", summary: "ok", reviewLoopIterationCount: 1, testIteration: 1 }],
           ticketsEvicted: [],
-        },
-        {
-          nodeId: "merge-queue",
+        }),
+        mqRow({
           ticketsLanded: [],
           ticketsEvicted: [{ ticketId: "u1", reason: "conflict", details: "x" }],
-        },
+        }),
       ],
     });
 
-    expect(isUnitEvicted(s, "u1")).toBe(false);
+    expect(isUnitEvicted(ctx, "u1")).toBe(false);
   });
 });
 
 describe("getEvictionContext", () => {
   test("returns latest eviction details", () => {
-    const s = snapshot({
+    const ctx = createCtx({
       mergeQueueRows: [
-        {
-          nodeId: "merge-queue",
+        mqRow({
           ticketsLanded: [],
           ticketsEvicted: [{ ticketId: "u1", reason: "old", details: "old details" }],
-        },
-        {
-          nodeId: "merge-queue",
+        }),
+        mqRow({
           ticketsLanded: [],
           ticketsEvicted: [{ ticketId: "u1", reason: "new", details: "new details" }],
-        },
+        }),
       ],
     });
 
-    expect(getEvictionContext(s, "u1")).toBe("new details");
+    expect(getEvictionContext(ctx, "u1")).toBe("new details");
   });
 
   test("returns null for landed units", () => {
-    const s = snapshot({
-      mergeQueueRows: [{
-        nodeId: "merge-queue",
+    const ctx = createCtx({
+      mergeQueueRows: [mqRow({
         ticketsLanded: [{ ticketId: "u1", mergeCommit: "abc", summary: "ok", reviewLoopIterationCount: 1, testIteration: 1 }],
         ticketsEvicted: [{ ticketId: "u1", reason: "conflict", details: "x" }],
-      }],
+      })],
     });
 
-    expect(getEvictionContext(s, "u1")).toBeNull();
+    expect(getEvictionContext(ctx, "u1")).toBeNull();
   });
 });
 
 describe("getUnitState", () => {
   test("returns done for landed unit", () => {
-    const s = snapshot({
-      mergeQueueRows: [{
-        nodeId: "merge-queue",
+    const ctx = createCtx({
+      mergeQueueRows: [mqRow({
         ticketsLanded: [{ ticketId: "u1", mergeCommit: "abc", summary: "ok", reviewLoopIterationCount: 1, testIteration: 1 }],
         ticketsEvicted: [],
-      }],
+      })],
     });
 
-    expect(getUnitState(s, [unit("u1")], "u1")).toBe("done");
+    expect(getUnitState(ctx, [unit("u1")], "u1")).toBe("done");
   });
 
   test("returns not-ready when a dependency is not landed", () => {
-    const s = snapshot();
-    expect(getUnitState(s, [unit("dep"), unit("u1", ["dep"])], "u1")).toBe("not-ready");
+    const ctx = createCtx();
+    expect(getUnitState(ctx, [unit("dep"), unit("u1", ["dep"])], "u1")).toBe("not-ready");
   });
 
   test("returns active when dependencies are satisfied and not landed", () => {
-    const s = snapshot({
-      mergeQueueRows: [{
-        nodeId: "merge-queue",
+    const ctx = createCtx({
+      mergeQueueRows: [mqRow({
         ticketsLanded: [{ ticketId: "dep", mergeCommit: "abc", summary: "ok", reviewLoopIterationCount: 1, testIteration: 1 }],
         ticketsEvicted: [],
-      }],
+      })],
     });
 
-    expect(getUnitState(s, [unit("dep"), unit("u1", ["dep"])], "u1")).toBe("active");
+    expect(getUnitState(ctx, [unit("dep"), unit("u1", ["dep"])], "u1")).toBe("active");
+  });
+});
+
+describe("shouldRunPipeline", () => {
+  test("returns false for landed unit", () => {
+    const ctx = createCtx({
+      mergeQueueRows: [mqRow({
+        ticketsLanded: [{ ticketId: "u1", mergeCommit: "abc", summary: "ok", reviewLoopIterationCount: 1, testIteration: 1 }],
+        ticketsEvicted: [],
+      })],
+    });
+    expect(shouldRunPipeline(ctx, unit("u1"), [unit("u1")])).toBe(false);
+  });
+
+  test("returns false for not-ready unit", () => {
+    const ctx = createCtx();
+    expect(shouldRunPipeline(ctx, unit("u1", ["dep"]), [unit("dep"), unit("u1", ["dep"])])).toBe(false);
+  });
+
+  test("returns true for active unit without passing review", () => {
+    const ctx = createCtx();
+    expect(shouldRunPipeline(ctx, unit("u1"), [unit("u1")])).toBe(true);
+  });
+
+  test("returns false for active unit with passing review and no eviction", () => {
+    const latestMap = new Map<string, unknown>();
+    latestMap.set(`review_loop_result|${reviewLoopNodeId("u1")}`, { passed: true });
+    const ctx = createCtx({ latestMap });
+    expect(shouldRunPipeline(ctx, unit("u1"), [unit("u1")])).toBe(false);
+  });
+
+  test("returns true for evicted unit with passing review (needs re-run)", () => {
+    const latestMap = new Map<string, unknown>();
+    latestMap.set(`review_loop_result|${reviewLoopNodeId("u1")}`, { passed: true });
+    const ctx = createCtx({
+      mergeQueueRows: [mqRow({
+        ticketsLanded: [],
+        ticketsEvicted: [{ ticketId: "u1", reason: "conflict", details: "needs rebase" }],
+      })],
+      latestMap,
+    });
+    expect(shouldRunPipeline(ctx, unit("u1"), [unit("u1")])).toBe(true);
   });
 });
 
 describe("buildDepSummaries", () => {
   test("returns summaries from dependency implement outputs", () => {
-    const s = snapshot({
-      latestImplement: (unitId) => {
-        if (unitId === "dep") {
-          return {
-            nodeId: "dep:implement",
-            iteration: 1,
-            whatWasDone: "did work",
-            filesCreated: ["a.ts"],
-            filesModified: ["b.ts"],
-            believesComplete: true,
-          };
-        }
-        return null;
-      },
+    const latestMap = new Map<string, unknown>();
+    latestMap.set(`implement|${stageNodeId("dep", "implement")}`, {
+      whatWasDone: "did work",
+      filesCreated: ["a.ts"],
+      filesModified: ["b.ts"],
+      believesComplete: true,
     });
+    const ctx = createCtx({ latestMap });
 
-    expect(buildDepSummaries(s, unit("u1", ["dep"]))).toEqual([
+    expect(buildDepSummaries(ctx, unit("u1", ["dep"]))).toEqual([
       {
         id: "dep",
         whatWasDone: "did work",
@@ -198,29 +244,18 @@ describe("buildDepSummaries", () => {
 describe("buildMergeTickets", () => {
   test("includes active units with passed review loop and latest implement outputs", () => {
     const units = [unit("u1")];
-    const s = snapshot({
-      latestTest: () => ({ nodeId: "u1:test", iteration: 2, testsPassed: true, buildPassed: true }),
-      testHistory: () => [{ nodeId: "u1:test", iteration: 2, testsPassed: true, buildPassed: true }],
-      latestReviewLoopResult: () => reviewLoopResult(2, true),
-      latestImplement: () => ({
-        nodeId: "u1:implement",
-        iteration: 2,
-        whatWasDone: "done",
-        filesCreated: ["created.ts"],
-        filesModified: ["modified.ts"],
-        believesComplete: true,
-      }),
-      implementHistory: () => [{
-        nodeId: "u1:implement",
-        iteration: 2,
-        whatWasDone: "done",
-        filesCreated: ["created.ts"],
-        filesModified: ["modified.ts"],
-        believesComplete: true,
-      }],
+    const latestMap = new Map<string, unknown>();
+    latestMap.set(`test|${stageNodeId("u1", "test")}`, { testsPassed: true, buildPassed: true });
+    latestMap.set(`review_loop_result|${reviewLoopNodeId("u1")}`, reviewLoopResult(2, true));
+    latestMap.set(`implement|${stageNodeId("u1", "implement")}`, {
+      whatWasDone: "done",
+      filesCreated: ["created.ts"],
+      filesModified: ["modified.ts"],
+      believesComplete: true,
     });
+    const ctx = createCtx({ latestMap });
 
-    expect(buildMergeTickets(s, units, "run-1", 2)).toEqual([
+    expect(buildMergeTickets(ctx, units, "run-1")).toEqual([
       {
         ticketId: "u1",
         ticketTitle: "u1",
@@ -233,7 +268,7 @@ describe("buildMergeTickets", () => {
         worktreePath: "/tmp/workflow-wt-run-1-u1",
         eligibilityProof: {
           reviewLoopIterationCount: 2,
-          testIteration: 2,
+          testIteration: null,
         },
       },
     ]);
@@ -241,89 +276,75 @@ describe("buildMergeTickets", () => {
 
   test("excludes landed units", () => {
     const units = [unit("u1")];
-    const s = snapshot({
-      mergeQueueRows: [{
-        nodeId: "merge-queue",
+    const latestMap = new Map<string, unknown>();
+    latestMap.set(`test|${stageNodeId("u1", "test")}`, { testsPassed: true, buildPassed: true });
+    latestMap.set(`review_loop_result|${reviewLoopNodeId("u1")}`, reviewLoopResult(1, true));
+    const ctx = createCtx({
+      mergeQueueRows: [mqRow({
         ticketsLanded: [{ ticketId: "u1", mergeCommit: "abc", summary: "ok", reviewLoopIterationCount: 1, testIteration: 1 }],
         ticketsEvicted: [],
-      }],
-      latestTest: () => ({ nodeId: "u1:test", iteration: 1, testsPassed: true, buildPassed: true }),
-      testHistory: () => [{ nodeId: "u1:test", iteration: 1, testsPassed: true, buildPassed: true }],
-      latestReviewLoopResult: () => reviewLoopResult(1, true),
+      })],
+      latestMap,
     });
 
-    expect(buildMergeTickets(s, units, "run-1", 1)).toEqual([]);
+    expect(buildMergeTickets(ctx, units, "run-1")).toEqual([]);
   });
 
   test("excludes not-ready units with unmet dependencies", () => {
     const units = [unit("u1", ["dep"])];
-    const s = snapshot({
-      latestTest: () => ({ nodeId: "u1:test", iteration: 1, testsPassed: true, buildPassed: true }),
-      testHistory: () => [{ nodeId: "u1:test", iteration: 1, testsPassed: true, buildPassed: true }],
-      latestReviewLoopResult: () => reviewLoopResult(1, true),
-    });
+    const latestMap = new Map<string, unknown>();
+    latestMap.set(`test|${stageNodeId("u1", "test")}`, { testsPassed: true, buildPassed: true });
+    latestMap.set(`review_loop_result|${reviewLoopNodeId("u1")}`, reviewLoopResult(1, true));
+    const ctx = createCtx({ latestMap });
 
-    expect(buildMergeTickets(s, units, "run-1", 1)).toEqual([]);
+    expect(buildMergeTickets(ctx, units, "run-1")).toEqual([]);
   });
 
   test("excludes units without a passing review loop result", () => {
     const units = [unit("u1")];
-    const s = snapshot({
-      latestTest: () => ({ nodeId: "u1:test", iteration: 1, testsPassed: true, buildPassed: true }),
-      testHistory: () => [{ nodeId: "u1:test", iteration: 1, testsPassed: true, buildPassed: true }],
-      latestReviewLoopResult: () => reviewLoopResult(1, false),
-    });
+    const latestMap = new Map<string, unknown>();
+    latestMap.set(`test|${stageNodeId("u1", "test")}`, { testsPassed: true, buildPassed: true });
+    latestMap.set(`review_loop_result|${reviewLoopNodeId("u1")}`, reviewLoopResult(1, false));
+    const ctx = createCtx({ latestMap });
 
-    expect(buildMergeTickets(s, units, "run-1", 1)).toEqual([]);
+    expect(buildMergeTickets(ctx, units, "run-1")).toEqual([]);
   });
 
-  test("requires fresh passing tests for evicted units", () => {
+  test("excludes evicted units when latest test fails", () => {
     const units = [unit("u1")];
-    const s = snapshot({
-      mergeQueueRows: [{
-        nodeId: "merge-queue",
+    const latestMap = new Map<string, unknown>();
+    latestMap.set(`test|${stageNodeId("u1", "test")}`, { testsPassed: false, buildPassed: true });
+    latestMap.set(`review_loop_result|${reviewLoopNodeId("u1")}`, reviewLoopResult(3, true));
+    const ctx = createCtx({
+      mergeQueueRows: [mqRow({
         ticketsLanded: [],
         ticketsEvicted: [{ ticketId: "u1", reason: "conflict", details: "needs rebase" }],
-      }],
-      latestTest: () => ({ nodeId: "u1:test", iteration: 3, testsPassed: true, buildPassed: true }),
-      testHistory: () => [{ nodeId: "u1:test", iteration: 3, testsPassed: true, buildPassed: true }],
-      latestReviewLoopResult: () => reviewLoopResult(3, true),
-      freshTest: () => ({ nodeId: "u1:test", iteration: 3, testsPassed: false, buildPassed: true }),
+      })],
+      latestMap,
     });
 
-    expect(buildMergeTickets(s, units, "run-1", 3)).toEqual([]);
+    expect(buildMergeTickets(ctx, units, "run-1")).toEqual([]);
   });
 
-  test("for evicted units with fresh build failure, keeps eligibility when review loop passed", () => {
+  test("for evicted units with build failure, keeps eligibility when review loop passed", () => {
     const units = [unit("u1")];
-    const s = snapshot({
-      mergeQueueRows: [{
-        nodeId: "merge-queue",
+    const latestMap = new Map<string, unknown>();
+    latestMap.set(`test|${stageNodeId("u1", "test")}`, { testsPassed: true, buildPassed: false });
+    latestMap.set(`review_loop_result|${reviewLoopNodeId("u1")}`, reviewLoopResult(3, true));
+    latestMap.set(`implement|${stageNodeId("u1", "implement")}`, {
+      whatWasDone: "done",
+      filesCreated: [],
+      filesModified: [],
+      believesComplete: true,
+    });
+    const ctx = createCtx({
+      mergeQueueRows: [mqRow({
         ticketsLanded: [],
         ticketsEvicted: [{ ticketId: "u1", reason: "conflict", details: "needs rebase" }],
-      }],
-      latestTest: () => ({ nodeId: "u1:test", iteration: 3, testsPassed: true, buildPassed: true }),
-      testHistory: () => [{ nodeId: "u1:test", iteration: 3, testsPassed: true, buildPassed: true }],
-      latestReviewLoopResult: () => reviewLoopResult(3, true),
-      freshTest: () => ({ nodeId: "u1:test", iteration: 3, testsPassed: true, buildPassed: false }),
-      latestImplement: () => ({
-        nodeId: "u1:implement",
-        iteration: 3,
-        whatWasDone: "done",
-        filesCreated: [],
-        filesModified: [],
-        believesComplete: true,
-      }),
-      implementHistory: () => [{
-        nodeId: "u1:implement",
-        iteration: 3,
-        whatWasDone: "done",
-        filesCreated: [],
-        filesModified: [],
-        believesComplete: true,
-      }],
+      })],
+      latestMap,
     });
 
-    expect(buildMergeTickets(s, units, "run-1", 3).map((t) => t.ticketId)).toEqual(["u1"]);
+    expect(buildMergeTickets(ctx, units, "run-1").map((t) => t.ticketId)).toEqual(["u1"]);
   });
 });

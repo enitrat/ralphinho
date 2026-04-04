@@ -66,6 +66,7 @@
     "@linear/sdk": "^78.0.0",
     "@opentui/core": "^0.1.81",
     "better-sqlite3": "^11.0.0",
-    "effect": "3.19.19"
+    "effect": "3.19.19",
+    "zod": "^4.3.6"
   }
 }

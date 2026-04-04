@@ -5,6 +5,7 @@ import { scheduledOutputSchemas } from "../../schemas";
 import type { WorkPlan, WorkUnit } from "../../types";
 import {
   STAGE_RETRY_POLICIES,
+  reviewLoopNodeId,
   stageNodeId,
 } from "../../workflow/contracts";
 import {
@@ -13,11 +14,12 @@ import {
   type ScheduledOutputs,
 } from "../QualityPipeline";
 import { ReviewLoop } from "../ReviewLoop";
+import { resolveTableName } from "../../__tests__/testUtils";
 
 function createCtx(latestImpl: (table: string, nodeId: string) => unknown): SmithersCtx<ScheduledOutputs> {
   return {
     runId: "run-1",
-    latest: latestImpl,
+    latest: (table: unknown, nodeId: string) => latestImpl(resolveTableName(table), nodeId),
   } as unknown as SmithersCtx<ScheduledOutputs>;
 }
 
@@ -116,7 +118,7 @@ describe("QualityPipeline stage semantics", () => {
 
     expect(learningsTask).toBeDefined();
     expect((learningsTask.meta as Record<string, unknown>).dependsOn).toEqual([
-      `${unit.id}:review-loop`,
+      reviewLoopNodeId(unit.id),
     ]);
     expect(tasks[`${unit.id}:final-review`]).toBeUndefined();
   });
@@ -167,7 +169,7 @@ describe("QualityPipeline stage semantics", () => {
     expect(reviewLoopIndex).toBeLessThan(learningsIndex);
   });
 
-  test("applies retry policy semantics and input-matched cache skips for large units", () => {
+  test("applies retry policy semantics and presence-based cache skips for large units", () => {
     const unit: WorkUnit = {
       id: "u-large",
       name: "Large unit",
@@ -179,28 +181,6 @@ describe("QualityPipeline stage semantics", () => {
     };
     const workPlan = createWorkPlan(unit);
 
-    const researchSig = JSON.stringify({
-      unitId: unit.id,
-      unitName: unit.name,
-      unitDescription: unit.description,
-      unitCategory: unit.tier,
-      rfcSource: workPlan.source,
-      rfcSections: unit.rfcSections,
-      referencePaths: [workPlan.source],
-      evictionContext: null,
-    });
-
-    const planSig = JSON.stringify({
-      unitId: unit.id,
-      unitName: unit.name,
-      unitDescription: unit.description,
-      unitCategory: unit.tier,
-      acceptanceCriteria: unit.acceptance,
-      contextFilePath: `docs/research/${unit.id}.md`,
-      researchSummary: undefined,
-      evictionContext: null,
-    });
-
     const ctx = createCtx((table, nodeId) => {
       if (table === "research" && nodeId === stageNodeId(unit.id, "research")) {
         return {
@@ -209,7 +189,6 @@ describe("QualityPipeline stage semantics", () => {
           referencesRead: [],
           openQuestions: [],
           notes: null,
-          inputSignature: researchSig,
         };
       }
       if (table === "plan" && nodeId === stageNodeId(unit.id, "plan")) {
@@ -219,7 +198,6 @@ describe("QualityPipeline stage semantics", () => {
           filesToCreate: [],
           filesToModify: [],
           complexity: "large",
-          inputSignature: planSig,
         };
       }
       return null;

@@ -24,8 +24,9 @@ For EACH issue from both reviews:
 2. Determine if the issue is valid or a false positive
 3. If valid: make the fix
 4. If false positive: document why in your output
-5. After each fix, run relevant validation commands:
+5. After ALL fixes, run the full validation suite to confirm nothing is broken:
 {props.validationCommands && props.validationCommands.length > 0 ? props.validationCommands.map(c => `   - ${c}`).join('\n') : '   - Run formatters and tests'}
+6. If validation fails, fix the regression before finishing
 
 ## TDD for Fixes
 

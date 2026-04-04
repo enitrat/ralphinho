@@ -21,7 +21,6 @@ export type Issue = z.infer<typeof issueSchema>;
 export const scheduledOutputSchemas = {
   // ── Research ──────────────────────────────────────────────────────
   research: z.object({
-    inputSignature: z.string(),
     contextFilePath: z.string(),
     findings: z.array(z.string()),
     referencesRead: z.array(z.string()),
@@ -31,7 +30,6 @@ export const scheduledOutputSchemas = {
 
   // ── Plan ──────────────────────────────────────────────────────────
   plan: z.object({
-    inputSignature: z.string(),
     planFilePath: z.string(),
     implementationSteps: z.array(z.string()),
     filesToCreate: z.array(z.string()),
@@ -135,16 +133,6 @@ export const scheduledOutputSchemas = {
         frequency: z.enum(["one-off", "recurring"]),
       }),
     ),
-    summary: z.string(),
-  }),
-
-  // ── Pass Tracker ──────────────────────────────────────────────────
-  pass_tracker: z.object({
-    totalIterations: z.number(),
-    unitsRun: z.array(z.string()),
-    unitsComplete: z.array(z.string()),
-    unitsLanded: z.array(z.string()),
-    unitsSemanticallyComplete: z.array(z.string()),
     summary: z.string(),
   }),
 

@@ -13,6 +13,7 @@ import { buildUnitWorktreePath } from "./runtimeNames";
 import { ReviewLoop } from "./ReviewLoop";
 import {
   STAGE_RETRY_POLICIES,
+  reviewLoopNodeId,
   stageNodeId,
 } from "../workflow/contracts";
 import type { ScheduledTier, StageName } from "../workflow/contracts";
@@ -104,14 +105,14 @@ export function QualityPipeline({
   };
 
   // In Loop loops, cross-stage reads must use latest() to see prior iterations.
-  const research = ctx.latest("research", stageNodeId(uid, "research"));
-  const plan = ctx.latest("plan", stageNodeId(uid, "plan"));
-  const impl = ctx.latest("implement", stageNodeId(uid, "implement"));
-  const test = ctx.latest("test", stageNodeId(uid, "test"));
-  const prdReview = ctx.latest("prd_review", stageNodeId(uid, "prd-review"));
-  const codeReview = ctx.latest("code_review", stageNodeId(uid, "code-review"));
-  const reviewFix = ctx.latest("review_fix", stageNodeId(uid, "review-fix"));
-  const learnings = ctx.latest("learnings", stageNodeId(uid, "learnings"));
+  const research = ctx.latest(scheduledOutputSchemas.research, stageNodeId(uid, "research"));
+  const plan = ctx.latest(scheduledOutputSchemas.plan, stageNodeId(uid, "plan"));
+  const impl = ctx.latest(scheduledOutputSchemas.implement, stageNodeId(uid, "implement"));
+  const test = ctx.latest(scheduledOutputSchemas.test, stageNodeId(uid, "test"));
+  const prdReview = ctx.latest(scheduledOutputSchemas.prd_review, stageNodeId(uid, "prd-review"));
+  const codeReview = ctx.latest(scheduledOutputSchemas.code_review, stageNodeId(uid, "code-review"));
+  const reviewFix = ctx.latest(scheduledOutputSchemas.review_fix, stageNodeId(uid, "review-fix"));
+  const learnings = ctx.latest(scheduledOutputSchemas.learnings, stageNodeId(uid, "learnings"));
 
   const combinedReviewFeedback = buildReviewFeedback([
     prdReview?.feedback ? `PRD review feedback:\n${prdReview.feedback}` : null,
@@ -122,30 +123,10 @@ export function QualityPipeline({
     ...Object.values(workPlan.repo.buildCmds),
     ...Object.values(workPlan.repo.testCmds),
   ];
-  const researchInputSignature = JSON.stringify({
-    unitId: uid,
-    unitName: unit.name,
-    unitDescription: unit.description,
-    unitCategory: tier,
-    rfcSource: workPlan.source,
-    rfcSections: unit.rfcSections,
-    referencePaths: [workPlan.source],
-    evictionContext,
-  });
   const researchSummary = research?.findings && research.findings.length > 0
     ? research.findings.join("\n")
     : undefined;
   const expectedContextFilePath = `docs/research/${uid}.md`;
-  const planInputSignature = JSON.stringify({
-    unitId: uid,
-    unitName: unit.name,
-    unitDescription: unit.description,
-    unitCategory: tier,
-    acceptanceCriteria: unit.acceptance,
-    contextFilePath: research?.contextFilePath ?? expectedContextFilePath,
-    researchSummary,
-    evictionContext,
-  });
   const implementDependsOn = tierHasStep(tier, "plan") ? [stageNodeId(uid, "plan")] : [];
 
   const testSuites = buildTestSuites(workPlan);
@@ -164,8 +145,7 @@ export function QualityPipeline({
             retries={STAGE_RETRY_POLICIES["research"].retries}
             scorers={pipelineScorers}
             meta={{ retryPolicy: STAGE_RETRY_POLICIES["research"] }}
-            // Cache semantics: reuse only when the prior output matches current inputs.
-            skipIf={research?.inputSignature === researchInputSignature}
+            skipIf={research != null && !evictionContext}
           >
             <ResearchPrompt
               unitId={uid}
@@ -179,7 +159,6 @@ export function QualityPipeline({
               referenceFiles={[]}
               relevantFiles={[]}
               contextFilePath={research?.contextFilePath ?? expectedContextFilePath}
-              inputSignature={researchInputSignature}
               branchPrefix={branchPrefix}
             />
           </Task>
@@ -197,8 +176,7 @@ export function QualityPipeline({
               dependsOn: [stageNodeId(uid, "research")],
               retryPolicy: STAGE_RETRY_POLICIES["plan"],
             }}
-            // Cache semantics: reuse only when the prior output matches current inputs.
-            skipIf={plan?.inputSignature === planInputSignature}
+            skipIf={plan != null && !evictionContext}
           >
             <PlanPrompt
               unitId={uid}
@@ -211,7 +189,6 @@ export function QualityPipeline({
               evictionContext={evictionContext}
               tddPatterns={[]}
               planFilePath={plan?.planFilePath ?? `docs/plans/${uid}.md`}
-              inputSignature={planInputSignature}
               commitPrefix="📝"
               branchPrefix={branchPrefix}
             />
@@ -283,7 +260,7 @@ export function QualityPipeline({
             fallbackAgent={fallbacks?.learningsExtractor}
             retries={STAGE_RETRY_POLICIES["learnings"].retries}
             meta={{
-              dependsOn: [`${uid}:review-loop`],
+              dependsOn: [reviewLoopNodeId(uid)],
               retryPolicy: STAGE_RETRY_POLICIES["learnings"],
             }}
             // Cache semantics: learnings are write-once per unit — do not re-extract on subsequent passes.

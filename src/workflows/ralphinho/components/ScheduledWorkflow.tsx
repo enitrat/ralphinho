@@ -26,18 +26,21 @@ import { buildUnitBranchPrefix, buildUnitWorktreePath } from "./runtimeNames";
 import {
   COMPLETION_REPORT_NODE_ID,
   MERGE_QUEUE_NODE_ID,
-  PASS_TRACKER_NODE_ID,
   PR_CREATION_NODE_ID,
+  reviewLoopNodeId,
+  stageNodeId,
 } from "../workflow/contracts";
+import { scheduledOutputSchemas } from "../schemas";
 import {
   buildDepSummaries,
   buildFailedUnitReport,
   buildMergeTickets,
   getEvictionContext,
   getUnitState,
+  isUnitLanded,
+  shouldRunPipeline,
   type UnitState,
 } from "../workflow/state";
-import { buildSnapshot } from "../workflow/snapshot";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -76,42 +79,33 @@ export function ScheduledWorkflow({
   const buildChecks = Object.values(workPlan.repo.buildCmds);
   const testChecks = Object.values(workPlan.repo.testCmds);
   const verificationChecks = Array.from(new Set([...buildChecks, ...testChecks]));
-  const snapshot = buildSnapshot(ctx);
-  // ── Landing status ──────────────────────────────────────────────
-  const unitState = (unitId: string): UnitState => getUnitState(snapshot, units, unitId);
-  const unitEvictionContext = (unitId: string) => getEvictionContext(snapshot, unitId);
 
-  // ── Pass tracking ──────────────────────────────────────────────
-
-  const passTracker = ctx.latest("pass_tracker", PASS_TRACKER_NODE_ID);
-  const currentPass = passTracker?.totalIterations ?? 0;
-  const allUnitsLanded = units.every((u) => snapshot.isUnitLanded(u.id));
+  // ── Termination condition ──
+  const completionReports = ctx.outputs("completion_report") ?? [];
+  const currentPass = completionReports.length;
+  const allUnitsLanded = units.every((u) => isUnitLanded(ctx, u.id));
   const allUnitsReviewComplete = units.every(
-    (u) => snapshot.isUnitLanded(u.id) || snapshot.latestReviewLoopResult(u.id)?.passed,
+    (u) => isUnitLanded(ctx, u.id) || ctx.latest(scheduledOutputSchemas.review_loop_result, reviewLoopNodeId(u.id))?.passed,
   );
-  // In merge mode, review-complete units still need the merge queue to advance the
-  // base branch and persist landing/accounting state. Only PR mode may terminate on
-  // review completion alone because landing happens outside this workflow.
   const done = currentPass >= maxPasses || allUnitsLanded || (landingMode === "pr" && allUnitsReviewComplete);
 
   // ── Completion report data ─────────────────────────────────────
 
-  const landedIds = units.filter((u) => snapshot.isUnitLanded(u.id)).map((u) => u.id);
+  const landedIds = units.filter((u) => isUnitLanded(ctx, u.id)).map((u) => u.id);
   const reviewCompleteIds = units
-    .filter((u) => snapshot.isUnitLanded(u.id) && (snapshot.latestReviewLoopResult(u.id)?.passed ?? false))
+    .filter((u) => isUnitLanded(ctx, u.id) && (ctx.latest(scheduledOutputSchemas.review_loop_result, reviewLoopNodeId(u.id))?.passed ?? false))
     .map((u) => u.id);
   const failedUnits = buildFailedUnitReport(
-    snapshot, units, maxPasses,
-    (key, nodeId) => !!ctx.latest(key as keyof ScheduledOutputs, nodeId),
+    ctx, units, maxPasses,
+    (key, nodeId) => !!ctx.latest(key, nodeId),
   );
 
   // ── Render ─────────────────────────────────────────────────────
 
   const mergeTickets: AgenticMergeQueueTicket[] = buildMergeTickets(
-    snapshot,
+    ctx,
     units,
     ctx.runId,
-    ctx.iteration,
   );
 
   return (
@@ -125,33 +119,23 @@ export function ScheduledWorkflow({
         <Sequence>
           {/* Phase 1: Quality pipelines for all Active units */}
           <Parallel maxConcurrency={maxConcurrency}>
-            {units.map((unit) => {
-              const state = unitState(unit.id);
-
-              // Done or NotReady → skip
-              if (state !== "active") return null;
-
-              // Active + already quality-complete → skip pipeline, enters merge queue
-              if (snapshot.latestReviewLoopResult(unit.id)?.passed && !unitEvictionContext(unit.id)) return null;
-
-              return (
-                <QualityPipeline
-                  key={unit.id}
-                  unit={unit}
-                  ctx={ctx}
-                  outputs={outputs}
-                  agents={agents}
-                  fallbacks={fallbacks}
-                  workPlan={workPlan}
-                  depSummaries={buildDepSummaries(snapshot, unit)}
-                  evictionContext={unitEvictionContext(unit.id)}
-                  pass={currentPass}
-                  maxPasses={maxPasses}
-                  branchPrefix={unitBranchPrefix}
-                  worktreePath={buildUnitWorktreePath(ctx.runId, unit.id)}
-                />
-              );
-            })}
+            {units.filter((u) => shouldRunPipeline(ctx, u, units)).map((unit) => (
+              <QualityPipeline
+                key={unit.id}
+                unit={unit}
+                ctx={ctx}
+                outputs={outputs}
+                agents={agents}
+                fallbacks={fallbacks}
+                workPlan={workPlan}
+                depSummaries={buildDepSummaries(ctx, unit)}
+                evictionContext={getEvictionContext(ctx, unit.id)}
+                pass={currentPass}
+                maxPasses={maxPasses}
+                branchPrefix={unitBranchPrefix}
+                worktreePath={buildUnitWorktreePath(ctx.runId, unit.id)}
+              />
+            ))}
           </Parallel>
 
           {/* Phase 2: Land completed units via merge queue or PR creation */}
@@ -190,22 +174,6 @@ export function ScheduledWorkflow({
               preLandChecks={verificationChecks}
             />
           )}
-
-          {/* Pass tracker (compute task — no agent needed) */}
-          <Task id={PASS_TRACKER_NODE_ID} output={outputs.pass_tracker}>
-            {{
-              totalIterations: currentPass + 1,
-              unitsRun: units
-                .filter((u) => unitState(u.id) === "active")
-                .map((u) => u.id),
-              unitsComplete: reviewCompleteIds,
-              unitsLanded: units
-                .filter((u) => snapshot.isUnitLanded(u.id))
-                .map((u) => u.id),
-              unitsSemanticallyComplete: reviewCompleteIds,
-              summary: `Pass ${currentPass + 1} of ${maxPasses}. ${units.filter((u) => snapshot.isUnitLanded(u.id)).length}/${units.length} units landed on ${baseBranch}. ${units.filter((u) => unitState(u.id) === "not-ready").length} units waiting on deps.`,
-            }}
-          </Task>
         </Sequence>
       </Loop>
 

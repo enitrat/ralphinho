@@ -7,13 +7,28 @@ import { Ralph } from "smithers-orchestrator";
 import type { AgentLike, SmithersCtx } from "smithers-orchestrator";
 import { scheduledOutputSchemas } from "../../schemas";
 import type { WorkUnit } from "../../types";
+import { stageNodeId } from "../../workflow/contracts";
 import type { ScheduledOutputs } from "../QualityPipeline";
 import { ReviewLoop, type ReviewLoopAgents } from "../ReviewLoop";
+import { resolveTableName } from "../../__tests__/testUtils";
 
-function createCtx(latestImpl: (table: string, nodeId: string) => unknown): SmithersCtx<ScheduledOutputs> {
+function createCtx(opts?: {
+  latestMap?: Map<string, unknown>;
+  outputsByTable?: Record<string, unknown[]>;
+}): SmithersCtx<ScheduledOutputs> {
+  const latestMap = opts?.latestMap ?? new Map<string, unknown>();
+  const outputsByTable = opts?.outputsByTable ?? {};
+
+  const outputsFn = ((table: unknown) => outputsByTable[resolveTableName(table)] ?? []) as SmithersCtx<ScheduledOutputs>["outputs"];
+
   return {
     runId: "run-1",
-    latest: latestImpl,
+    latest: (table: unknown, nodeId: string) => latestMap.get(`${resolveTableName(table)}|${nodeId}`) ?? null,
+    iterationCount: (table: unknown, nodeId: string) => {
+      const rows = outputsByTable[resolveTableName(table)] ?? [];
+      return rows.filter((r: any) => r.nodeId === nodeId).length;
+    },
+    outputs: outputsFn,
   } as unknown as SmithersCtx<ScheduledOutputs>;
 }
 
@@ -64,31 +79,31 @@ function collectTasks(node: React.ReactNode): Record<string, Record<string, unkn
   return tasks;
 }
 
-function findRalph(node: React.ReactNode): React.ReactElement | null {
+function findLoop(node: React.ReactNode): React.ReactElement | null {
   if (!React.isValidElement(node)) return null;
   if (node.type === Ralph) return node;
   const props = node.props as { children?: React.ReactNode };
   const children = props.children;
   if (Array.isArray(children)) {
     for (const child of children) {
-      const found = findRalph(child);
+      const found = findLoop(child);
       if (found) return found;
     }
     return null;
   }
-  if (children != null) return findRalph(children);
+  if (children != null) return findLoop(children);
   return null;
 }
 
 function createLatestMap(entries: Array<[string, string, unknown]>) {
   const map = new Map(entries.map(([table, nodeId, value]) => [`${table}|${nodeId}`, value]));
-  return (table: string, nodeId: string) => map.get(`${table}|${nodeId}`) ?? null;
+  return map;
 }
 
 describe("ReviewLoop", () => {
   test("uses strict maxIterations equal to maxReviewPasses", () => {
     const unit = createUnit("large");
-    const ctx = createCtx(createLatestMap([]));
+    const ctx = createCtx();
 
     const element = ReviewLoop({
       unit,
@@ -101,18 +116,67 @@ describe("ReviewLoop", () => {
       maxReviewPasses: 3,
     });
 
-    const ralph = findRalph(element);
+    const ralph = findLoop(element);
     expect(ralph).not.toBeNull();
     expect((ralph?.props as Record<string, unknown>).maxIterations).toBe(3);
   });
 
-  test("keeps loop active until a clean review result is persisted", () => {
+  test("loop stays active when code_review.approved is false", () => {
     const unit = createUnit("large");
-    const ctx = createCtx(createLatestMap([
-      ["code_review", `${unit.id}:code-review`, { severity: "minor", issues: null, feedback: "ok" }],
-      ["prd_review", `${unit.id}:prd-review`, { severity: "none", issues: null, feedback: "ok" }],
-      ["review_loop_result", `${unit.id}:review-loop`, { iterationCount: 1 }],
-    ]));
+    const ctx = createCtx({
+      latestMap: createLatestMap([
+        ["code_review", stageNodeId(unit.id, "code-review"), { severity: "major", approved: false, issues: null, feedback: "blocked" }],
+        ["prd_review", stageNodeId(unit.id, "prd-review"), { severity: "none", approved: true, issues: null, feedback: "ok" }],
+      ]),
+    });
+
+    const element = ReviewLoop({
+      unit,
+      ctx,
+      outputs: scheduledOutputSchemas,
+      agents: createAgents(),
+      implOutput: null,
+      testSuites: [],
+      verifyCommands: [],
+      maxReviewPasses: 3,
+    });
+
+    const ralph = findLoop(element);
+    expect((ralph?.props as Record<string, unknown>).until).toBe(false);
+  });
+
+  test("loop exits when code_review.approved is true", () => {
+    const unit = createUnit("large");
+    const ctx = createCtx({
+      latestMap: createLatestMap([
+        ["code_review", stageNodeId(unit.id, "code-review"), { severity: "minor", approved: true, issues: null, feedback: "ok" }],
+        ["prd_review", stageNodeId(unit.id, "prd-review"), { severity: "none", approved: true, issues: null, feedback: "ok" }],
+      ]),
+    });
+
+    const element = ReviewLoop({
+      unit,
+      ctx,
+      outputs: scheduledOutputSchemas,
+      agents: createAgents(),
+      implOutput: null,
+      testSuites: [],
+      verifyCommands: [],
+      maxReviewPasses: 3,
+    });
+
+    const ralph = findLoop(element);
+    expect((ralph?.props as Record<string, unknown>).until).toBe(true);
+  });
+
+  test("review-fix is skipped when code_review.approved is true", () => {
+    const unit = createUnit("large");
+    const ctx = createCtx({
+      latestMap: createLatestMap([
+        ["code_review", stageNodeId(unit.id, "code-review"), { severity: "minor", approved: true, issues: null, feedback: "ok" }],
+        ["prd_review", stageNodeId(unit.id, "prd-review"), { severity: "none", approved: true, issues: null, feedback: "ok" }],
+      ]),
+    });
 
     const element = ReviewLoop({
       unit,
@@ -126,72 +190,57 @@ describe("ReviewLoop", () => {
     });
 
     const tasks = collectTasks(element);
-    expect(tasks[`${unit.id}:review-fix`].skipIf).toBe(true);
+    expect(tasks[stageNodeId(unit.id, "review-fix")].skipIf).toBe(true);
+  });
+
+  test("post-loop review_loop_result reflects passed state from approved reviews", () => {
+    const unit = createUnit("large");
+    const ctx = createCtx({
+      latestMap: createLatestMap([
+        ["code_review", stageNodeId(unit.id, "code-review"), { severity: "minor", approved: true, issues: null, feedback: "ok" }],
+        ["prd_review", stageNodeId(unit.id, "prd-review"), { severity: "none", approved: true, issues: null, feedback: "ok" }],
+      ]),
+      outputsByTable: {
+        code_review: [{ nodeId: stageNodeId(unit.id, "code-review") }],
+      },
+    });
+
+    const element = ReviewLoop({
+      unit,
+      ctx,
+      outputs: scheduledOutputSchemas,
+      agents: createAgents(),
+      implOutput: null,
+      testSuites: [],
+      verifyCommands: [],
+      maxReviewPasses: 3,
+    });
+
+    const tasks = collectTasks(element);
     expect(tasks[`${unit.id}:review-loop`].children).toEqual({
-      iterationCount: 2,
+      iterationCount: 1,
       codeSeverity: "minor",
       prdSeverity: "none",
       passed: true,
       exhausted: false,
     });
-
-    const ralph = findRalph(element);
-    expect((ralph?.props as Record<string, unknown>).until).toBe(false);
   });
 
-  test("exits loop when a passing review result was already persisted", () => {
+  test("post-loop review_loop_result marks exhausted when code not approved", () => {
     const unit = createUnit("large");
-    const ctx = createCtx(createLatestMap([
-      ["code_review", `${unit.id}:code-review`, { severity: "minor", issues: null, feedback: "ok" }],
-      ["prd_review", `${unit.id}:prd-review`, { severity: "none", issues: null, feedback: "ok" }],
-      ["review_loop_result", `${unit.id}:review-loop`, { iterationCount: 1, passed: true, exhausted: false }],
-    ]));
-
-    const element = ReviewLoop({
-      unit,
-      ctx,
-      outputs: scheduledOutputSchemas,
-      agents: createAgents(),
-      implOutput: null,
-      testSuites: [],
-      verifyCommands: [],
-      maxReviewPasses: 3,
+    const ctx = createCtx({
+      latestMap: createLatestMap([
+        ["code_review", stageNodeId(unit.id, "code-review"), { severity: "major", approved: false, issues: null, feedback: "blocked" }],
+        ["prd_review", stageNodeId(unit.id, "prd-review"), { severity: "none", approved: true, issues: null, feedback: "ok" }],
+      ]),
+      outputsByTable: {
+        code_review: [
+          { nodeId: stageNodeId(unit.id, "code-review") },
+          { nodeId: stageNodeId(unit.id, "code-review") },
+          { nodeId: stageNodeId(unit.id, "code-review") },
+        ],
+      },
     });
-
-    const ralph = findRalph(element);
-    expect((ralph?.props as Record<string, unknown>).until).toBe(true);
-  });
-
-  test("exits loop when an exhausted review result was already persisted", () => {
-    const unit = createUnit("large");
-    const ctx = createCtx(createLatestMap([
-      ["code_review", `${unit.id}:code-review`, { severity: "major", issues: null, feedback: "blocked" }],
-      ["prd_review", `${unit.id}:prd-review`, { severity: "none", issues: null, feedback: "ok" }],
-      ["review_loop_result", `${unit.id}:review-loop`, { iterationCount: 3, passed: false, exhausted: true }],
-    ]));
-
-    const element = ReviewLoop({
-      unit,
-      ctx,
-      outputs: scheduledOutputSchemas,
-      agents: createAgents(),
-      implOutput: null,
-      testSuites: [],
-      verifyCommands: [],
-      maxReviewPasses: 3,
-    });
-
-    const ralph = findRalph(element);
-    expect((ralph?.props as Record<string, unknown>).until).toBe(true);
-  });
-
-  test("increments review-loop counter task output with latest severities", () => {
-    const unit = createUnit("large");
-    const ctx = createCtx(createLatestMap([
-      ["code_review", `${unit.id}:code-review`, { severity: "major", issues: null, feedback: "blocked" }],
-      ["prd_review", `${unit.id}:prd-review`, { severity: "minor", issues: null, feedback: "ok" }],
-      ["review_loop_result", `${unit.id}:review-loop`, { iterationCount: 1 }],
-    ]));
 
     const element = ReviewLoop({
       unit,
@@ -206,29 +255,92 @@ describe("ReviewLoop", () => {
 
     const tasks = collectTasks(element);
     expect(tasks[`${unit.id}:review-loop`].children).toEqual({
-      iterationCount: 2,
+      iterationCount: 3,
       codeSeverity: "major",
-      prdSeverity: "minor",
+      prdSeverity: "none",
       passed: false,
-      exhausted: false,
+      exhausted: true,
     });
   });
 
-  test("writes backlog only when loop has passed and minor issues exist", () => {
+  test("test task runs before the review loop (outside)", () => {
     const unit = createUnit("large");
-    const ctx = createCtx(createLatestMap([
-      [
-        "code_review",
-        `${unit.id}:code-review`,
-        {
-          severity: "minor",
-          issues: [{ severity: "minor", description: "nit", file: "a.ts", suggestion: null, reference: null }],
-          feedback: "ok",
-        },
-      ],
-      ["prd_review", `${unit.id}:prd-review`, { severity: "none", issues: null, feedback: "ok" }],
-      ["review_loop_result", `${unit.id}:review-loop`, { iterationCount: 1 }],
-    ]));
+    const ctx = createCtx();
+
+    const element = ReviewLoop({
+      unit,
+      ctx,
+      outputs: scheduledOutputSchemas,
+      agents: createAgents(),
+      implOutput: null,
+      testSuites: [],
+      verifyCommands: [],
+      maxReviewPasses: 3,
+    });
+
+    // Collect the top-level Sequence children
+    if (!React.isValidElement(element)) throw new Error("expected element");
+    const seqChildren = ((element.props as Record<string, unknown>).children as React.ReactNode[])
+      .filter(React.isValidElement) as React.ReactElement[];
+
+    // Test task should be first child of the outer Sequence
+    const firstChild = seqChildren[0];
+    expect((firstChild.props as Record<string, unknown>).id).toBe(stageNodeId(unit.id, "test"));
+
+    // The Loop should not contain the test task
+    const tasks = collectTasks(element);
+    const ralph = findLoop(element);
+    if (!ralph) throw new Error("expected loop");
+    const loopTasks = collectTasks(ralph);
+    expect(loopTasks[stageNodeId(unit.id, "test")]).toBeUndefined();
+  });
+
+  test("prd_review runs before the review loop (outside)", () => {
+    const unit = createUnit("large");
+    const ctx = createCtx();
+
+    const element = ReviewLoop({
+      unit,
+      ctx,
+      outputs: scheduledOutputSchemas,
+      agents: createAgents(),
+      implOutput: null,
+      testSuites: [],
+      verifyCommands: [],
+      maxReviewPasses: 3,
+    });
+
+    // The loop should not contain prd_review
+    const ralph = findLoop(element);
+    if (!ralph) throw new Error("expected loop");
+    const loopTasks = collectTasks(ralph);
+    expect(loopTasks[stageNodeId(unit.id, "prd-review")]).toBeUndefined();
+
+    // But the overall tree should contain it
+    const allTasks = collectTasks(element);
+    expect(allTasks[stageNodeId(unit.id, "prd-review")]).toBeDefined();
+  });
+
+  test("writes backlog only when reviews passed and minor issues exist", () => {
+    const unit = createUnit("large");
+    const ctx = createCtx({
+      latestMap: createLatestMap([
+        [
+          "code_review",
+          stageNodeId(unit.id, "code-review"),
+          {
+            severity: "minor",
+            approved: true,
+            issues: [{ severity: "minor", description: "nit", file: "a.ts", suggestion: null, reference: null }],
+            feedback: "ok",
+          },
+        ],
+        ["prd_review", stageNodeId(unit.id, "prd-review"), { severity: "none", approved: true, issues: null, feedback: "ok" }],
+      ]),
+      outputsByTable: {
+        code_review: [{ nodeId: stageNodeId(unit.id, "code-review") }],
+      },
+    });
 
     const element = ReviewLoop({
       unit,
@@ -247,7 +359,7 @@ describe("ReviewLoop", () => {
 
   test("uses dedicated output for backlog task instead of review_loop_result", () => {
     const unit = createUnit("large");
-    const ctx = createCtx(createLatestMap([]));
+    const ctx = createCtx();
 
     const element = ReviewLoop({
       unit,
@@ -266,19 +378,24 @@ describe("ReviewLoop", () => {
 
   test("backlog writer resolves path from explicit cwd context", async () => {
     const unit = createUnit("large");
-    const ctx = createCtx(createLatestMap([
-      [
-        "code_review",
-        `${unit.id}:code-review`,
-        {
-          severity: "minor",
-          issues: [{ severity: "minor", description: "nit", file: "a.ts", suggestion: null, reference: null }],
-          feedback: "ok",
-        },
-      ],
-      ["prd_review", `${unit.id}:prd-review`, { severity: "none", issues: null, feedback: "ok" }],
-      ["review_loop_result", `${unit.id}:review-loop`, { iterationCount: 1 }],
-    ]));
+    const ctx = createCtx({
+      latestMap: createLatestMap([
+        [
+          "code_review",
+          stageNodeId(unit.id, "code-review"),
+          {
+            severity: "minor",
+            approved: true,
+            issues: [{ severity: "minor", description: "nit", file: "a.ts", suggestion: null, reference: null }],
+            feedback: "ok",
+          },
+        ],
+        ["prd_review", stageNodeId(unit.id, "prd-review"), { severity: "none", approved: true, issues: null, feedback: "ok" }],
+      ]),
+      outputsByTable: {
+        code_review: [{ nodeId: stageNodeId(unit.id, "code-review") }],
+      },
+    });
 
     const element = ReviewLoop({
       unit,

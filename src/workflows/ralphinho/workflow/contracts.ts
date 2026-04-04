@@ -12,6 +12,10 @@ export function stageNodeId(unitId: string, stage: StageName): string {
   return `${unitId}:${stage}`;
 }
 
+export function reviewLoopNodeId(unitId: string): string {
+  return `${unitId}:review-loop`;
+}
+
 export type RetryPolicyKind = "fail-fast" | "backoff";
 
 export type StageRetryPolicy = {
@@ -23,7 +27,6 @@ export type StageRetryPolicy = {
 
 export const MERGE_QUEUE_NODE_ID = "merge-queue" as const;
 export const PR_CREATION_NODE_ID = "pr-creation" as const;
-export const PASS_TRACKER_NODE_ID = "pass-tracker" as const;
 export const COMPLETION_REPORT_NODE_ID = "completion-report" as const;
 
 const _TIER_STAGES = {

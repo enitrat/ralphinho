@@ -86,3 +86,8 @@ The goal is to leave the codebase cleaner after every change. Flag:
 - "none" — Code is production-quality
 
 Use severity "none" only if there are absolutely no quality issues.
+
+## Approval Decision
+
+Set `approved: true` when severity is "minor" or "none" — minor issues are tracked in a backlog and do not block landing.
+Set `approved: false` when severity is "critical" or "major" — the review-fix agent will address these issues and the code will be re-reviewed.

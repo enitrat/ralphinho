@@ -4,7 +4,7 @@ import React from "react";
 import { Parallel, Loop, Sequence, Task } from "smithers-orchestrator";
 import type { AgentLike, SmithersCtx, ScorersMap } from "smithers-orchestrator";
 import { schemaAdherenceScorer, relevancyScorer } from "smithers-orchestrator";
-import type { Issue } from "../schemas";
+import { scheduledOutputSchemas, type Issue } from "../schemas";
 import type { WorkUnit } from "../types";
 import { reviewCoverageScorer } from "../scorers";
 import CodeReviewPrompt from "../prompts/CodeReview.mdx";
@@ -112,26 +112,20 @@ export function ReviewLoop({
     ...(judge ? { reviewCoverage: { scorer: reviewCoverageScorer(judge) } } : {}),
   };
 
-  const reviewLoopResult = ctx.latest("review_loop_result", `${uid}:review-loop`);
-  const iterationCount = reviewLoopResult?.iterationCount ?? 0;
+  // Read current review state from ctx
+  const test = ctx.latest(scheduledOutputSchemas.test, stageNodeId(uid, "test"));
+  const prdReview = ctx.latest(scheduledOutputSchemas.prd_review, stageNodeId(uid, "prd-review"));
+  const codeReview = ctx.latest(scheduledOutputSchemas.code_review, stageNodeId(uid, "code-review"));
 
-  const test = ctx.latest("test", stageNodeId(uid, "test"));
-  const prdReview = ctx.latest("prd_review", stageNodeId(uid, "prd-review"));
-  const codeReview = ctx.latest("code_review", stageNodeId(uid, "code-review"));
+  // Loop exit driven by code_review.approved
+  const codeApproved = codeReview?.approved === true;
+  const prdApproved = prdReview?.approved ?? true;
+  const passed = codeApproved && prdApproved;
+
+  const iterationCount = ctx.iterationCount(scheduledOutputSchemas.code_review, stageNodeId(uid, "code-review"));
 
   const codeSeverity = codeReview?.severity ?? "none";
   const prdSeverity = prdReview?.severity ?? "none";
-  const reviewsRanAtLeastOnce = codeReview != null;
-  const exitConditionMet =
-    reviewsRanAtLeastOnce
-    && codeSeverity !== "critical"
-    && codeSeverity !== "major"
-    && prdSeverity !== "critical"
-    && prdSeverity !== "major";
-  const done = reviewLoopResult?.passed === true || reviewLoopResult?.exhausted === true;
-
-  const nextIterationCount = iterationCount + 1;
-  const nextExhausted = nextIterationCount >= maxReviewPasses && !exitConditionMet;
 
   const codeMinorIssues = buildMinorChecklist(codeReview?.issues);
   const prdMinorIssues = buildMinorChecklist(prdReview?.issues);
@@ -139,110 +133,108 @@ export function ReviewLoop({
 
   return (
     <Sequence>
-      {/* Terminate only from the persisted review-loop_result row.
-          If we stop the loop based on live review severities, Smithers can re-render
-          after test/review tasks complete and exit the loop before the terminal
-          review-loop_result Task writes { passed, exhausted }. That leaves clean units
-          without a persisted completion signal, so merge eligibility and outer-loop
-          completion both fail to observe them. */}
-      <Loop id={`${uid}:review-loop`} until={done} maxIterations={maxReviewPasses} onMaxReached="return-last">
-        <Sequence>
-          <Task
-            id={stageNodeId(uid, "test")}
-            output={outputs.test}
-            agent={agents.tester}
-            fallbackAgent={fallbacks?.tester}
-            retries={STAGE_RETRY_POLICIES["test"].retries}
-            scorers={baseScorers}
-            meta={{
-              dependsOn: [stageNodeId(uid, "implement")],
-              retryPolicy: STAGE_RETRY_POLICIES["test"],
-            }}
-          >
-            <TestPrompt
-              unitId={uid}
-              unitName={unit.name}
-              unitCategory={tier}
-              whatWasDone={implOutput?.whatWasDone ?? "Unknown"}
-              filesCreated={implOutput?.filesCreated ?? []}
-              filesModified={implOutput?.filesModified ?? []}
-              testSuites={testSuites}
-              fixCommitPrefix="fix"
-              branchPrefix={branchPrefix}
-            />
-          </Task>
+      {/* Test — runs once before reviews */}
+      <Task
+        id={stageNodeId(uid, "test")}
+        output={outputs.test}
+        agent={agents.tester}
+        fallbackAgent={fallbacks?.tester}
+        retries={STAGE_RETRY_POLICIES["test"].retries}
+        scorers={baseScorers}
+        meta={{
+          dependsOn: [stageNodeId(uid, "implement")],
+          retryPolicy: STAGE_RETRY_POLICIES["test"],
+        }}
+      >
+        <TestPrompt
+          unitId={uid}
+          unitName={unit.name}
+          unitCategory={tier}
+          whatWasDone={implOutput?.whatWasDone ?? "Unknown"}
+          filesCreated={implOutput?.filesCreated ?? []}
+          filesModified={implOutput?.filesModified ?? []}
+          testSuites={testSuites}
+          fixCommitPrefix="fix"
+          branchPrefix={branchPrefix}
+        />
+      </Task>
 
-          <Parallel>
-            {tierHasStep(tier, "prd-review") && (
-              <Task
-                id={stageNodeId(uid, "prd-review")}
-                output={outputs.prd_review}
-                agent={agents.prdReviewer}
-                fallbackAgent={fallbacks?.prdReviewer}
-                retries={STAGE_RETRY_POLICIES["prd-review"].retries}
-                scorers={baseScorers}
-                meta={{
-                  dependsOn: [stageNodeId(uid, "implement")],
-                  retryPolicy: STAGE_RETRY_POLICIES["prd-review"],
-                }}
-                continueOnFail
-              >
-                <PrdReviewPrompt
-                  unitId={uid}
-                  unitName={unit.name}
-                  unitCategory={tier}
-                  acceptanceCriteria={unit.acceptance}
-                  filesCreated={implOutput?.filesCreated ?? []}
-                  filesModified={implOutput?.filesModified ?? []}
-                  testResults={[
-                    { name: "Build", status: test?.buildPassed ? "passed" : "failed" },
-                    { name: "Tests", status: test?.testsPassed ? "passed" : "failed" },
-                  ]}
-                  failingSummary={test?.failingSummary ?? null}
-                  specChecks={[
-                    {
-                      name: "Acceptance criteria",
-                      items: unit.acceptance,
-                    },
-                  ]}
-                />
-              </Task>
-            )}
-            {tierHasStep(tier, "code-review") && (
-              <Task
-                id={stageNodeId(uid, "code-review")}
-                output={outputs.code_review}
-                agent={agents.codeReviewer}
-                fallbackAgent={fallbacks?.codeReviewer}
-                retries={STAGE_RETRY_POLICIES["code-review"].retries}
-                scorers={codeReviewScorers}
-                meta={{
-                  dependsOn: [stageNodeId(uid, "implement")],
-                  retryPolicy: STAGE_RETRY_POLICIES["code-review"],
-                }}
-                continueOnFail
-              >
-                <CodeReviewPrompt
-                  unitId={uid}
-                  unitName={unit.name}
-                  unitCategory={tier}
-                  whatWasDone={implOutput?.whatWasDone ?? "Unknown"}
-                  filesCreated={implOutput?.filesCreated ?? []}
-                  filesModified={implOutput?.filesModified ?? []}
-                  qualityChecks={[
-                    {
-                      name: "Correctness and safety",
-                      items: [
-                        "No regressions in changed paths",
-                        "Error handling covers new edge cases",
-                        "No security issues introduced",
-                      ],
-                    },
-                  ]}
-                />
-              </Task>
-            )}
-          </Parallel>
+      {/* PRD review — structural spec check, runs once */}
+      {tierHasStep(tier, "prd-review") && (
+        <Task
+          id={stageNodeId(uid, "prd-review")}
+          output={outputs.prd_review}
+          agent={agents.prdReviewer}
+          fallbackAgent={fallbacks?.prdReviewer}
+          retries={STAGE_RETRY_POLICIES["prd-review"].retries}
+          scorers={baseScorers}
+          meta={{
+            dependsOn: [stageNodeId(uid, "implement")],
+            retryPolicy: STAGE_RETRY_POLICIES["prd-review"],
+          }}
+          continueOnFail
+        >
+          <PrdReviewPrompt
+            unitId={uid}
+            unitName={unit.name}
+            unitCategory={tier}
+            acceptanceCriteria={unit.acceptance}
+            filesCreated={implOutput?.filesCreated ?? []}
+            filesModified={implOutput?.filesModified ?? []}
+            testResults={[
+              { name: "Build", status: test?.buildPassed ? "passed" : "failed" },
+              { name: "Tests", status: test?.testsPassed ? "passed" : "failed" },
+            ]}
+            failingSummary={test?.failingSummary ?? null}
+            specChecks={[
+              {
+                name: "Acceptance criteria",
+                items: unit.acceptance,
+              },
+            ]}
+          />
+        </Task>
+      )}
+
+      {/* Code review + fix cycle — exits when code_review.approved === true.
+          Loop ID is :review-cycle (iteration tracking); the post-loop result
+          Task writes to :review-loop (merge eligibility signal). */}
+      <Loop id={`${uid}:review-cycle`} until={codeApproved} maxIterations={maxReviewPasses} onMaxReached="return-last">
+        <Sequence>
+          {tierHasStep(tier, "code-review") && (
+            <Task
+              id={stageNodeId(uid, "code-review")}
+              output={outputs.code_review}
+              agent={agents.codeReviewer}
+              fallbackAgent={fallbacks?.codeReviewer}
+              retries={STAGE_RETRY_POLICIES["code-review"].retries}
+              scorers={codeReviewScorers}
+              meta={{
+                dependsOn: [stageNodeId(uid, "implement")],
+                retryPolicy: STAGE_RETRY_POLICIES["code-review"],
+              }}
+              continueOnFail
+            >
+              <CodeReviewPrompt
+                unitId={uid}
+                unitName={unit.name}
+                unitCategory={tier}
+                whatWasDone={implOutput?.whatWasDone ?? "Unknown"}
+                filesCreated={implOutput?.filesCreated ?? []}
+                filesModified={implOutput?.filesModified ?? []}
+                qualityChecks={[
+                  {
+                    name: "Correctness and safety",
+                    items: [
+                      "No regressions in changed paths",
+                      "Error handling covers new edge cases",
+                      "No security issues introduced",
+                    ],
+                  },
+                ]}
+              />
+            </Task>
+          )}
 
           {tierHasStep(tier, "review-fix") && (
             <Task
@@ -258,7 +250,7 @@ export function ReviewLoop({
                 ],
                 retryPolicy: STAGE_RETRY_POLICIES["review-fix"],
               }}
-              skipIf={exitConditionMet}
+              skipIf={codeApproved}
             >
               <ReviewFixPrompt
                 unitId={uid}
@@ -277,33 +269,34 @@ export function ReviewLoop({
               />
             </Task>
           )}
-
-          <Task id={`${uid}:review-loop`} output={outputs.review_loop_result}>
-            {{
-              iterationCount: nextIterationCount,
-              codeSeverity,
-              prdSeverity,
-              passed: exitConditionMet,
-              exhausted: nextExhausted,
-            }}
-          </Task>
         </Sequence>
       </Loop>
 
+      {/* Post-loop: review summary for merge eligibility */}
+      <Task id={`${uid}:review-loop`} output={outputs.review_loop_result}>
+        {{
+          iterationCount: Math.max(iterationCount, 1),
+          codeSeverity,
+          prdSeverity,
+          passed,
+          exhausted: !codeApproved,
+        }}
+      </Task>
+
+      {/* Post-loop: write backlog for minor issues */}
       <Task
         id={`${uid}:review-backlog`}
         output={outputs.review_backlog}
-        skipIf={!exitConditionMet || !hasMinorIssues}
+        skipIf={!passed || !hasMinorIssues}
         continueOnFail
       >
         {async () => {
-          // Resolve from active task cwd (unit worktree root) to make write target explicit.
           const backlogPath = resolve(process.cwd(), "docs", "review-backlog", `${uid}.md`);
           const markdown = buildBacklogMarkdown({
             unitId: uid,
             unitName: unit.name,
             branchPrefix,
-            iterationCount,
+            iterationCount: Math.max(iterationCount, 1),
             codeIssues: codeMinorIssues,
             prdIssues: prdMinorIssues,
           });
@@ -314,7 +307,7 @@ export function ReviewLoop({
           return {
             backlogPath,
             wroteBacklog: true,
-            iterationCount,
+            iterationCount: Math.max(iterationCount, 1),
             codeMinorIssueCount: codeMinorIssues.length,
             prdMinorIssueCount: prdMinorIssues.length,
           };

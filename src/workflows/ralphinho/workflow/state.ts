@@ -1,195 +1,37 @@
-import { z } from "zod";
-
+import type { SmithersCtx } from "smithers-orchestrator";
+import type { z } from "zod";
 import type { WorkUnit } from "../types";
-import type { DepSummary } from "../components/QualityPipeline";
+import type { DepSummary, ScheduledOutputs } from "../components/QualityPipeline";
 import type { AgenticMergeQueueTicket } from "../components/AgenticMergeQueue";
+import { scheduledOutputSchemas } from "../schemas";
 import { buildUnitWorktreePath } from "../components/runtimeNames";
-import { MERGE_QUEUE_NODE_ID, TIER_STAGES, stageNodeId } from "./contracts";
+import { TIER_STAGES, stageNodeId, reviewLoopNodeId } from "./contracts";
 
-export type MergeQueueRow = {
-  nodeId: string;
-  ticketsLanded: Array<{
-    ticketId: string;
-    mergeCommit: string | null;
-    summary: string;
-    reviewLoopIterationCount: number | null;
-    testIteration: number | null;
-  }>;
-  ticketsEvicted: Array<{ ticketId: string; reason: string; details: string }>;
-};
+// ── Derived types from schemas ──────────────────────────────────────
 
-export type TestRow = {
-  nodeId: string;
-  iteration: number;
-  testsPassed: boolean;
-  buildPassed: boolean;
-  failingSummary?: string | null;
-};
+type MergeQueueRow = z.infer<typeof scheduledOutputSchemas.merge_queue>;
 
-export type ImplementRow = {
-  nodeId: string;
-  iteration: number;
-  whatWasDone: string;
-  filesCreated: string[] | null;
-  filesModified: string[] | null;
-  believesComplete: boolean;
-  summary?: string;
-};
+// ── ctx helpers ──────────────────────────────────────────────────────
 
-export type ReviewFixRow = {
-  nodeId: string;
-  iteration: number;
-  summary: string;
-  allIssuesResolved: boolean;
-  buildPassed: boolean;
-  testsPassed: boolean;
-};
-
-export type ReviewLoopResultRow = {
-  nodeId: string;
-  iterationCount: number;
-  codeSeverity: "critical" | "major" | "minor" | "none";
-  prdSeverity: "critical" | "major" | "minor" | "none";
-  passed: boolean;
-  exhausted: boolean;
-};
-
-// ── SQLite row parsing utilities ──────────────────────────────────────────
-
-export function parseStringArray(raw: unknown): string[] {
-  if (typeof raw !== "string") return [];
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.map((entry) => String(entry)) : [];
-  } catch {
-    return [];
-  }
+function mergeQueueRows(ctx: SmithersCtx<ScheduledOutputs>): MergeQueueRow[] {
+  return ctx.outputs("merge_queue");
 }
 
-// Internal raw row schemas (SQLite: snake_case, INTEGER for booleans)
-
-const implementRawSchema = z.object({
-  node_id: z.string(),
-  iteration: z.number(),
-  what_was_done: z.string(),
-  files_created: z.string().nullable(),
-  files_modified: z.string().nullable(),
-  believes_complete: z.number(),
-  summary: z.string().nullable(),
-});
-
-export function implementRowFromSqlite(row: Record<string, unknown>): ImplementRow | null {
-  const r = implementRawSchema.safeParse(row);
-  if (!r.success) return null;
-  return {
-    nodeId: r.data.node_id,
-    iteration: r.data.iteration,
-    whatWasDone: r.data.what_was_done ?? "",
-    filesCreated: parseStringArray(r.data.files_created),
-    filesModified: parseStringArray(r.data.files_modified),
-    believesComplete: Boolean(r.data.believes_complete),
-    summary: r.data.summary ?? undefined,
-  };
-}
-
-const testRawSchema = z.object({
-  node_id: z.string(),
-  iteration: z.number(),
-  tests_passed: z.number(),
-  build_passed: z.number(),
-  failing_summary: z.string().nullable(),
-});
-
-export function testRowFromSqlite(row: Record<string, unknown>): TestRow | null {
-  const r = testRawSchema.safeParse(row);
-  if (!r.success) return null;
-  return {
-    nodeId: r.data.node_id,
-    iteration: r.data.iteration,
-    testsPassed: Boolean(r.data.tests_passed),
-    buildPassed: Boolean(r.data.build_passed),
-    failingSummary: r.data.failing_summary,
-  };
-}
-
-const reviewFixRawSchema = z.object({
-  node_id: z.string(),
-  iteration: z.number(),
-  summary: z.string(),
-  all_issues_resolved: z.number(),
-  build_passed: z.number(),
-  tests_passed: z.number(),
-});
-
-export function reviewFixRowFromSqlite(row: Record<string, unknown>): ReviewFixRow | null {
-  const r = reviewFixRawSchema.safeParse(row);
-  if (!r.success) return null;
-  return {
-    nodeId: r.data.node_id,
-    iteration: r.data.iteration,
-    summary: r.data.summary ?? "",
-    allIssuesResolved: Boolean(r.data.all_issues_resolved),
-    buildPassed: Boolean(r.data.build_passed),
-    testsPassed: Boolean(r.data.tests_passed),
-  };
-}
-
-const reviewLoopResultRawSchema = z.object({
-  node_id: z.string(),
-  iteration_count: z.number(),
-  code_severity: z.enum(["critical", "major", "minor", "none"]),
-  prd_severity: z.enum(["critical", "major", "minor", "none"]),
-  passed: z.number(),
-  exhausted: z.number(),
-});
-
-export function reviewLoopResultRowFromSqlite(row: Record<string, unknown>): ReviewLoopResultRow | null {
-  const r = reviewLoopResultRawSchema.safeParse(row);
-  if (!r.success) return null;
-  return {
-    nodeId: r.data.node_id,
-    iterationCount: r.data.iteration_count,
-    codeSeverity: r.data.code_severity,
-    prdSeverity: r.data.prd_severity,
-    passed: Boolean(r.data.passed),
-    exhausted: Boolean(r.data.exhausted),
-  };
-}
-
-export type OutputSnapshot = {
-  mergeQueueRows: MergeQueueRow[];
-  latestTest: (unitId: string) => TestRow | null;
-  latestReviewLoopResult: (unitId: string) => ReviewLoopResultRow | null;
-  latestImplement: (unitId: string) => ImplementRow | null;
-  freshTest: (unitId: string, iteration: number) => TestRow | null;
-  testHistory: (unitId: string) => TestRow[];
-  implementHistory: (unitId: string) => ImplementRow[];
-  reviewFixHistory: (unitId: string) => ReviewFixRow[];
-  isUnitLanded: (unitId: string) => boolean;
-};
-
-export type UnitState = "done" | "not-ready" | "active";
-
-function mergeQueueRows(snapshot: OutputSnapshot): MergeQueueRow[] {
-  return snapshot.mergeQueueRows.filter((row) => row.nodeId === MERGE_QUEUE_NODE_ID);
-}
-
-function isTicketLandedInMergeQueueRows(rows: MergeQueueRow[], unitId: string): boolean {
-  return rows.some(
-    (row) => row.nodeId === MERGE_QUEUE_NODE_ID
-      && row.ticketsLanded.some((ticket) => ticket.ticketId === unitId),
+export function isUnitLanded(ctx: SmithersCtx<ScheduledOutputs>, unitId: string): boolean {
+  return mergeQueueRows(ctx).some(
+    (row) => row.ticketsLanded.some((ticket) => ticket.ticketId === unitId),
   );
 }
 
-export function isUnitEvicted(snapshot: OutputSnapshot, unitId: string): boolean {
-  if (snapshot.isUnitLanded(unitId)) return false;
-  return mergeQueueRows(snapshot)
+export function isUnitEvicted(ctx: SmithersCtx<ScheduledOutputs>, unitId: string): boolean {
+  if (isUnitLanded(ctx, unitId)) return false;
+  return mergeQueueRows(ctx)
     .some((mq) => mq.ticketsEvicted.some((ticket) => ticket.ticketId === unitId));
 }
 
-export function getEvictionContext(snapshot: OutputSnapshot, unitId: string): string | null {
-  if (snapshot.isUnitLanded(unitId)) return null;
-  const relevantRows = mergeQueueRows(snapshot).slice().reverse();
+export function getEvictionContext(ctx: SmithersCtx<ScheduledOutputs>, unitId: string): string | null {
+  if (isUnitLanded(ctx, unitId)) return null;
+  const relevantRows = mergeQueueRows(ctx).slice().reverse();
   for (const row of relevantRows) {
     const evictedEntry = row.ticketsEvicted.find((ticket) => ticket.ticketId === unitId);
     if (evictedEntry) return evictedEntry.details ?? null;
@@ -197,22 +39,36 @@ export function getEvictionContext(snapshot: OutputSnapshot, unitId: string): st
   return null;
 }
 
-export function getUnitState(snapshot: OutputSnapshot, units: WorkUnit[], unitId: string): UnitState {
-  if (snapshot.isUnitLanded(unitId)) return "done";
+export type UnitState = "done" | "not-ready" | "active";
+
+export function getUnitState(ctx: SmithersCtx<ScheduledOutputs>, units: WorkUnit[], unitId: string): UnitState {
+  if (isUnitLanded(ctx, unitId)) return "done";
 
   const unit = units.find((u) => u.id === unitId);
   const deps = unit?.deps ?? [];
-  if (deps.length > 0 && !deps.every((depId) => snapshot.isUnitLanded(depId))) {
+  if (deps.length > 0 && !deps.every((depId) => isUnitLanded(ctx, depId))) {
     return "not-ready";
   }
 
   return "active";
 }
 
-export function buildDepSummaries(snapshot: OutputSnapshot, unit: WorkUnit): DepSummary[] {
+// ── Unit-skip helpers ────────────────────────────────────────────────
+
+export function shouldRunPipeline(ctx: SmithersCtx<ScheduledOutputs>, unit: WorkUnit, units: WorkUnit[]): boolean {
+  const state = getUnitState(ctx, units, unit.id);
+  if (state !== "active") return false;
+  const reviewResult = ctx.latest(scheduledOutputSchemas.review_loop_result, reviewLoopNodeId(unit.id));
+  if (reviewResult?.passed && !getEvictionContext(ctx, unit.id)) return false;
+  return true;
+}
+
+// ── Dependency summaries ─────────────────────────────────────────────
+
+export function buildDepSummaries(ctx: SmithersCtx<ScheduledOutputs>, unit: WorkUnit): DepSummary[] {
   return (unit.deps ?? [])
     .map((depId) => {
-      const depImplement = snapshot.latestImplement(depId);
+      const depImplement = ctx.latest(scheduledOutputSchemas.implement, stageNodeId(depId, "implement"));
       if (!depImplement) return null;
       return {
         id: depId,
@@ -224,58 +80,7 @@ export function buildDepSummaries(snapshot: OutputSnapshot, unit: WorkUnit): Dep
     .filter((dep): dep is DepSummary => dep !== null);
 }
 
-// --- Shared OutputSnapshot builder ---
-
-export type SnapshotInput = {
-  mergeQueueRows: MergeQueueRow[];
-  testRows: TestRow[];
-  reviewLoopResultRows: ReviewLoopResultRow[];
-  implementRows: ImplementRow[];
-  reviewFixRows: ReviewFixRow[];
-};
-
-export function buildOutputSnapshot(input: SnapshotInput): OutputSnapshot {
-  const testByUnit = groupByUnit(input.testRows);
-  const reviewLoopResultByUnit = groupByUnit(input.reviewLoopResultRows);
-  const implementByUnit = groupByUnit(input.implementRows);
-  const reviewFixByUnit = groupByUnit(input.reviewFixRows);
-
-  return {
-    mergeQueueRows: input.mergeQueueRows,
-    latestTest: (id) => latestRow(testByUnit.get(id) ?? []),
-    latestReviewLoopResult: (id) => latestRow(reviewLoopResultByUnit.get(id) ?? []),
-    latestImplement: (id) => latestRow(implementByUnit.get(id) ?? []),
-    freshTest: (id, iteration) =>
-      (testByUnit.get(id) ?? []).find((row) => row.iteration === iteration) ?? null,
-    testHistory: (id) => testByUnit.get(id) ?? [],
-    implementHistory: (id) => implementByUnit.get(id) ?? [],
-    reviewFixHistory: (id) => reviewFixByUnit.get(id) ?? [],
-    isUnitLanded: (id) => isTicketLandedInMergeQueueRows(input.mergeQueueRows, id),
-  };
-}
-
-/** Extract unitId from a nodeId of the form `{unitId}:{stageName}` */
-export function extractUnitId(nodeId: string): string | null {
-  const lastColon = nodeId.lastIndexOf(":");
-  if (lastColon <= 0) return null;
-  return nodeId.slice(0, lastColon);
-}
-
-function groupByUnit<T extends { nodeId: string }>(rows: T[]): Map<string, T[]> {
-  const map = new Map<string, T[]>();
-  for (const row of rows) {
-    const unitId = extractUnitId(row.nodeId);
-    if (!unitId) continue;
-    const current = map.get(unitId) ?? [];
-    current.push(row);
-    map.set(unitId, current);
-  }
-  return map;
-}
-
-function latestRow<T>(rows: T[]): T | null {
-  return rows.at(-1) ?? null;
-}
+// ── Failed unit report ───────────────────────────────────────────────
 
 export type FailedUnitReport = {
   unitId: string;
@@ -284,15 +89,15 @@ export type FailedUnitReport = {
 };
 
 export function buildFailedUnitReport(
-  snapshot: OutputSnapshot,
+  ctx: SmithersCtx<ScheduledOutputs>,
   units: WorkUnit[],
   maxPasses: number,
-  stageExists: (key: string, nodeId: string) => boolean,
+  stageExists: (key: keyof ScheduledOutputs & string, nodeId: string) => boolean,
 ): FailedUnitReport[] {
   return units
-    .filter((u) => !(snapshot.isUnitLanded(u.id) && snapshot.latestReviewLoopResult(u.id)?.passed))
+    .filter((u) => !isUnitLanded(ctx, u.id) && !ctx.latest(scheduledOutputSchemas.review_loop_result, reviewLoopNodeId(u.id))?.passed)
     .map((u) => {
-      const state = getUnitState(snapshot, units, u.id);
+      const state = getUnitState(ctx, units, u.id);
       const tierStages = TIER_STAGES[u.tier] ?? TIER_STAGES.large;
       const allStages = [
         { key: "review_fix", stage: "review-fix", nodeId: stageNodeId(u.id, "review-fix") },
@@ -314,11 +119,11 @@ export function buildFailedUnitReport(
         }
       }
       let reason = state === "not-ready"
-        ? `Blocked: dependencies not landed (${(units.find((x) => x.id === u.id)?.deps ?? []).filter((d) => !snapshot.isUnitLanded(d)).join(", ")})`
+        ? `Blocked: dependencies not landed (${(units.find((x) => x.id === u.id)?.deps ?? []).filter((d) => !isUnitLanded(ctx, d)).join(", ")})`
         : `Did not complete within ${maxPasses} passes`;
-      const evCtx = getEvictionContext(snapshot, u.id);
+      const evCtx = getEvictionContext(ctx, u.id);
       if (evCtx) reason = `Evicted from merge queue: ${evCtx.slice(0, 200)}`;
-      const testRow = snapshot.latestTest(u.id);
+      const testRow = ctx.latest(scheduledOutputSchemas.test, stageNodeId(u.id, "test"));
       if (testRow && !testRow.testsPassed) {
         reason = `Tests failing: ${testRow.failingSummary ?? "unknown"}`;
       }
@@ -326,31 +131,31 @@ export function buildFailedUnitReport(
     });
 }
 
+// ── Merge ticket building ────────────────────────────────────────────
+
 export function buildMergeTickets(
-  snapshot: OutputSnapshot,
+  ctx: SmithersCtx<ScheduledOutputs>,
   units: WorkUnit[],
   runId: string,
-  iteration: number,
 ): AgenticMergeQueueTicket[] {
   return units
     .filter((unit) => {
-      if (snapshot.isUnitLanded(unit.id)) return false;
-      if (getUnitState(snapshot, units, unit.id) !== "active") return false;
-      if (!snapshot.latestReviewLoopResult(unit.id)?.passed) return false;
+      if (isUnitLanded(ctx, unit.id)) return false;
+      if (getUnitState(ctx, units, unit.id) !== "active") return false;
+      const reviewResult = ctx.latest(scheduledOutputSchemas.review_loop_result, reviewLoopNodeId(unit.id));
+      if (!reviewResult?.passed) return false;
 
-      if (isUnitEvicted(snapshot, unit.id)) {
-        const freshTest = snapshot.freshTest(unit.id, iteration);
-        if (!freshTest?.testsPassed) return false;
-        // Fresh build failed — fall back to latest test's build status via merge eligibility
-        if (!freshTest.buildPassed) return snapshot.latestReviewLoopResult(unit.id)?.passed ?? false;
+      if (isUnitEvicted(ctx, unit.id)) {
+        const latestTest = ctx.latest(scheduledOutputSchemas.test, stageNodeId(unit.id, "test"));
+        if (!latestTest?.testsPassed) return false;
+        if (!latestTest.buildPassed) return reviewResult.passed ?? false;
       }
 
       return true;
     })
     .map((unit) => {
-      const latestImplement = snapshot.latestImplement(unit.id);
-      const latestTest = snapshot.latestTest(unit.id);
-      const reviewLoopResult = snapshot.latestReviewLoopResult(unit.id);
+      const latestImplement = ctx.latest(scheduledOutputSchemas.implement, stageNodeId(unit.id, "implement"));
+      const reviewLoopResult = ctx.latest(scheduledOutputSchemas.review_loop_result, reviewLoopNodeId(unit.id));
       return {
         ticketId: unit.id,
         ticketTitle: unit.name,
@@ -363,8 +168,9 @@ export function buildMergeTickets(
         worktreePath: buildUnitWorktreePath(runId, unit.id),
         eligibilityProof: {
           reviewLoopIterationCount: reviewLoopResult?.iterationCount ?? null,
-          testIteration: latestTest?.iteration ?? null,
+          testIteration: null,
         },
       };
     });
 }
+

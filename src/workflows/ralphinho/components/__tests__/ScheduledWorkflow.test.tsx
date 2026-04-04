@@ -5,6 +5,7 @@ import { scheduledOutputSchemas } from "../../schemas";
 import type { WorkPlan, WorkUnit } from "../../types";
 import type { QualityPipelineAgents, ScheduledOutputs } from "../QualityPipeline";
 import { ScheduledWorkflow, type ScheduledWorkflowAgents } from "../ScheduledWorkflow";
+import { resolveTableName } from "../../__tests__/testUtils";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -18,7 +19,7 @@ function createCtx(opts?: {
   outputsByTable?: Record<string, unknown[]>;
 }): SmithersCtx<ScheduledOutputs> {
   const outputsByTable = opts?.outputsByTable ?? {};
-  const latestImpl = opts?.latestImpl ?? ((table: string, nodeId: string) => {
+  const defaultLatest = (table: string, nodeId: string) => {
     const rows = outputsByTable[table] ?? [];
     let best: any = null;
     let bestIteration = -Infinity;
@@ -31,17 +32,15 @@ function createCtx(opts?: {
       }
     }
     return best;
-  });
+  };
+  const latestImpl = opts?.latestImpl ?? defaultLatest;
 
-  const outputsFn = ((table: string) => outputsByTable[table] ?? []) as ((table: string) => unknown[]) & Record<string, unknown[]>;
-  for (const [table, rows] of Object.entries(outputsByTable)) {
-    outputsFn[table] = rows;
-  }
+  const outputsFn = ((table: unknown) => outputsByTable[resolveTableName(table)] ?? []) as SmithersCtx<ScheduledOutputs>["outputs"];
 
   return {
     runId: "run-1",
     iteration: 0,
-    latest: latestImpl,
+    latest: (table: unknown, nodeId: string) => latestImpl(resolveTableName(table), nodeId),
     outputs: outputsFn,
   } as unknown as SmithersCtx<ScheduledOutputs>;
 }
