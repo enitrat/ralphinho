@@ -88,10 +88,13 @@ Linear Integration:
 Monitoring (via smithers CLI):
   smithers tui                         Interactive dashboard
   smithers ps                          List runs
-  smithers inspect <run-id>            Detailed run state
+  smithers inspect <run-id>            Detailed run state (steps, agents, outputs)
+  smithers chat <run-id> --follow      Watch agent conversations live
+  smithers logs <run-id> --follow      Tail event log
   smithers scores <run-id>             Scorer results
   smithers why <run-id>                Diagnose blockages
-  smithers logs <run-id> --follow      Tail event log
+  smithers approve <run-id>            Approve a paused gate
+  smithers cancel <run-id>             Halt agents and stop a run
 ```
 
 ## Linear Integration

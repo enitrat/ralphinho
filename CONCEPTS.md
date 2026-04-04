@@ -27,8 +27,8 @@ Two workflow modes exist:
 
 | Mode | Input | Scheduling | See |
 |------|-------|-----------|-----|
-| **Super-Ralph** | Free-form prompt | AI-driven (dynamic discovery + scheduler) | [SUPER_RALPH.md](SUPER_RALPH.md) |
-| **Scheduled Work** | RFC/PRD document | Deterministic DAG (pre-planned) | [RALPHINHO.md](RALPHINHO.md) |
+| **Ralphinho** (scheduled-work) | RFC/PRD document | Deterministic DAG (pre-planned) | [RALPHINHO.md](RALPHINHO.md) |
+| **Improvinho** (review-discovery) | Review instruction + paths | Coverage-based, all scopes once | [IMPROVINHO.md](IMPROVINHO.md) |
 
 Both modes share the same core infrastructure documented here: the Smithers engine, agent system, jj VCS, worktree isolation, complexity tiers, quality pipeline stages, and merge queue.
 
@@ -38,11 +38,11 @@ Both modes share the same core infrastructure documented here: the Smithers engi
 |-------|-----------|
 | Workflow engine | Smithers (JSX-based, React reconciler) |
 | Runtime | Bun >= 1.3 |
-| Database | SQLite (Drizzle ORM for Smithers, raw bun:sqlite for job queues) |
+| Database | SQLite (Drizzle ORM for Smithers) |
 | Schema validation | Zod |
 | VCS | jj (Jujutsu) exclusively, no git fallback |
-| Prompt templates | MDX (SuperRalph), template literals (ScheduledWork) |
-| Agents | ClaudeCodeAgent (claude-sonnet-4-6 / claude-opus-4-6), CodexAgent (gpt-5.3-codex) |
+| Prompt templates | MDX (Improvinho), MDX (Ralphinho) |
+| Agents | ClaudeCodeAgent (claude-sonnet-4-6 / claude-opus-4-6), CodexAgent (gpt-5.4) |
 
 ---
 
@@ -115,20 +115,7 @@ Both are CLI wrappers -- Smithers spawns the agent CLI as a subprocess with a pr
 
 ### Agent Selection
 
-Both workflows detect available agents at init time (`detectAgents()` checks `which claude`, `which codex`, `which gh`). The selection logic follows a preference-with-fallback pattern:
-
-```typescript
-// SuperRalph: choose(primary, systemPrompt)
-function choose(primary: "claude" | "codex", systemPrompt: string) {
-  if (primary === "claude" && HAS_CLAUDE) return createClaude(systemPrompt);
-  if (primary === "codex" && HAS_CODEX)   return createCodex(systemPrompt);
-  if (HAS_CLAUDE) return createClaude(systemPrompt);
-  return createCodex(systemPrompt);
-}
-
-// ScheduledWork: chooseAgent(primary, role) -- also supports "opus" tier
-function chooseAgent(primary: "claude" | "codex" | "opus", role: string) { ... }
-```
+Both workflows detect available agents at init time (`detectAgents()` checks `which claude`, `which codex`, `which gh`). Each workflow uses an `agentFactory` that constructs agents with role-specific system prompts. The `--agent` CLI flag overrides all role assignments to the specified model.
 
 If neither agent is found, the CLI throws immediately.
 
@@ -208,9 +195,7 @@ Smithers creates a `jj workspace add` at the given path. The `cwd` for the agent
 
 | Scope | Worktree Path |
 |-------|---------------|
-| Per-ticket/unit pipeline stages | `/tmp/workflow-wt-{id}` |
-| Discovery jobs (SuperRalph) | `/tmp/workflow-wt-discovery` |
-| Progress updates (SuperRalph) | `/tmp/workflow-wt-progress-update` |
+| Per-unit pipeline stages | `/tmp/workflow-wt-{id}` |
 
 **Critical**: Pipeline stages for the same work unit share a single worktree. If unit X runs research then implement, both run in `/tmp/workflow-wt-X`. This preserves working state (context files, plan files, code changes) across stages.
 
@@ -314,31 +299,16 @@ When a unit is evicted:
 
 ---
 
-## 9. Two-Database Architecture
+## 9. Database Architecture
 
-### Smithers DB (`.ralphinho/smithers.db` or `.super-ralph/smithers.db`)
+### Smithers DB (`.ralphinho/smithers.db`)
 
 Managed by Smithers via Drizzle ORM. Stores:
 - All task outputs (one table per Zod schema key)
 - Internal tables: `_smithers_runs`, `_smithers_frames`, `_smithers_attempts`, `_smithers_nodes`, `_smithers_approvals`
 - Each row has `run_id`, `node_id`, `iteration` columns
 
-### Scheduled Tasks DB (`scheduled-tasks.db`) — SuperRalph Only
-
-A separate SQLite database for tracking the active job queue. Exists because Smithers has no native job queue concept:
-
-```sql
-CREATE TABLE scheduled_tasks (
-  job_id TEXT PRIMARY KEY,
-  job_type TEXT NOT NULL,
-  agent_id TEXT NOT NULL,
-  ticket_id TEXT,
-  focus_id TEXT,
-  created_at_ms INTEGER NOT NULL
-);
-```
-
-ScheduledWork does not need this database because its execution order is deterministic (DAG-driven, not scheduler-driven).
+Both workflows (Ralphinho and Improvinho) use this single database. Execution order is deterministic — DAG-driven for Ralphinho, coverage-based for Improvinho — so no separate job queue database is needed.
 
 ---
 
@@ -349,13 +319,13 @@ ScheduledWork does not need this database because its execution order is determi
 `ralphinho` is the unified CLI (`src/cli/ralphinho.ts`), registered as the package bin.
 
 ```
-ralphinho init super-ralph "prompt"       # Initialize intent-driven workflow
-ralphinho init scheduled-work ./rfc.md    # Initialize RFC-driven workflow
+ralphinho init ./rfc.md                   # Initialize RFC-driven workflow
+ralphinho init scheduled-work ./rfc.md    # Same (explicit subcommand)
+ralphinho init review "<prompt>" --paths  # Initialize review-discovery workflow
 ralphinho plan                            # (Re)generate work plan (scheduled-work only)
 ralphinho run                             # Execute the initialized workflow
 ralphinho run --resume <run-id>           # Resume a previous run
-ralphinho monitor                         # Attach TUI to running workflow
-ralphinho status                          # Show current state
+ralphinho run --force                     # Attempt resume without prompts
 ```
 
 ### Shared Utilities (`src/cli/shared.ts`)
@@ -383,10 +353,11 @@ The generated workflow imports Smithers primitives and the workflow's own schema
 ### Run ID Format
 
 ```
-sr-{base36-timestamp}-{8-char-uuid}
+sw-{base36-timestamp}-{8-char-uuid}   (scheduled-work)
+rv-{base36-timestamp}-{8-char-uuid}   (review-discovery)
 ```
 
-Example: `sr-m3abc12-deadbeef`
+Examples: `sw-m3abc12-deadbeef`, `rv-m3abc12-deadbeef`
 
 ### Environment Variables
 
