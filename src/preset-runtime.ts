@@ -41,7 +41,7 @@ export function resolveScheduledPresetPaths(
     ralphDir,
     configPath: resolve(env.RALPHINHO_CONFIG_PATH ?? join(ralphDir, "config.json")),
     planPath: resolve(env.RALPHINHO_PLAN_PATH ?? join(ralphDir, "work-plan.json")),
-    dbPath: resolve(env.RALPHINHO_DB_PATH ?? join(ralphDir, "workflow.db")),
+    dbPath: resolve(env.RALPHINHO_DB_PATH ?? join(ralphDir, "smithers.db")),
   };
 }
 

@@ -19,7 +19,7 @@ describe("resolveScheduledPresetPaths", () => {
       ralphDir: "/repo/.ralphinho",
       configPath: "/repo/.ralphinho/config.json",
       planPath: "/repo/.ralphinho/work-plan.json",
-      dbPath: "/repo/.ralphinho/workflow.db",
+      dbPath: "/repo/.ralphinho/smithers.db",
     });
   });
 

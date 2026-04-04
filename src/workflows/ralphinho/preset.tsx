@@ -116,8 +116,6 @@ export default smithers((ctx) => (
       landingMode={config.landingMode}
       agents={agents}
       fallbacks={fallbacks}
-      dbPath={paths.dbPath}
-      prompt={config.rfcPath}
     />
   </Workflow>
 ));

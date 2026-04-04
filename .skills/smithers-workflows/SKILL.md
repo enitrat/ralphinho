@@ -219,7 +219,7 @@ Keep JSX expressions on single lines in MDX (multi-line ternaries can break pars
 
 ## Querying the SQLite DB
 
-The DB is at `<project-root>/.ralphinho/workflow.db` (path baked into the generated workflow file as `DB_PATH`). It's in the **project being processed**, not in super-ralph-lite itself.
+The DB is at `<project-root>/.ralphinho/smithers.db` (path baked into the generated workflow file as `DB_PATH`). It's in the **project being processed**, not in super-ralph-lite itself.
 
 **Always run `.schema <table>` before querying** — column names differ from what you'd guess.
 

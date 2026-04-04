@@ -316,7 +316,7 @@ When a unit is evicted:
 
 ## 9. Two-Database Architecture
 
-### Smithers DB (`.ralphinho/workflow.db` or `.super-ralph/workflow.db`)
+### Smithers DB (`.ralphinho/smithers.db` or `.super-ralph/smithers.db`)
 
 Managed by Smithers via Drizzle ORM. Stores:
 - All task outputs (one table per Zod schema key)
@@ -403,4 +403,4 @@ Both workflows store state in `.ralphinho/`:
 - `.ralphinho/config.json` — Mode, repoRoot, agents, settings
 - `.ralphinho/work-plan.json` — Work plan (ScheduledWork only)
 - `.ralphinho/generated/workflow.tsx` — Generated Smithers workflow
-- `.ralphinho/workflow.db` — Smithers SQLite database
+- `.ralphinho/smithers.db` — Smithers SQLite database

@@ -68,11 +68,6 @@ export async function runWorkflow(opts: {
   const resumeRunId =
     typeof flags.resume === "string" ? flags.resume : null;
   const force = flags.force === true;
-  const skipDiagnostics = flags["skip-diagnostics"] === true;
-  const prometheusPort =
-    typeof flags["prometheus-port"] === "string"
-      ? Number(flags["prometheus-port"])
-      : undefined;
   const linearEnabled = flags.linear === true;
   const linearTeamId = typeof flags.team === "string" ? flags.team : (process.env.LINEAR_TEAM_ID ?? null);
   const linearLabel = typeof flags.label === "string" ? flags.label : (process.env.LINEAR_LABEL ?? "ralph-approved");
@@ -83,23 +78,6 @@ export async function runWorkflow(opts: {
   if (linearEnabled && !linearTeamId) {
     log.error("Error: --linear requires --team <team-id> or LINEAR_TEAM_ID env var.");
     process.exit(1);
-  }
-
-  // ── Prometheus metrics server ────────────────────────────────────────
-  let promStop: (() => void) | undefined;
-  if (prometheusPort !== undefined) {
-    try {
-      const { startPrometheusServer } = await import("./prometheus");
-      const prom = startPrometheusServer({ port: prometheusPort });
-      promStop = prom.stop;
-      log.info(`📊 Prometheus metrics at http://localhost:${prom.port}/metrics`);
-      // Ensure cleanup on process exit
-      process.on("exit", () => promStop?.());
-    } catch (err) {
-      log.warn(
-        `⚠️  Prometheus server failed to start on port ${prometheusPort}: ${err instanceof Error ? err.message : String(err)}. Continuing without metrics.`,
-      );
-    }
   }
 
   // Build Linear options (undefined when --linear is not set)
@@ -152,7 +130,7 @@ export async function runWorkflow(opts: {
     process.exit(1);
   }
 
-  const dbPath = join(ralphDir, "workflow.db");
+  const dbPath = join(ralphDir, "smithers.db");
   const workflowPath = getRalphinhoPresetPath(config.mode);
   const envOverrides = buildPresetEnv(ralphDir, dbPath, planPath);
 
@@ -283,24 +261,6 @@ export async function runWorkflow(opts: {
     }
   }
 
-  // ── Pre-flight diagnostics ──────────────────────────────────────────
-  if (!skipDiagnostics) {
-    const { runPreflightDiagnostics } = await import("./diagnostics");
-    const enabledAgents = agentOverride
-      ? [agentOverride === "codex" ? "codex" : "claude"]
-      : Object.entries(config.agents)
-          .filter(([, v]) => v)
-          .map(([k]) => k);
-    const diag = await runPreflightDiagnostics({ enabledAgents, cwd: repoRoot });
-    for (const w of diag.warnings) log.warn(`⚠️  ${w}`);
-    if (!diag.ok) {
-      log.error(
-        `❌ Pre-flight failed for: ${diag.failedAgents.join(", ")}. Fix issues above or use --skip-diagnostics.`,
-      );
-      process.exit(1);
-    }
-  }
-
   const runId = `${config.mode === "review-discovery" ? "rv" : "sw"}-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
 
   return launchAndReport({
@@ -354,7 +314,7 @@ async function launchAndReport(opts: {
     // Push findings to Linear if enabled
     if (linear) {
       log.info("\n📤 Pushing findings to Linear...\n");
-      const dbPath = join(getRalphDir(opts.repoRoot), "workflow.db");
+      const dbPath = join(getRalphDir(opts.repoRoot), "smithers.db");
       const result = await pushFindingsToLinear({
         dbPath,
         teamId: linear.teamId,
@@ -479,7 +439,7 @@ async function runFromLinearTicket(opts: {
   const maxConcurrency = parseMaxConcurrency(flags, config.maxConcurrency);
 
   const planPath = join(ralphDir, "work-plan.json");
-  const dbPath = join(ralphDir, "workflow.db");
+  const dbPath = join(ralphDir, "smithers.db");
   const workflowPath = getRalphinhoPresetPath(config.mode);
   const envOverrides = buildPresetEnv(ralphDir, dbPath, planPath);
 
@@ -665,7 +625,7 @@ export async function runBatchFromLinear(opts: {
 }
 
 async function projectReviewArtifacts(repoRoot: string): Promise<void> {
-  const dbPath = join(getRalphDir(repoRoot), "workflow.db");
+  const dbPath = join(getRalphDir(repoRoot), "smithers.db");
   if (!existsSync(dbPath)) return;
 
   const db = new Database(dbPath, { readonly: true });

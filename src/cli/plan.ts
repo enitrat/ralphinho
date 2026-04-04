@@ -77,11 +77,6 @@ export async function runPlan(opts: {
     return;
   }
 
-  if (config.mode === "bugfinder") {
-    log.info("🐛 Bugfinder plans are generated at init time. Re-run `ralphinho init bugfinder` to regenerate.\n");
-    return;
-  }
-
   log.info("🔎 ralphinho plan — Regenerating review plan\n");
   const { promptText, promptSourcePath } = await readPromptInput(
     config.reviewInstructionSource ?? config.reviewInstruction,

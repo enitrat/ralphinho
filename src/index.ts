@@ -6,7 +6,6 @@
  * - ScheduledWorkflow: orchestrator composing pipelines + merge queue
  * - AgenticMergeQueue: lands completed units onto main
  * - ReviewDiscoveryWorkflow: multi-lens code review discovery
- * - Monitor: TUI for observing workflow progress
  * - Scheduled work types and schemas
  * - Review discovery types and schemas
  */
@@ -73,8 +72,3 @@ export type {
   ReviewFinding,
 } from "./workflows/improvinho";
 
-// ── Shared ──────────────────────────────────────────────────────────
-
-export { Monitor, monitorOutputSchema } from "./components";
-
-export type { MonitorOutput, MonitorProps } from "./components";

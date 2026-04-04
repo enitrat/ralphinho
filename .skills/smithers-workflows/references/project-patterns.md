@@ -65,7 +65,7 @@ const SCHEDULED_TIERS = {
 
 ## Two-Database Architecture
 
-1. **Smithers DB** (`.super-ralph/workflow.db`) - All task outputs, system tables
+1. **Smithers DB** (`.super-ralph/smithers.db`) - All task outputs, system tables
 2. **Scheduled Tasks DB** (`scheduled-tasks.db`) - Active job queue
 
 Smithers has no native job queue concept, so a separate SQLite table tracks active jobs.
@@ -161,7 +161,7 @@ The CLI generates a `.tsx` workflow file at runtime, baking constants as JS lite
 
 ```typescript
 const REPO_ROOT = "/absolute/path/to/repo";
-const DB_PATH = "/absolute/path/to/.super-ralph/workflow.db";
+const DB_PATH = "/absolute/path/to/.super-ralph/smithers.db";
 // ...
 export default smithers((ctx) => (
   <Workflow name="super-ralph-full">

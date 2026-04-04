@@ -67,8 +67,6 @@ Usage:
   ralphinho run                                         Execute the initialized workflow
   ralphinho run --resume <run-id>                       Resume a previous run
   ralphinho run --force                                 Resume without prompts
-  ralphinho monitor --run-id <run-id>                   Attach TUI to a workflow run
-  ralphinho status                                      Show current state
 
 Global Options:
   --cwd <path>                Repo root (default: current directory)
@@ -78,13 +76,22 @@ Global Options:
 
 Init Options:
   --dry-run                   Generate work plan but don't execute
-  --agent <sonnet|opus|codex> Review mode only: override all review lens agents
+  --agent <sonnet|opus|codex> Override agent for all workflow roles
 
 Linear Integration:
   --linear                    Enable Linear integration (requires LINEAR_API_KEY)
   --team <id>                 Linear team ID (required with --linear)
   --label <name>              Linear label filter (default: "ralph-approved")
   --min-priority <level>      Minimum priority to push (critical|high|medium|low)
+  --batch                     Consume all approved tickets, group by file overlap
+
+Monitoring (via smithers CLI):
+  smithers tui                         Interactive dashboard
+  smithers ps                          List runs
+  smithers inspect <run-id>            Detailed run state
+  smithers scores <run-id>             Scorer results
+  smithers why <run-id>                Diagnose blockages
+  smithers logs <run-id> --follow      Tail event log
 ```
 
 ## Linear Integration
@@ -194,43 +201,43 @@ Layers execute sequentially; units within a layer run in parallel (up to `maxCon
 
 ```
 src/
-├── cli/                            # CLI entry points
-│   ├── ralphinho.ts                # Main entry point
+├── cli/                            # CLI entry points (init, plan, run)
+│   ├── ralphinho.ts                # Main entry point — 3 commands
 │   ├── init-scheduled.ts           # RFC decomposition + config
 │   ├── init-review.ts              # Review discovery init
 │   ├── plan.ts                     # Re-generate work plan
 │   ├── run.ts                      # Execute workflow (+ Linear wiring)
-│   ├── status.ts                   # Show current state
-│   ├── monitor-cmd.ts              # Attach TUI
-│   └── shared.ts                   # Arg parsing, env detection, utilities
+│   ├── shared.ts                   # Arg parsing, env detection, utilities
+│   └── spinner.ts                  # CLI spinner for init/plan
 ├── workflows/
 │   ├── ralphinho/                  # Scheduled-work workflow
 │   │   ├── components/             # ScheduledWorkflow, QualityPipeline, AgenticMergeQueue
-│   │   ├── workflow/               # contracts, decisions, state, snapshot
-│   │   ├── prompts/                # MDX templates (Research, Plan, Implement, etc.)
+│   │   ├── workflow/               # contracts, state, snapshot
 │   │   ├── types.ts                # WorkPlan, WorkUnit, computeLayers
 │   │   ├── schemas.ts              # Zod output schemas
 │   │   ├── decompose.ts            # AI RFC decomposition
 │   │   └── preset.tsx              # Smithers preset entry point
-│   └── improvinho/                 # Review-discovery workflow
-│       ├── components/             # ReviewDiscoveryWorkflow, ReviewSlicePipeline
-│       ├── prompts/                # DiscoverIssues.mdx
-│       ├── types.ts                # ReviewFinding, ReviewPlan
-│       ├── schemas.ts              # Zod output schemas
-│       ├── projection.ts           # Merge + summary generation
-│       ├── lenses.ts               # Discovery lens definitions
-│       └── preset.tsx              # Smithers preset entry point
+│   ├── improvinho/                 # Review-discovery workflow
+│   │   ├── components/             # ReviewDiscoveryWorkflow, ReviewSlicePipeline
+│   │   ├── types.ts                # ReviewFinding, ReviewPlan
+│   │   ├── schemas.ts              # Zod output schemas
+│   │   ├── projection.ts           # Merge + summary generation
+│   │   ├── lenses.ts               # Discovery lens definitions
+│   │   └── preset.tsx              # Smithers preset entry point
+│   └── shared/
+│       └── agentFactory.ts         # Agent creation helper
 ├── adapters/
 │   └── linear/                     # Optional Linear integration
-│       ├── client.ts               # LinearClient singleton
-│       ├── useLinear.ts            # Core operations (Effect-based)
-│       ├── effect.ts               # Slim Effect interop layer
 │       ├── push-findings.ts        # Improvinho findings → Linear issues
 │       ├── consume-tickets.ts      # Linear tickets → RFC markdown
 │       ├── types.ts                # Serializable Linear types
 │       └── index.ts                # Barrel exports
-├── runtime/                        # Smithers launch, events, projections
-├── config/                         # Config schemas
+├── runtime/                        # Smithers launch + logging
+│   ├── smithers-launch.ts          # Launch layer (env injection, smithers resolution)
+│   └── logger.ts                   # Logging
+├── config/
+│   └── types.ts                    # Zod config schemas
+├── preset-runtime.ts               # Preset path resolution + loading
 └── index.ts                        # Package exports
 ```
 
